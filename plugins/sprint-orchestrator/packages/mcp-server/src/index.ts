@@ -2,13 +2,25 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+import { defaultContext, type ToolContext } from "./tools/context.js";
+import { getSprintStatus } from "./tools/get-sprint-status.js";
+import { getReadyStories } from "./tools/get-ready-stories.js";
+import { getStoryContext } from "./tools/get-story-context.js";
+import { claimStory } from "./tools/claim-story.js";
+import { markStoryComplete } from "./tools/mark-story-complete.js";
+import { markStoryFailed } from "./tools/mark-story-failed.js";
+import { validateAcceptanceCriteria } from "./tools/validate-acceptance-criteria.js";
+import { releaseStaleClaims } from "./tools/release-stale-claims.js";
+import { getOrInitConfig } from "./tools/get-or-init-config.js";
+
 export const PLUGIN_NAME = "sprint-orchestrator";
 
-export function buildServer(): McpServer {
-  const server = new McpServer({
-    name: PLUGIN_NAME,
-    version: "0.0.1",
-  });
+const json = (value: unknown) => ({
+  content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
+});
+
+export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
+  const server = new McpServer({ name: PLUGIN_NAME, version: "0.0.1" });
 
   server.registerTool(
     "ping",
@@ -20,6 +32,113 @@ export function buildServer(): McpServer {
     async ({ message }) => ({
       content: [{ type: "text", text: `pong: ${message}` }],
     }),
+  );
+
+  server.registerTool(
+    "getOrInitConfig",
+    {
+      title: "Get or init config",
+      description:
+        "Returns the orchestrator config. Auto-detects BMAD v6 layout. If no layout is recognised, returns needsSetup with prompts the agent should ask the user.",
+      inputSchema: {},
+    },
+    async () => json(await getOrInitConfig(ctx)),
+  );
+
+  server.registerTool(
+    "getSprintStatus",
+    {
+      title: "Get sprint status",
+      description: "Read the full sprint-status.yaml file.",
+      inputSchema: {},
+    },
+    async () => json(await getSprintStatus(ctx)),
+  );
+
+  server.registerTool(
+    "getReadyStories",
+    {
+      title: "Get ready stories",
+      description:
+        "Returns stories with status=ready whose dependencies are all done. Stable order.",
+      inputSchema: {},
+    },
+    async () => json(await getReadyStories(ctx)),
+  );
+
+  server.registerTool(
+    "getStoryContext",
+    {
+      title: "Get story context",
+      description:
+        "Returns the story plus absolute paths to PRD / architecture / story files (per config). The dev agent reads what it needs from those paths.",
+      inputSchema: { storyId: z.string() },
+    },
+    async ({ storyId }) => json(await getStoryContext(ctx, storyId)),
+  );
+
+  server.registerTool(
+    "claimStory",
+    {
+      title: "Claim story",
+      description:
+        "Atomically claim a ready story for an agent. Returns { claimed: true } or { claimed: false, holder } when another agent already has it.",
+      inputSchema: { storyId: z.string(), agentId: z.string() },
+    },
+    async ({ storyId, agentId }) => json(await claimStory(ctx, storyId, agentId)),
+  );
+
+  server.registerTool(
+    "markStoryComplete",
+    {
+      title: "Mark story complete",
+      description:
+        "Mark a claimed story done. Re-runs acceptance criteria inside the lock; rejects if the caller is not the claim holder or AC fails.",
+      inputSchema: {
+        storyId: z.string(),
+        agentId: z.string(),
+        summary: z.string(),
+        artefacts: z.array(z.string()).default([]),
+      },
+    },
+    async ({ storyId, agentId, summary, artefacts }) => {
+      await markStoryComplete(ctx, storyId, agentId, summary, artefacts);
+      return json({ ok: true });
+    },
+  );
+
+  server.registerTool(
+    "markStoryFailed",
+    {
+      title: "Mark story failed",
+      description: "Mark a story as blocked with a structured reason. No silent retries.",
+      inputSchema: { storyId: z.string(), reason: z.string() },
+    },
+    async ({ storyId, reason }) => {
+      await markStoryFailed(ctx, storyId, reason);
+      return json({ ok: true });
+    },
+  );
+
+  server.registerTool(
+    "validateAcceptanceCriteria",
+    {
+      title: "Validate acceptance criteria",
+      description: "Run all acceptance checks defined on the story. Read-only.",
+      inputSchema: { storyId: z.string() },
+    },
+    async ({ storyId }) => json(await validateAcceptanceCriteria(ctx, storyId)),
+  );
+
+  server.registerTool(
+    "releaseStaleClaims",
+    {
+      title: "Release stale claims",
+      description:
+        "Reset to ready any in-progress story whose claim is older than the threshold (minutes). For crashed-agent recovery.",
+      inputSchema: { olderThanMinutes: z.number().positive() },
+    },
+    async ({ olderThanMinutes }) => json(await releaseStaleClaims(ctx, olderThanMinutes)),
   );
 
   return server;
