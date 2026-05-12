@@ -242,9 +242,78 @@ Two patterns worth exploring:
 
 ---
 
+## 6. Agent-to-agent communication
+
+Today agents communicate **only through the skill**: each `Task(subagent)` call returns a single text value to the parent, and side-channel info flows via `sprint-status.yaml` writes (claim, mark-complete, etc.). No agent talks directly to another mid-flight.
+
+Direct or structured channels would unlock new patterns. Question is which patterns are worth the complexity.
+
+### Pattern catalog
+
+| Pattern | Direction | Why useful | Why risky |
+|---|---|---|---|
+| **Annotated handoff** | dev → reviewer | Dev writes "implementation notes" — choices made, areas of uncertainty, where AC felt ambiguous. Reviewer reads before judging. Reduces "diff archaeology." | Adds writing burden; might be summarized away. |
+| **Rework dialogue (bidirectional)** | reviewer ↔ dev across rounds | Beyond a one-shot feedback string — dev can ask a clarifying question via the same channel, reviewer answers in the next round. | Stories drift into chat that never converges. Needs strict turn cap (the rework_limit already bounds this if we reuse it). |
+| **Specialist consultation** | dev → specialist (mid-implementation) | Dev pauses, asks `security-reviewer` "is this approach OK before I keep going?" Avoids wasted work. | Requires nested subagent invocation (which we don't do today). Cost compounds. |
+| **Persistent story thread** | all agents → shared log | One append-only file per story. Every agent jots its reasoning + decisions. Becomes the story's "minutes," feeds retros, reviewable post-hoc. | Storage growth. Might duplicate what `run.log` and retros already carry. |
+| **Consensus on parallel review** | multiple reviewers → aggregator | When `reviewer` and `security-reviewer` run in parallel, both return verdicts; the skill (or a small "synthesizer" subagent) combines. | Tiebreaker rules need defining — agree, disagree, abstain. |
+| **Broadcast / pubsub** | one agent emits → many react | Reactive multi-agent. | Almost certainly overkill for our case. |
+
+### Channel mechanisms
+
+Which transport carries the message:
+
+- **File system** — write a markdown file, the next agent reads it. Async, durable, auditable, debuggable. *Works today.*
+- **MCP state extension** — fields under `story.orchestrator.thread[]` or similar. Single source of truth, structured. *Cheap addition.*
+- **Direct tool call** — synchronous request/response between agents. Powerful but invisible after the fact unless logged.
+- **`run.log` lifecycle events** — fan-out style. Good for "what happened" replay, less good for live coordination.
+
+Best fit per pattern:
+
+| Pattern | Best channel |
+|---|---|
+| Annotated handoff | MCP state field (`implementation_notes` on the story) |
+| Rework dialogue | Extension of `last_review_feedback` into a `dialogue[]` array |
+| Specialist consultation | Direct nested `Task` call |
+| Story thread | File at `.sprint-orchestrator/threads/<storyId>.md`, append-only |
+| Consensus on parallel review | Return-value aggregation in the skill (no new channel) |
+
+### Top-3 worth doing for *our* orchestrator
+
+1. **Annotated handoff (dev → reviewer).** Smallest change, biggest leverage. Add `implementation_notes` field on the story; dev populates it before signalling completion; reviewer's prompt instructs it to read those notes. Almost free.
+2. **Persistent story thread.** Each agent involved writes a dated entry: dev notes, reviewer notes, rework reasoning, retro. By the time the story is done, the thread is the audit trail. Plays beautifully with retros (sprint retro reads N threads).
+3. **Specialist consultation.** Only matters once we have specialists (section 5). Without specialists, dev has no one to ask.
+
+The others (broadcast, parallel-consensus, bidirectional dialogue) earn their complexity later, if at all.
+
+### Risks across the board
+
+- **Chatty drift.** Without hard turn caps, agents will fill any communication channel. The rework loop's `rework_limit` is the model; every direct channel needs an equivalent.
+- **Context inflation.** Each new channel is another thing for downstream agents to read. The fresh-context-per-subagent property is exactly what we're trying to preserve.
+- **Prompt-injection surface.** One agent's output becomes another agent's prompt. We already accept this via the rework feedback path; expanding it expands the surface. Worth treating any agent-authored content as untrusted input.
+- **Audit complexity.** More channels means retros have more to look at. Story thread (option 2 above) helps because it forces convergence into one log per story.
+
+### How it composes with the others
+
+- **Retros → consume threads.** Sprint retro reads every story's thread + structured retro. Threads add narrative; structured retros add metrics.
+- **Agent teams → enables consultation.** Specialists only matter once they can be consulted. Communication is the verb that makes the team a team.
+- **Tiering → cheap channels for cheap tiers.** Haiku-tier orchestrator can route messages without reading the full thread; specialists invoked at deep tier get the full context.
+- **PR-per-story → thread is the PR description.** Render the story's thread into the PR body for human review. The PR becomes the artifact + the conversation.
+- **Self-rewriting → meta-loop has its own thread.** Plugin-modifying stories should leave a heavier audit trail than feature stories. Same channel, different retention policy.
+
+### Open questions
+
+- Single channel design or multiple? My instinct: start with **one** (the persistent story thread) and grow from there. Resist multi-channel until a pattern fights for it.
+- Is the thread structured (sections per author) or freeform (chronological log)? Structured is easier to aggregate; freeform is more honest about agent voice.
+- Read-everything default, or readers opt in? If every agent reads every prior agent's notes by default, context grows fast.
+- Bounded dialogue: cap on dialogue turns per story (or per rework round)?
+- Trust model: are agent-authored thread entries trusted equally with code? My instinct: no — treat as input, not gospel.
+
+---
+
 ## Composition notes
 
-The five ideas reinforce each other:
+The six ideas reinforce each other:
 
 - **Retros → tier feedback.** Retros can recommend tier-default changes per story type.
 - **Rework → tier escalation.** The rework loop (Epic 1 of current sprint) is the natural escalation moment for tiering.
@@ -252,11 +321,12 @@ The five ideas reinforce each other:
 - **PR-per-story → retro in PR body.** Reviewing the work + retro together is a clean human surface.
 - **Agent teams → tier-per-specialist.** Each specialist agent gets a tier default (debugger=deep, docs-writer=fast). Story-type routing is what makes tiering interesting beyond static defaults.
 - **Agent teams → retro signal.** Per-agent timing/quality data feeds retros which feed routing maps.
+- **Communication → makes teams real.** Specialists you can't talk to aren't a team. Story-thread + handoff-notes patterns turn `dev`/`reviewer` and any future specialists into actual collaborators.
 
 Implies a likely build order:
 1. Current sprint (`orchestrator-polish-sprint-1`) finishes — gives us rework loop + observability foundation.
 2. Retros next (story-level + sprint-level capture; storage choice settled).
-3. Agent teams + model tiering as a coupled pair (specialist agents with tier defaults; rework escalation built in).
+3. Agent teams + communication + model tiering as a coupled triple (specialist agents that can actually talk to each other, with tier defaults; rework escalation built in). Communication's smallest version (`implementation_notes` handoff) could even ship earlier as a tiny standalone story.
 4. PR-per-story (independent; can slot in anytime).
 5. Self-rewriting / meta-loop last (depends on retros + tiering being mature; biggest blast radius; needs Level 1 → 2 → 3 staging).
 
