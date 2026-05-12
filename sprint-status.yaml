@@ -2,7 +2,7 @@ sprint_id: orchestrator-polish-sprint-1
 stories:
   - id: "0.1"
     title: Rename BmadError to OrchestratorError
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -32,9 +32,16 @@ stories:
     orchestrator:
       claimed_by: dev-20260512-1
       claimed_at: 2026-05-12T13:42:50.563Z
+      completed_at: 2026-05-12T13:45:04.360Z
+      summary: Renamed BmadError class to OrchestratorError and updated all references and error codes in
+        the mcp-server package.
+      artefacts:
+        - git:ad0204af3ca71d9aaf4f68ccb96a798270a2e9f0
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/lib/errors.ts
+        - /Users/jackmcintyre/projects/claude-dev-loop/sprint-status.yaml
   - id: "0.2"
     title: Add pnpm verify root script
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -47,7 +54,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-20260512-2
+      claimed_at: 2026-05-12T13:45:21.113Z
   - id: "1.1"
     title: Extend state schema with rework tracking fields
     status: ready
