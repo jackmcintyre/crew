@@ -48,13 +48,16 @@ export async function runCheck(check: Check, opts: RunCheckOptions = {}): Promis
       };
     }
     case "regex": {
-      const { output } = await runShell(check.cmd, { cwd, timeoutMs, env });
+      const { exitCode, output } = await runShell(check.cmd, { cwd, timeoutMs, env });
       const re = new RegExp(check.pattern);
+      // Require the command to succeed before honoring the match — otherwise
+      // error output (e.g. "cat: hello.txt: No such file") can spuriously match
+      // patterns drawn from the filename or path the user is trying to read.
       return {
         type: "regex",
         cmd: check.cmd,
         pattern: check.pattern,
-        passed: re.test(output),
+        passed: exitCode === 0 && re.test(output),
         output,
       };
     }

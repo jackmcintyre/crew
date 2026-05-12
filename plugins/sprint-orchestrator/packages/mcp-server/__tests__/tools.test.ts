@@ -186,6 +186,28 @@ describe("validateAcceptanceCriteria", () => {
     expect(r.results.map((x) => x.type)).toEqual(["shell", "file_exists", "regex"]);
   });
 
+  it("regex check fails when cmd exits non-zero even if stderr matches the pattern", async () => {
+    // Regression: `cat hello.txt` on a missing file prints
+    //   `cat: hello.txt: No such file or directory`
+    // which contains the substring "hello" — without the exit-code gate the
+    // regex check would falsely report passed.
+    const variant = {
+      ...baseSprint,
+      stories: [
+        {
+          ...baseSprint.stories[0]!,
+          acceptance_criteria: {
+            checks: [{ type: "regex", cmd: "cat hello-not-real.txt", pattern: "hello" }],
+          },
+        },
+      ],
+    };
+    const { ctx } = await setup(variant as unknown as typeof baseSprint);
+    const r = await validateAcceptanceCriteria(ctx, "S1");
+    expect(r.passed).toBe(false);
+    expect(r.results[0]!.passed).toBe(false);
+  });
+
   it("reports per-check failures", async () => {
     const variant = {
       ...baseSprint,
