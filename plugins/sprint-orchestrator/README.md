@@ -8,7 +8,30 @@ Works standalone or with BMAD v6 planning artefacts. When BMAD layout is detecte
 
 **Phase 1 — skeleton.** Scaffolding only. Tools, hooks, and agents are stubs. See `project.md` for the full build spec.
 
-## Install
+## Quickstart
+
+Install the plugin into Claude Code from this repo's marketplace:
+
+```
+/plugin marketplace add jackmcintyre/claude-dev-loop
+/plugin install sprint-orchestrator
+```
+
+Then drive the backlog from inside Claude Code:
+
+```
+/sprint-orchestrator:process-backlog
+```
+
+To keep the orchestrator running on an interval (claiming and routing ready stories without manual nudging), wrap it in `/loop`:
+
+```
+/loop 5m /sprint-orchestrator:process-backlog
+```
+
+On first run in a project, the plugin asks where your planning docs live (or detects BMAD v6 layout automatically) and writes `.sprint-orchestrator/config.yaml`.
+
+## Install from source
 
 ```bash
 git clone <this-repo>
@@ -22,14 +45,6 @@ Then in Claude Code:
 ```
 /plugin install <path-to-this-repo>
 ```
-
-## Usage
-
-```
-/sprint-orchestrator:process-backlog
-```
-
-On first run in a project, the plugin asks where your planning docs live (or detects BMAD v6 layout automatically) and writes `.sprint-orchestrator/config.yaml`.
 
 ## Modes
 
