@@ -1,0 +1,14 @@
+{
+  "name": "sprint-orchestrator-local",
+  "owner": {
+    "name": "Jack McIntyre"
+  },
+  "plugins": [
+    {
+      "name": "sprint-orchestrator",
+      "source": "./plugins/sprint-orchestrator",
+      "description": "Autonomous-but-supervised sprint execution with deterministic state and guardrails.",
+      "version": "0.0.1"
+    }
+  ]
+}
