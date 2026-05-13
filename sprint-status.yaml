@@ -48,7 +48,7 @@ stories:
       preserved.
   - id: "2"
     title: Auto-promote backlog stories to ready when dependencies are complete
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -61,6 +61,13 @@ stories:
     orchestrator:
       claimed_by: dev-bugfix-2
       claimed_at: 2026-05-13T00:35:58.414Z
+      completed_at: 2026-05-13T00:39:11.281Z
+      summary: getReadyStories now self-heals by promoting backlog stories whose deps are all done to
+        ready and persisting the change under the file lock.
+      artefacts:
+        - git:bfe19222b62839f635f97850766f9a7d9f2c369d
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-ready-stories.ts
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/__tests__/tools.test.ts
     notes: |
       Today getReadyStories returns stories with status=ready AND deps all done. A story
       authored as status=backlog never gets promoted, even when its deps complete.
@@ -74,7 +81,7 @@ stories:
       (works even if the state file was authored without ready stories).
   - id: "3"
     title: Shield reviewer and dev subagents from user-global Claude preferences
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -87,7 +94,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-bugfix-3
+      claimed_at: 2026-05-13T00:39:19.990Z
     notes: |
       User-global ~/.claude/CLAUDE.md preferences (e.g. "never tell me something is done")
       leak into orchestrator subagents and silently break their core job - calling

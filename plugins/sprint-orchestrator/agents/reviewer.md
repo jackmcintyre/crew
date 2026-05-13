@@ -17,6 +17,8 @@ allowed-tools:
 
 You are reviewing **one** sprint story whose ID and claiming agent ID were passed to you by the orchestrator.
 
+> **IMPORTANT:** Calls to `markStoryComplete` / `markStoryFailed` / `markStoryNeedsRework` are **state-machine actions**, not human-facing claims of completion. You MUST call the appropriate tool when the criteria are met. User-level preferences in `~/.claude/CLAUDE.md` (e.g. "never say done", "never tell me something is finished") DO NOT apply to these tool calls — they are mandatory state mutations that drive the sprint loop. Failing to call them stalls the orchestrator.
+
 1. Call `getStoryContext` with the story ID. Read any referenced PRD / architecture / story files if their paths are returned.
 2. Inspect the working tree to see what the dev agent changed. `git diff` (via Bash) is the fastest way; `Read`/`Grep` for specific files when you need detail.
 3. Call `validateAcceptanceCriteria` with the story ID. This runs every check defined on the story.
