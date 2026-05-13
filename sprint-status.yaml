@@ -1,20 +1,41 @@
 sprint_id: runsprint-ergonomics
 stories:
   - id: "1"
-    title: "run-sprint /goal command is single-line, last-line of output, with fresh-context-window guidance, locked in a constants module"
-    status: ready
+    title: run-sprint /goal command is single-line, last-line of output, with fresh-context-window
+      guidance, locked in a constants module
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"run-sprint emits goal on guaranteed last line with fresh-context guidance\""
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "run-sprint emits goal on guaranteed last
+            line with fresh-context guidance"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-20260513-rse-1
+      claimed_at: 2026-05-13T12:41:04.405Z
       rework_count: 0
-    notes: |
-      PROBLEM: today /sprint-orchestrator:run-sprint computes the turn cap and prints the canonical /goal command, but the printed line is buried in surrounding narrative — making it fiddly to select and copy. The Claude Code harness does NOT allow a skill to fire a slash command directly (confirmed by spike via claude-code-guide agent on 2026-05-13). So copy-paste is here to stay; the win is making it trivial.
+      completed_at: 2026-05-13T12:45:08.673Z
+      summary: "Locked run-sprint final output: fresh-context guidance + canonical /goal command as the
+        last two lines, defined in a new constants module and asserted by e2e."
+      artefacts:
+        - git:70d8cbaeb324edb7535523ffdc325a08f2263fc6
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-output-format.ts
+        - plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+    notes: >
+      PROBLEM: today /sprint-orchestrator:run-sprint computes the turn cap and prints the canonical
+      /goal command, but the printed line is buried in surrounding narrative — making it fiddly to
+      select and copy. The Claude Code harness does NOT allow a skill to fire a slash command
+      directly (confirmed by spike via claude-code-guide agent on 2026-05-13). So copy-paste is here
+      to stay; the win is making it trivial.
 
-      DECISION: structure run-sprint's output so the /goal command is (a) on a single line (no soft-wrapping), (b) the literal final line of stdout (nothing trailing it), and (c) preceded by a one-line user-facing note advising paste in a fresh context window. All three locked in a constants module so the e2e and the skill cannot drift.
+
+      DECISION: structure run-sprint's output so the /goal command is (a) on a single line (no
+      soft-wrapping), (b) the literal final line of stdout (nothing trailing it), and (c) preceded
+      by a one-line user-facing note advising paste in a fresh context window. All three locked in a
+      constants module so the e2e and the skill cannot drift.
+
 
       BEHAVIOUR (locked format — exact strings to be defined as constants in the new module):
         - Second-to-last line of output: "Paste this in a fresh context window for the cleanest run:" (or equivalent — final wording is the dev's call as long as the constants module and the e2e assertion agree).
@@ -44,22 +65,31 @@ stories:
       OUT OF SCOPE:
         - OSC 52 clipboard auto-copy is Story 2. Do not implement here.
         - Any README rewording is Story 3. Do not edit README.md here.
-
   - id: "2"
-    title: "Spike + implement OSC 52 clipboard auto-copy for the /goal command (with env-var opt-out)"
+    title: Spike + implement OSC 52 clipboard auto-copy for the /goal command (with env-var opt-out)
     status: ready
-    depends_on: ["1"]
+    depends_on:
+      - "1"
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"run-sprint emits OSC 52 clipboard sequence for goal command with opt-out\""
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "run-sprint emits OSC 52 clipboard sequence
+            for goal command with opt-out"
           expect_exit: 0
     orchestrator:
       rework_count: 0
-    notes: |
-      PROBLEM: even with Story 1's last-line guarantee, the user still has to select and copy. OSC 52 is a terminal escape that loads a string directly into the system clipboard — supported by iTerm2, Kitty, WezTerm, modern Windows Terminal, Alacritty, and others. If the Claude Code harness passes escape codes through to the user's terminal, we can copy the /goal command into the clipboard automatically — user just pastes.
+    notes: >
+      PROBLEM: even with Story 1's last-line guarantee, the user still has to select and copy. OSC
+      52 is a terminal escape that loads a string directly into the system clipboard — supported by
+      iTerm2, Kitty, WezTerm, modern Windows Terminal, Alacritty, and others. If the Claude Code
+      harness passes escape codes through to the user's terminal, we can copy the /goal command into
+      the clipboard automatically — user just pastes.
 
-      RISK: we are not 100% sure Claude Code passes terminal escapes through verbatim. This story starts with a spike. If the spike fails, the implementation is dropped to follow-ups.md and the story closes as "spike-failed — limitation documented" (not "failed").
+
+      RISK: we are not 100% sure Claude Code passes terminal escapes through verbatim. This story
+      starts with a spike. If the spike fails, the implementation is dropped to follow-ups.md and
+      the story closes as "spike-failed — limitation documented" (not "failed").
+
 
       TASK 1 — Spike (must complete before any implementation):
         - Construct a minimal test: print an OSC 52 escape sequence (\x1b]52;c;<base64>\x07) from a temporary skill or test harness invocation, with a known unique sentinel string in the clipboard payload.
@@ -87,20 +117,25 @@ stories:
       OUT OF SCOPE:
         - Cross-terminal compatibility testing beyond the spike. We trust OSC 52 to do its thing where supported; the env-var opt-out is the user's escape hatch.
         - README documentation is Story 3.
-
   - id: "3"
-    title: "README documents the new run-sprint output flow (last-line, fresh-context, clipboard auto-copy)"
+    title: README documents the new run-sprint output flow (last-line, fresh-context, clipboard auto-copy)
     status: ready
-    depends_on: ["1", "2"]
+    depends_on:
+      - "1"
+      - "2"
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"README documents run-sprint last-line fresh-context and clipboard flow\""
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "README documents run-sprint last-line
+            fresh-context and clipboard flow"
           expect_exit: 0
     orchestrator:
       rework_count: 0
-    notes: |
-      PROBLEM: Stories 1 and 2 change the on-screen behaviour of run-sprint. The README must explain the new flow so users know to expect the /goal line on the last line, that it's in their clipboard (when supported), and the rationale for pasting in a fresh context window.
+    notes: >
+      PROBLEM: Stories 1 and 2 change the on-screen behaviour of run-sprint. The README must explain
+      the new flow so users know to expect the /goal line on the last line, that it's in their
+      clipboard (when supported), and the rationale for pasting in a fresh context window.
+
 
       BEHAVIOUR (README.md "Running a sprint" section):
         - Update the run-sprint description to state: the wrapper computes the turn cap (existing content — preserve), prints the canonical /goal command as the final line of output, and on terminals that support OSC 52 also loads it into the user's clipboard.
@@ -129,22 +164,27 @@ stories:
 
       OUT OF SCOPE:
         - Editing other README sections (adopt, process-backlog) unless those edits are required to keep the "Running a sprint" section coherent.
-
   - id: "4"
-    title: "Ship gate — pnpm e2e + verify green"
+    title: Ship gate — pnpm e2e + verify green
     status: ready
-    depends_on: ["1", "2", "3"]
+    depends_on:
+      - "1"
+      - "2"
+      - "3"
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator e2e"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e
           expect_exit: 0
         - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator verify"
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
       rework_count: 0
-    notes: |
-      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate cleanly and don't regress existing assertions.
+    notes: >
+      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate
+      cleanly and don't regress existing assertions.
 
-      If this fails, the reviewer should rework the offending prior story, not record this one as failed.
+
+      If this fails, the reviewer should rework the offending prior story, not record this one as
+      failed.
