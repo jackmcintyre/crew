@@ -94,10 +94,10 @@ stories:
     orchestrator:
       claimed_by: dev-20260513-bmad-2
       claimed_at: 2026-05-13T13:40:58.795Z
-      rework_count: 0
       completed_at: 2026-05-13T13:46:44.225Z
       summary: Added adapt-bmad e2e mini-run with happy/missing-verification/malformed fixtures locking in
         adaptor behaviour.
+      rework_count: 0
       artefacts:
         - git:ee86e8505a61fe8dd5aab5eff3ce03b7ccbca698
         - plugins/sprint-orchestrator/scripts/e2e.ts
@@ -125,7 +125,7 @@ stories:
         - Use the existing scripts/fixtures/ convention from Story 2 of the adopt-skill sprint.
   - id: "3"
     title: README documents the adapt-bmad fast path and the BMad-side Verification section convention
-    status: ready
+    status: done
     depends_on:
       - "1"
       - "2"
@@ -136,7 +136,18 @@ stories:
             verification convention"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-20260513-bmad-3
+      claimed_at: 2026-05-13T13:46:59.242Z
       rework_count: 0
+      completed_at: 2026-05-13T13:51:44.191Z
+      summary: README now documents adapt-bmad as the first concrete adaptor alongside universal /adopt,
+        including the BMad-side Verification section convention with a fenced-shell example; backed
+        by a new e2e mini-run and phrase-lock module.
+      artefacts:
+        - git:c8398d16a2491ca16d99c3539c9a5c34902ee6ad
+        - plugins/sprint-orchestrator/README.md
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-adapt-bmad-phrases.ts
     notes: >
       PROBLEM: The README documents universal /adopt and names the adaptor pattern, but doesn't yet
       document the first concrete adaptor (adapt-bmad) or the Verification section convention that
