@@ -31,6 +31,7 @@ import { prepareStoryBranch } from "../packages/mcp-server/src/tools/prepare-sto
 import { recordStoryReopen } from "../packages/mcp-server/src/tools/record-story-reopen.js";
 import { getReadyStories } from "../packages/mcp-server/src/tools/get-ready-stories.js";
 import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
+import { planRunSprint } from "../packages/mcp-server/src/tools/plan-run-sprint.js";
 import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/validate-acceptance-criteria.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
@@ -1524,6 +1525,226 @@ async function runLintSprintYamlSafetyMiniRun(): Promise<AssertionOutcome[]> {
   return outcomes;
 }
 
+/**
+ * Mini-run for story 1: /sprint-orchestrator:run-sprint wrapper.
+ *
+ * The wrapper is a thin entrypoint that reads sprint-status.yaml, counts
+ * stories, multiplies by turn_cap_per_story (config; default 3), and emits
+ * a /goal command with the canonical drain condition. We test the
+ * computation step directly via planRunSprint() — the harness does not
+ * actually invoke /goal, only asserts the command the wrapper would emit.
+ */
+async function runRunSprintWrapperMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  const CANONICAL_DRAIN =
+    "every story in sprint-status.yaml is status=done or status=failed, OR stop after";
+
+  async function writeSprint(root: string, statuses: Array<"ready" | "done" | "failed">) {
+    const stories = statuses
+      .map((status, i) => {
+        const id = `S${i + 1}`;
+        return [
+          `  - id: "${id}"`,
+          `    title: "story ${id}"`,
+          `    status: ${status}`,
+          `    depends_on: []`,
+          `    acceptance_criteria:`,
+          `      checks:`,
+          `        - type: file_exists`,
+          `          path: src/${id}.txt`,
+          `    orchestrator: {}`,
+        ].join("\n");
+      })
+      .join("\n");
+    const sprintYaml = [
+      "schema_version: 1",
+      'sprint_id: "run-sprint-wrapper-fixture"',
+      "stories:",
+      stories,
+      "",
+    ].join("\n");
+    await fs.writeFile(path.join(root, "sprint-status.yaml"), sprintYaml, "utf8");
+  }
+
+  async function writeConfig(root: string, body: string) {
+    const configDir = path.join(root, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(path.join(configDir, "config.yaml"), body, "utf8");
+  }
+
+  // Variant 1: 3-story sprint, no config override → default 3, cap 9.
+  const tmp1 = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-runsprint-1-"));
+  try {
+    await writeSprint(tmp1, ["ready", "ready", "ready"]);
+    const result = await planRunSprint({ cwd: tmp1 });
+
+    const checks: Assertion[] = [
+      {
+        name: "run-sprint wrapper computes turn cap and invokes goal with the drain condition",
+        run: () => {
+          expect(result.kind === "ok", `expected kind=ok, got ${JSON.stringify(result)}`);
+          if (result.kind !== "ok") return;
+          expect(result.storyCount === 3, `expected storyCount=3, got ${result.storyCount}`);
+          expect(
+            result.turnCapPerStory === 3,
+            `expected default turn_cap_per_story=3, got ${result.turnCapPerStory}`,
+          );
+          expect(result.turnCap === 9, `expected turn_cap=9, got ${result.turnCap}`);
+          expect(
+            result.command.includes("stop after 9 turns"),
+            `expected command to contain 'stop after 9 turns', got: ${result.command}`,
+          );
+          expect(
+            result.command.includes(CANONICAL_DRAIN),
+            `expected command to contain canonical drain condition, got: ${result.command}`,
+          );
+          expect(
+            result.command.startsWith("/goal /sprint-orchestrator:process-backlog UNTIL "),
+            `expected command to start with '/goal /sprint-orchestrator:process-backlog UNTIL ', got: ${result.command}`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(tmp1, { recursive: true, force: true });
+  }
+
+  // Variant 2: 3-story sprint, turn_cap_per_story: 5 → cap 15.
+  const tmp2 = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-runsprint-2-"));
+  try {
+    await writeSprint(tmp2, ["ready", "ready", "ready"]);
+    await writeConfig(
+      tmp2,
+      [
+        "sprintStatusPath: sprint-status.yaml",
+        "layout: custom",
+        "autoDetected: false",
+        "turn_cap_per_story: 5",
+        "",
+      ].join("\n"),
+    );
+    const result = await planRunSprint({ cwd: tmp2 });
+
+    const a: Assertion = {
+      name: "run-sprint wrapper honors turn_cap_per_story override from config",
+      run: () => {
+        expect(result.kind === "ok", `expected kind=ok, got ${JSON.stringify(result)}`);
+        if (result.kind !== "ok") return;
+        expect(
+          result.turnCapPerStory === 5,
+          `expected turn_cap_per_story=5, got ${result.turnCapPerStory}`,
+        );
+        expect(result.turnCap === 15, `expected turn_cap=15, got ${result.turnCap}`);
+        expect(
+          result.command.includes("stop after 15 turns"),
+          `expected command to contain 'stop after 15 turns', got: ${result.command}`,
+        );
+      },
+    };
+
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(tmp2, { recursive: true, force: true });
+  }
+
+  // Variant 3: drained sprint (all done/failed) → refuse, no command.
+  const tmp3 = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-runsprint-3-"));
+  try {
+    await writeSprint(tmp3, ["done", "done", "failed"]);
+    const result = await planRunSprint({ cwd: tmp3 });
+
+    const a: Assertion = {
+      name: "run-sprint wrapper refuses on a drained sprint and emits no command",
+      run: () => {
+        expect(result.kind === "refuse", `expected kind=refuse, got ${JSON.stringify(result)}`);
+        if (result.kind !== "refuse") return;
+        expect(result.reason === "drained", `expected reason=drained, got ${result.reason}`);
+        expect(
+          /nothing to run — backlog is drained/.test(result.message),
+          `expected message to mention drained backlog, got: ${result.message}`,
+        );
+        expect(
+          /2 done/.test(result.message) && /1 failed/.test(result.message),
+          `expected message to report '2 done, 1 failed', got: ${result.message}`,
+        );
+      },
+    };
+
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(tmp3, { recursive: true, force: true });
+  }
+
+  // Variant 4: missing sprint-status.yaml → refuse with the expected message.
+  const tmp4 = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-runsprint-4-"));
+  try {
+    const result = await planRunSprint({ cwd: tmp4 });
+
+    const a: Assertion = {
+      name: "run-sprint wrapper refuses when sprint-status.yaml is missing and emits no command",
+      run: () => {
+        expect(result.kind === "refuse", `expected kind=refuse, got ${JSON.stringify(result)}`);
+        if (result.kind !== "refuse") return;
+        expect(
+          result.reason === "missing_backlog",
+          `expected reason=missing_backlog, got ${result.reason}`,
+        );
+        expect(
+          /no backlog found: expected sprint-status\.yaml at /.test(result.message),
+          `expected message to start with 'no backlog found...', got: ${result.message}`,
+        );
+        expect(
+          /Copy a backlog file there before running\.$/.test(result.message),
+          `expected message to end with 'Copy a backlog file there before running.', got: ${result.message}`,
+        );
+      },
+    };
+
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(tmp4, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -1645,6 +1866,23 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: lintSprint YAML-safety check on shell cmd fields");
     const yamlSafetyOutcomes = await runLintSprintYamlSafetyMiniRun();
     outcomes.push(...yamlSafetyOutcomes);
+  }
+
+  // Ninth mini-run (story 1): /sprint-orchestrator:run-sprint wrapper.
+  // Asserts the wrapper's computed /goal command (default cap, override,
+  // drained refusal, missing-backlog refusal).
+  if (
+    !filter ||
+    filter.test("run-sprint wrapper computes turn cap and invokes goal with the drain condition") ||
+    filter.test("run-sprint wrapper honors turn_cap_per_story override from config") ||
+    filter.test("run-sprint wrapper refuses on a drained sprint and emits no command") ||
+    filter.test(
+      "run-sprint wrapper refuses when sprint-status.yaml is missing and emits no command",
+    )
+  ) {
+    console.log("[e2e] mini-run: run-sprint wrapper turn cap + refusal paths");
+    const runSprintOutcomes = await runRunSprintWrapperMiniRun();
+    outcomes.push(...runSprintOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);
