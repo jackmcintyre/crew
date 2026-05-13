@@ -71,10 +71,10 @@ stories:
     orchestrator:
       claimed_by: dev-loop-20260513-s2
       claimed_at: 2026-05-13T05:19:20.367Z
-      rework_count: 0
       completed_at: 2026-05-13T05:23:55.265Z
       summary: prepareStoryBranch now roots a story's per-story branch from the most recent completed
         dependency's branch tip, with fallback reason recorded when deps lack branches.
+      rework_count: 0
       artefacts:
         - git:55d84b96974796d211064d074d0c1e2a55be1a3b
         - plugins/sprint-orchestrator/packages/mcp-server/src/tools/prepare-story-branch.ts
@@ -170,7 +170,7 @@ stories:
         - scripts/e2e.ts
   - id: "4"
     title: Ship gate — pnpm e2e green
-    status: ready
+    status: in_progress
     depends_on:
       - "1"
       - "2"
@@ -185,6 +185,8 @@ stories:
           expect_exit: 0
     orchestrator:
       rework_count: 0
+      claimed_by: dev-loop-20260513-s4
+      claimed_at: 2026-05-13T05:24:07.292Z
     notes: |
       Per planning-discipline.md rule 3: every sprint ends with a ship
       gate that runs the full unfiltered `pnpm e2e` and `pnpm verify`.
