@@ -34,9 +34,13 @@ import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
 import { validateAndWriteBacklog } from "../packages/mcp-server/src/tools/adopt-write.js";
 import { planRunSprint } from "../packages/mcp-server/src/tools/plan-run-sprint.js";
 import {
+  CLIPBOARD_AUTOCOPY_NOTE_LINE,
+  CLIPBOARD_OPT_OUT_ENV_VAR,
   FRESH_CONTEXT_GUIDANCE_LINE,
+  buildClipboardEscape,
   buildRunSprintFinalOutput,
   formatGoalCommandLine,
+  isClipboardOptOut,
 } from "../packages/mcp-server/src/tools/run-sprint-output-format.js";
 import {
   countTerminalOutcomes,
@@ -1898,6 +1902,143 @@ async function runRunSprintGoalLastLineMiniRun(): Promise<AssertionOutcome[]> {
 }
 
 /**
+ * Mini-run for the goal-adoption sprint story 2: OSC 52 clipboard auto-copy
+ * spike + env-var opt-out safety.
+ *
+ * Outcome of the spike (recorded in `_bmad-output/planning-artifacts/follow-ups.md`):
+ * Claude Code's harness does NOT pass OSC 52 terminal escapes through to the
+ * user's terminal verbatim. The implementation branch is therefore inert,
+ * but the `SPRINT_ORCHESTRATOR_NO_CLIPBOARD` opt-out is still wired so a
+ * future harness change has a single, predictable gate to flip.
+ *
+ * These assertions verify the failure-path safety net:
+ *  (a) opt-out unset → output contains no OSC 52 sequence, no clipboard note;
+ *      /goal line is still the literal last line (Story 1 contract).
+ *  (b) opt-out set to "1" or "true" (any case) → identical output: no OSC 52
+ *      sequence, no clipboard note; perfect no-op safety.
+ *  (c) the env-var gate is observable via `isClipboardOptOut(env)` so future
+ *      callers (and the e2e itself) can prove it's wired.
+ *  (d) `buildClipboardEscape` is a pure helper that produces a well-formed
+ *      OSC 52 frame — kept alive as a tested function so the cost-to-revive
+ *      is near zero when the harness changes.
+ */
+async function runRunSprintOsc52ClipboardMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  // OSC 52 frame: ESC ] 52 ; c ; <base64> BEL. We assert ABSENCE of any
+  // substring matching this shape (with at least one base64 character) in
+  // the production output, given the spike failed and the emit branch is
+  // dead code today.
+  const OSC52_RE = /\x1b\]52;c;[A-Za-z0-9+/=]+\x07/;
+
+  const turnCaps = [1, 9, 42];
+  // Cover unset + the documented true-ish forms + a couple of false-ish
+  // forms to prove the parser is strict ("1"/"true" only, case-insensitive).
+  const envFixtures: Array<{ label: string; env: NodeJS.ProcessEnv; expectOptOut: boolean }> = [
+    { label: "unset", env: {}, expectOptOut: false },
+    { label: 'set to "1"', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "1" }, expectOptOut: true },
+    { label: 'set to "true"', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "true" }, expectOptOut: true },
+    { label: 'set to "TRUE"', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "TRUE" }, expectOptOut: true },
+    { label: 'set to "0"', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "0" }, expectOptOut: false },
+    { label: 'set to "false"', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "false" }, expectOptOut: false },
+    { label: 'set to ""', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "" }, expectOptOut: false },
+  ];
+
+  for (const turnCap of turnCaps) {
+    for (const fixture of envFixtures) {
+      const a: Assertion = {
+        name: "run-sprint emits OSC 52 clipboard sequence for goal command with opt-out",
+        run: () => {
+          // (c) gate is observable and parses strictly.
+          expect(
+            isClipboardOptOut(fixture.env) === fixture.expectOptOut,
+            `expected isClipboardOptOut(${fixture.label})=${fixture.expectOptOut}, got ${isClipboardOptOut(fixture.env)}`,
+          );
+
+          const block = buildRunSprintFinalOutput(turnCap, fixture.env);
+          const goalLine = formatGoalCommandLine(turnCap);
+
+          // (a)/(b) NO OSC 52 sequence leaks into output, regardless of env.
+          expect(
+            !OSC52_RE.test(block),
+            `expected no OSC 52 escape in output (env=${fixture.label}), got: ${JSON.stringify(block)}`,
+          );
+
+          // (a)/(b) NO clipboard note line in output, regardless of env.
+          expect(
+            !block.includes(CLIPBOARD_AUTOCOPY_NOTE_LINE),
+            `expected clipboard auto-copy note absent (env=${fixture.label}), got: ${JSON.stringify(block)}`,
+          );
+
+          // Story 1 contract preserved: /goal line is the literal last line.
+          expect(
+            block.endsWith(`${goalLine}\n`),
+            `expected block to end with /goal line + \\n (env=${fixture.label}), got: ${JSON.stringify(block)}`,
+          );
+          const trimmed = block.endsWith("\n") ? block.slice(0, -1) : block;
+          const lines = trimmed.split("\n");
+          expect(
+            lines[lines.length - 1] === goalLine,
+            `expected last line to equal /goal command (env=${fixture.label}), got: ${JSON.stringify(lines[lines.length - 1])}`,
+          );
+
+          // Output with opt-out set must equal output with opt-out unset — perfect no-op.
+          const unsetBlock = buildRunSprintFinalOutput(turnCap, {});
+          expect(
+            block === unsetBlock,
+            `expected env=${fixture.label} output to equal unset output (no-op safety), got block=${JSON.stringify(block)} unsetBlock=${JSON.stringify(unsetBlock)}`,
+          );
+        },
+      };
+
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name} (turnCap=${turnCap}, env=${fixture.label})`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name} (turnCap=${turnCap}, env=${fixture.label})\n        ${msg}`);
+      }
+    }
+  }
+
+  // (d) buildClipboardEscape is a well-formed pure function — base64 round-trip
+  // confirms it would produce a valid OSC 52 frame the day the harness lets us
+  // ship it. This is the "kept alive, tested" guarantee.
+  const escapeFixtures = ["hello", "/goal /sprint-orchestrator:process-backlog UNTIL stop"];
+  for (const payload of escapeFixtures) {
+    const a: Assertion = {
+      name: "run-sprint emits OSC 52 clipboard sequence for goal command with opt-out",
+      run: () => {
+        const frame = buildClipboardEscape(payload);
+        const m = frame.match(/^\x1b\]52;c;([A-Za-z0-9+/=]+)\x07$/);
+        expect(m !== null, `expected OSC 52 frame shape, got: ${JSON.stringify(frame)}`);
+        if (!m) return;
+        const decoded = Buffer.from(m[1] ?? "", "base64").toString("utf8");
+        expect(
+          decoded === payload,
+          `expected base64 payload to round-trip to ${JSON.stringify(payload)}, got ${JSON.stringify(decoded)}`,
+        );
+      },
+    };
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name} (buildClipboardEscape payload=${JSON.stringify(payload)})`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(
+        `  FAIL  ${a.name} (buildClipboardEscape payload=${JSON.stringify(payload)})\n        ${msg}`,
+      );
+    }
+  }
+
+  return outcomes;
+}
+
+/**
  * Story 2 — end-of-run summary contract for /sprint-orchestrator:process-backlog.
  *
  * Three distinct, greppable final lines tell the /goal evaluator
@@ -2693,6 +2834,20 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: run-sprint goal-on-last-line + fresh-context guidance");
     const goalLastLineOutcomes = await runRunSprintGoalLastLineMiniRun();
     outcomes.push(...goalLastLineOutcomes);
+  }
+
+  // goal-adoption sprint, story 2: OSC 52 clipboard auto-copy spike + env-var
+  // opt-out no-op safety. Spike failed (Claude Code does not pass escapes
+  // through verbatim — see follow-ups.md). These assertions guard the
+  // failure-path safety net: no OSC 52 leak in output, opt-out env var
+  // wired and parsed strictly, Story 1 last-line contract preserved.
+  if (
+    !filter ||
+    filter.test("run-sprint emits OSC 52 clipboard sequence for goal command with opt-out")
+  ) {
+    console.log("[e2e] mini-run: run-sprint OSC 52 clipboard auto-copy spike + opt-out safety");
+    const osc52Outcomes = await runRunSprintOsc52ClipboardMiniRun();
+    outcomes.push(...osc52Outcomes);
   }
 
   // Eleventh mini-run (story 3): README documents /sprint-orchestrator:run-sprint
