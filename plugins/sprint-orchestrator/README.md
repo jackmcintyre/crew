@@ -95,6 +95,7 @@ Key transitions:
 - `recordStorySuccess` — finalize a story after reviewer approval (formerly `markStoryComplete`).
 - `recordStoryRework` — bounce a story back for another attempt with reviewer feedback attached (formerly `markStoryNeedsRework`).
 - `recordStoryFailure` — give up on a story with a structured reason (formerly `markStoryFailed`).
+- `recordStoryReopen` — human-only recovery path: transition a `failed` story back to `ready` with an audit-trail entry. Clears `failed_at`, `last_failure_reason`, and the stale claim, but preserves `rework_count` so the prior attempts remain visible. The automated reviewer never calls this — `failed` is a terminal state for the orchestrator.
 
 ## Modes
 
@@ -152,8 +153,39 @@ a story spec), but be aware:
   the now-orphaned transitions. Consider annotating the log manually, or
   truncating it alongside the revert if you need a clean baseline.
 - Prefer the orchestrator's tools (`releaseStaleClaims`, `recordStoryFailure`,
-  etc.) over hand edits whenever an equivalent tool exists — they keep state
-  and log in sync.
+  `recordStoryReopen`, etc.) over hand edits whenever an equivalent tool
+  exists — they keep state and log in sync.
+
+## Recovering a failed story
+
+`failed` is a terminal state in the automated workflow: the reviewer cannot
+walk a story out of it, and the orchestrator will not retry it on its own.
+This is intentional — once the rework cap is hit (or a no-code failure is
+recorded), the right move is for a human to look at what went wrong before
+asking the agents to take another swing.
+
+When you want to put a failed story back into the queue, call the
+`recordStoryReopen` MCP tool:
+
+```
+recordStoryReopen(storyId: "S1", reason: "deferred dep landed; agent was right to give up first time")
+```
+
+What it does:
+
+- Transitions the story from `failed` back to `ready`.
+- Clears `failed_at`, `last_failure_reason`, and any stale `claimed_by` /
+  `claimed_at` left over from the prior agent.
+- **Preserves `rework_count`** so the next reviewer can see the prior attempts
+  in the audit trail.
+- Appends one entry to `orchestrator.reopen_history` (with timestamp, your
+  reason, and the prior failure reason) so the recovery itself is auditable.
+- Commits the mutation as `chore(sprint): reopen <id> — <reason>` so the
+  reset shows up in git history.
+
+The tool refuses (with `InvalidStateTransitionError`) on any non-`failed`
+status — it is not a free reset. To unstick a stuck `in_progress` claim, use
+`releaseStaleClaims` instead.
 
 ## Known issue: orphan code commit on state-write failure
 

@@ -28,6 +28,8 @@ import { markStoryComplete } from "../packages/mcp-server/src/tools/mark-story-c
 import { markStoryFailed } from "../packages/mcp-server/src/tools/mark-story-failed.js";
 import { markStoryNeedsRework } from "../packages/mcp-server/src/tools/mark-story-needs-rework.js";
 import { prepareStoryBranch } from "../packages/mcp-server/src/tools/prepare-story-branch.js";
+import { recordStoryReopen } from "../packages/mcp-server/src/tools/record-story-reopen.js";
+import { getReadyStories } from "../packages/mcp-server/src/tools/get-ready-stories.js";
 import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/validate-acceptance-criteria.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
@@ -1204,6 +1206,169 @@ async function runReviewerBlockedOnRejectedTransitionMiniRun(): Promise<Assertio
   return outcomes;
 }
 
+/**
+ * Mini-run for story 3: drive a story all the way to `failed` with rework
+ * activity, then call `recordStoryReopen` and assert the story is back in the
+ * ready queue with rework_count preserved, failure fields cleared, an entry
+ * appended to reopen_history, and a `chore(sprint): reopen` commit on HEAD.
+ */
+async function runRecordStoryReopenMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: false",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const agent = "agent-reopen-driver";
+  const outcomes: AssertionOutcome[] = [];
+
+  try {
+    // Story C has a never-passing AC. Drive it through one rework attempt to
+    // ensure rework_count > 0, then hit the cap and flip to failed via the
+    // reviewer's normal path (markStoryNeedsRework + markStoryFailed).
+    const claim = await claimStory(ctx, "C", agent);
+    if (!claim.claimed) throw new Error(`could not claim C: holder=${claim.holder ?? "?"}`);
+
+    // One rework attempt (cap default is 2). After this, rework_count=1.
+    await markStoryNeedsRework(ctx, "C", agent, "first reviewer rejection");
+
+    // Reviewer gives up. Flip to failed (cap reached, no-code failure, etc).
+    await markStoryFailed(ctx, "C", "rework cap reached after no progress");
+
+    const failedState = await readSprintStatus(ctx.sprintStatusPath);
+    const failedC = failedState.stories.find((s) => s.id === "C");
+    if (!failedC || failedC.status !== "failed") {
+      throw new Error(`expected C status=failed before reopen, got ${String(failedC?.status)}`);
+    }
+    const failedReworkCount = failedC.orchestrator.rework_count ?? 0;
+
+    const headBefore = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+
+    // The action under test.
+    const reopenReason = "human override: deferred work resolved";
+    const reopenResult = await recordStoryReopen(ctx, "C", reopenReason);
+
+    const finalState = await readSprintStatus(ctx.sprintStatusPath);
+    const storyC = finalState.stories.find((s) => s.id === "C");
+
+    const headAfter = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    const lastMsg = git(root, ["log", "-1", "--format=%s"]).stdout.trim();
+    const ready = await getReadyStories(ctx);
+    const readyIds = ready.map((s) => s.id);
+
+    const checks: Assertion[] = [
+      {
+        name: "recordStoryReopen transitions a failed story back to ready and clears failure fields",
+        run: () => {
+          expect(!!storyC, "story C missing from final state");
+          expect(
+            storyC!.status === "ready",
+            `story C status=${storyC!.status} (expected "ready" after reopen)`,
+          );
+          const orch = storyC!.orchestrator as Record<string, unknown>;
+          expect(
+            orch.failed_at === undefined,
+            `story C failed_at=${String(orch.failed_at)} (expected cleared)`,
+          );
+          expect(
+            orch.last_failure_reason === undefined,
+            `story C last_failure_reason=${String(orch.last_failure_reason)} (expected cleared)`,
+          );
+          expect(
+            orch.claimed_by === undefined,
+            `story C claimed_by=${String(orch.claimed_by)} (expected cleared)`,
+          );
+          expect(
+            orch.claimed_at === undefined,
+            `story C claimed_at=${String(orch.claimed_at)} (expected cleared)`,
+          );
+          // rework_count preserved.
+          expect(
+            (storyC!.orchestrator.rework_count ?? 0) === failedReworkCount,
+            `story C rework_count=${String(
+              storyC!.orchestrator.rework_count,
+            )} (expected preserved at ${failedReworkCount})`,
+          );
+          expect(
+            failedReworkCount >= 1,
+            `precondition: failed story should have rework_count >= 1 to prove preservation, got ${failedReworkCount}`,
+          );
+          // reopen_history carries the audit entry.
+          const history = orch.reopen_history as Array<Record<string, unknown>> | undefined;
+          expect(Array.isArray(history), "reopen_history missing or not an array");
+          expect(history!.length === 1, `expected reopen_history length 1, got ${history!.length}`);
+          expect(
+            history![0]!.reason === reopenReason,
+            `reopen_history[0].reason=${String(history![0]!.reason)} (expected ${reopenReason})`,
+          );
+          expect(
+            history![0]!.prior_status === "failed",
+            `reopen_history[0].prior_status=${String(history![0]!.prior_status)} (expected "failed")`,
+          );
+          expect(
+            history![0]!.prior_failure_reason === "rework cap reached after no progress",
+            `reopen_history[0].prior_failure_reason=${String(history![0]!.prior_failure_reason)}`,
+          );
+          // Tool return value.
+          expect(
+            reopenResult.status === "ready",
+            `reopenResult.status=${reopenResult.status} (expected "ready")`,
+          );
+          expect(
+            reopenResult.reworkCount === failedReworkCount,
+            `reopenResult.reworkCount=${reopenResult.reworkCount} (expected ${failedReworkCount})`,
+          );
+          // getReadyStories now includes C.
+          expect(
+            readyIds.includes("C"),
+            `expected C in ready set after reopen, got [${readyIds.join(", ")}]`,
+          );
+          // Chore commit on HEAD.
+          expect(
+            headAfter !== headBefore,
+            `expected a new commit after reopen, HEAD unchanged at ${headAfter}`,
+          );
+          expect(
+            /^chore\(sprint\): reopen C — /.test(lastMsg),
+            `expected HEAD message to match "chore(sprint): reopen C — ...", got: ${lastMsg}`,
+          );
+          expect(
+            lastMsg.includes(reopenReason),
+            `expected HEAD message to carry the reason, got: ${lastMsg}`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -1301,6 +1466,19 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: reviewer returns blocked when state machine rejects mutation");
     const blockedOutcomes = await runReviewerBlockedOnRejectedTransitionMiniRun();
     outcomes.push(...blockedOutcomes);
+  }
+
+  // Seventh mini-run: recordStoryReopen recovery path (story 3). Drives a
+  // story through to `failed` with rework activity, then reopens it.
+  if (
+    !filter ||
+    filter.test(
+      "recordStoryReopen transitions a failed story back to ready and clears failure fields",
+    )
+  ) {
+    console.log("[e2e] mini-run: recordStoryReopen recovery from failed");
+    const reopenOutcomes = await runRecordStoryReopenMiniRun();
+    outcomes.push(...reopenOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);

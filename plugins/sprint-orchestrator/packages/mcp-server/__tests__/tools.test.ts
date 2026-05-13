@@ -10,6 +10,7 @@ import { getStoryContext } from "../src/tools/get-story-context.js";
 import { claimStory } from "../src/tools/claim-story.js";
 import { markStoryComplete } from "../src/tools/mark-story-complete.js";
 import { markStoryFailed } from "../src/tools/mark-story-failed.js";
+import { recordStoryReopen } from "../src/tools/record-story-reopen.js";
 import { validateAcceptanceCriteria } from "../src/tools/validate-acceptance-criteria.js";
 import { releaseStaleClaims } from "../src/tools/release-stale-claims.js";
 import { prepareStoryBranch } from "../src/tools/prepare-story-branch.js";
@@ -730,5 +731,109 @@ describe("prepareStoryBranch / default_base schema check", () => {
     const stateRaw = fsMod.readFileSync(ctx.sprintStatusPath, "utf8");
     expect(stateRaw).toMatch(/base_branch:\s*main/);
     expect(stateRaw).toMatch(/base_branch_fallback_reason:.*no orchestrator\.branch/);
+  });
+});
+
+describe("recordStoryReopen", () => {
+  async function setupReopenable() {
+    const { ctx } = await setup();
+    const root = ctx.projectRoot;
+    git(root, ["init", "-q", "-b", "main"]);
+    git(root, ["config", "user.email", "unit@example.com"]);
+    git(root, ["config", "user.name", "Unit Test"]);
+    git(root, ["config", "commit.gpgsign", "false"]);
+    git(root, ["add", "sprint-status.yaml"]);
+    git(root, ["commit", "-q", "-m", "initial"]);
+    // Drive S1 through to `failed` via the real path so claimed_* and
+    // last_failure_reason get populated.
+    const claim = await claimStory(ctx, "S1", "agent-orig");
+    expect(claim.claimed).toBe(true);
+    await markStoryFailed(ctx, "S1", "designed-to-fail");
+    return { ctx, root };
+  }
+
+  it("transitions a failed story back to ready and clears failure fields", async () => {
+    const { ctx, root } = await setupReopenable();
+
+    const result = await recordStoryReopen(ctx, "S1", "human override after triage");
+
+    expect(result.status).toBe("ready");
+    expect(typeof result.reopened_at).toBe("string");
+
+    const state = await getSprintStatus(ctx);
+    const s1 = state.stories.find((s) => s.id === "S1")!;
+    expect(s1.status).toBe("ready");
+    const orch = s1.orchestrator as Record<string, unknown>;
+    expect(orch.failed_at).toBeUndefined();
+    expect(orch.last_failure_reason).toBeUndefined();
+    expect(orch.claimed_by).toBeUndefined();
+    expect(orch.claimed_at).toBeUndefined();
+    const history = orch.reopen_history as Array<Record<string, unknown>>;
+    expect(Array.isArray(history)).toBe(true);
+    expect(history.length).toBe(1);
+    expect(history[0]!.reason).toBe("human override after triage");
+    expect(history[0]!.prior_status).toBe("failed");
+    expect(history[0]!.prior_failure_reason).toBe("designed-to-fail");
+
+    // Commit lands on HEAD with chore(sprint): reopen ...
+    const lastMsg = git(root, ["log", "-1", "--format=%s"]).stdout.trim();
+    expect(lastMsg).toMatch(/^chore\(sprint\): reopen S1 — human override after triage$/);
+  });
+
+  it("preserves rework_count across a reopen", async () => {
+    const { ctx } = await setup();
+    const root = ctx.projectRoot;
+    git(root, ["init", "-q", "-b", "main"]);
+    git(root, ["config", "user.email", "unit@example.com"]);
+    git(root, ["config", "user.name", "Unit Test"]);
+    git(root, ["config", "commit.gpgsign", "false"]);
+    git(root, ["add", "sprint-status.yaml"]);
+    git(root, ["commit", "-q", "-m", "initial"]);
+
+    // Hand-craft a failed story with prior rework_count.
+    const { updateSprintStatus, findStory, replaceStory } =
+      await import("../src/state/sprint-status.js");
+    await updateSprintStatus(ctx.sprintStatusPath, async (state) => {
+      const story = findStory(state, "S1");
+      return {
+        next: replaceStory(state, {
+          ...story,
+          status: "failed" as const,
+          orchestrator: {
+            ...story.orchestrator,
+            rework_count: 2,
+            failed_at: "2026-05-13T09:00:00Z",
+            last_failure_reason: "rework cap reached",
+          },
+        }),
+        result: undefined,
+      };
+    });
+
+    const result = await recordStoryReopen(ctx, "S1", "give it another swing");
+    expect(result.reworkCount).toBe(2);
+
+    const state = await getSprintStatus(ctx);
+    const s1 = state.stories.find((s) => s.id === "S1")!;
+    expect(s1.orchestrator.rework_count).toBe(2);
+  });
+
+  it("refuses to reopen a story that is not failed", async () => {
+    const { ctx } = await setup();
+    await expect(recordStoryReopen(ctx, "S1", "should reject")).rejects.toThrow(
+      InvalidStateTransitionError,
+    );
+  });
+
+  it("throws StoryNotFoundError for an unknown story", async () => {
+    const { ctx } = await setup();
+    await expect(recordStoryReopen(ctx, "does-not-exist", "x")).rejects.toThrow(StoryNotFoundError);
+  });
+
+  it("reopened story is returned by getReadyStories", async () => {
+    const { ctx } = await setupReopenable();
+    await recordStoryReopen(ctx, "S1", "back in the queue");
+    const ready = await getReadyStories(ctx);
+    expect(ready.map((s) => s.id)).toContain("S1");
   });
 });
