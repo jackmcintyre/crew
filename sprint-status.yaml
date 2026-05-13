@@ -266,7 +266,7 @@ stories:
       that lacks an e2e check, assert the lint warning fires.
   - id: "8"
     title: Sprint ship gate — every sprint's last story runs e2e
-    status: in_progress
+    status: done
     depends_on:
       - "1"
       - "2"
@@ -286,6 +286,13 @@ stories:
     orchestrator:
       claimed_by: dev-bugfix2-8
       claimed_at: 2026-05-13T02:41:16.472Z
+      completed_at: 2026-05-13T02:43:17.540Z
+      summary: Documented ship-gate authoring rule in process-backlog SKILL.md; e2e and verify suites both
+        green, proving bugfix-2 sprint integrates cleanly.
+      artefacts:
+        - git:3c01e55cdaed20ca8fa8cf322ff0c757958aeec9
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+        - /Users/jackmcintyre/projects/claude-dev-loop/sprint-status.yaml
     notes: |
       Document in the process-backlog skill that every sprint MUST end
       with a "ship gate" story whose AC runs `pnpm e2e`. This is the
