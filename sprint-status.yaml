@@ -170,7 +170,7 @@ stories:
         - scripts/e2e.ts
   - id: "4"
     title: Ship gate — pnpm e2e green
-    status: in_progress
+    status: done
     depends_on:
       - "1"
       - "2"
@@ -184,9 +184,13 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      rework_count: 0
       claimed_by: dev-loop-20260513-s4
       claimed_at: 2026-05-13T05:24:07.292Z
+      rework_count: 0
+      completed_at: 2026-05-13T05:25:18.569Z
+      summary: "feat(4): Ship gate — pnpm e2e green"
+      artefacts:
+        - git:0b405cee674fc5ea8539b50a91b38849d24d867f
     notes: |
       Per planning-discipline.md rule 3: every sprint ends with a ship
       gate that runs the full unfiltered `pnpm e2e` and `pnpm verify`.
