@@ -117,7 +117,7 @@ stories:
       happy-path story (one code, one state).
   - id: "3"
     title: Diagnose and fix backlog auto-promotion
-    status: in_progress
+    status: done
     depends_on:
       - "1"
     acceptance_criteria:
@@ -131,6 +131,14 @@ stories:
     orchestrator:
       claimed_by: dev-bugfix2-3
       claimed_at: 2026-05-13T02:01:53.149Z
+      completed_at: 2026-05-13T02:11:48.564Z
+      summary: Fixed auto-promotion stale-dist regression by adding `prepare` build script to mcp-server
+        and `ensureDistBuilt()` in the e2e harness; the auto-promotion assertion now imports from
+        dist (the same entry the MCP server runs) and passes.
+      artefacts:
+        - git:217f812893f9788207034c0103de94b9c9a7f25c
+        - plugins/sprint-orchestrator/packages/mcp-server/package.json
+        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: |
       ROOT CAUSE OF BUG 2: unknown. Bugfix-1 story #2's dev claimed to
       add a promoteBacklogStories helper to get-ready-stories.ts with
