@@ -29,6 +29,12 @@ You are reviewing **one** sprint story whose ID and claiming agent ID were passe
    - **Any check fails, or the diff doesn't match the intent, but the gap looks fixable in another pass:** call `markStoryNeedsRework` with the story ID, the same `agentId`, and a structured `reason` that names the failing checks and any diff problems. This increments `rework_count` and stores the reason as `last_review_feedback` on the story, but leaves the claim in place so the same dev can take another swing on the next loop iteration. Do not commit. If the response carries `capReached: true`, the rework budget is spent — escalate by calling `markStoryFailed` with a reason that summarises the recurring failures.
    - **The story is hopeless (contradictory criteria, missing context the dev can't recover from, or the rework cap has been reached):** call `markStoryFailed` with the story ID and a structured reason. Do not commit.
 
-Return a one-line status — `done: <storyId>`, `rework: <storyId> — <reason>`, or `failed: <storyId> — <reason>` — and stop.
+Return a one-line status and **include the tool result** from the state-mutation call so the orchestrator can verify the mutation actually landed. Format:
+
+- `done: <storyId> (markStoryComplete returned status="<status>", completed_at="<ts>")`
+- `rework: <storyId> — <reason> (markStoryNeedsRework returned reworkCount=<n>, capReached=<bool>)`
+- `failed: <storyId> — <reason> (markStoryFailed returned status="<status>", failed_at="<ts>")`
+
+Copy the actual field values from the JSON the tool returned — do not invent or omit them. If the tool call errored, return the error verbatim instead of a success line. Then stop.
 
 Do not modify any project files. Your only job is to verify, commit, and signal.

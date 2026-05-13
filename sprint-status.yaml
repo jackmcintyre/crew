@@ -123,7 +123,7 @@ stories:
       explicit override).
   - id: "4"
     title: Unify failed vocabulary across status enum, run.log, and reports
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -142,6 +142,20 @@ stories:
     orchestrator:
       claimed_by: dev-bugfix-4
       claimed_at: 2026-05-13T00:41:52.545Z
+      completed_at: 2026-05-13T00:46:55.456Z
+      summary: 'Unified failed vocabulary: added "failed" to StoryStatus enum, markStoryFailed now sets
+        status=failed, sprint report renders failed and blocked as separate groups.'
+      artefacts:
+        - git:44ba5d0a332ef7f9a8f29df3147f158a3ba410c8
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-sprint-report.ts
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/__tests__/tools.test.ts
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/agents/reviewer.md
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+        - /Users/jackmcintyre/projects/claude-dev-loop/sprint-status.yaml
     notes: |
       Today markStoryFailed sets status="blocked", but run.log writes outcome="failed",
       and the README/skill docs say "failed". Inconsistent vocabulary.
@@ -159,7 +173,7 @@ stories:
       No backwards-compat shim needed.
   - id: "5"
     title: Enrich reviewer subagent return strings with tool-call results
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -169,7 +183,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-bugfix-5
+      claimed_at: 2026-05-13T00:47:04.657Z
     notes: |
       Today the reviewer subagent returns a one-line string like "done: 1.1" or
       "rework: 3.3 - <reason>". The orchestrator skill trusts this verbatim. There is no
