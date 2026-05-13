@@ -30,6 +30,7 @@ import { prepareStoryBranch } from "../packages/mcp-server/src/tools/prepare-sto
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
 import { appendRunLog } from "../packages/hooks/src/post-tool-use.js";
+import { handleStop } from "../packages/hooks/src/stop.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_ROOT = path.resolve(HERE, "..", "__fixtures__", "tiny-sprint");
@@ -734,6 +735,100 @@ async function runStaleBaseMiniRun(): Promise<AssertionOutcome[]> {
   return outcomes;
 }
 
+/**
+ * Mini-run for story 3: simulate a "fresh session" on a repo whose
+ * sprint-status.yaml carries leftover dirt from a prior, crashed session —
+ * i.e. NO orchestrator MCP tool has been called in this session. Then fire
+ * the Stop hook (which is what Claude Code invokes at session end) and
+ * assert that no new commits land.
+ *
+ * BEFORE the story-3 fix, the stop hook unconditionally ran
+ * `commitMetadataOnly`, producing a `chore(sprint): persist story metadata`
+ * commit attributable to a session that did nothing. That is the
+ * cross-session leak users reported (a stray `chore(sprint): persist 1.1
+ * failure`-style commit appearing on the next session for a branch).
+ *
+ * AFTER the fix, the tidy step only runs when handleClaimed actually
+ * transitioned a story (completed or failed) in this session; a noop session
+ * leaves the dirt alone.
+ */
+async function runCrossSessionStrayCommitMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+  const sprintPath = ctx.sprintStatusPath;
+
+  // Capture HEAD before we do anything.
+  const headBefore = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+  const commitsBefore = git(root, ["rev-list", "HEAD"]).stdout.trim().split("\n").filter(Boolean);
+
+  // Simulate residue from a prior session: append a harmless-but-real edit to
+  // sprint-status.yaml without going through any orchestrator tool. Use an
+  // appended YAML comment so the file still parses (handleStop reads it).
+  const original = await fs.readFile(sprintPath, "utf8");
+  await fs.writeFile(sprintPath, `${original}# stray edit from a prior session\n`, "utf8");
+
+  // CRUCIAL: do NOT call any MCP orchestrator tool in this "session". Just
+  // fire the Stop hook directly, as the Claude Code harness would when the
+  // user closes a session that never touched the orchestrator.
+  let stopResult: Awaited<ReturnType<typeof handleStop>> | null = null;
+  const outcomes: AssertionOutcome[] = [];
+  try {
+    stopResult = await handleStop({ cwd: root });
+
+    const headAfter = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    const commitsAfter = git(root, ["rev-list", "HEAD"]).stdout.trim().split("\n").filter(Boolean);
+    const newCommits = commitsAfter.filter((s) => !commitsBefore.includes(s));
+    const newMessages = newCommits.map((sha) =>
+      git(root, ["log", "-1", "--format=%s", sha]).stdout.trim(),
+    );
+
+    const checks: Assertion[] = [
+      {
+        name: "no orchestrator commits appear without a tool call in the current session",
+        run: () => {
+          // No tool called this session => no commits should be created by
+          // the stop hook, even if sprint-status.yaml was dirty on entry.
+          expect(
+            newCommits.length === 0,
+            `expected 0 new commits when no orchestrator tool was called this session, got ${
+              newCommits.length
+            } (messages: ${JSON.stringify(newMessages)})`,
+          );
+          expect(
+            headAfter === headBefore,
+            `expected HEAD unchanged (${headBefore}), got ${headAfter}`,
+          );
+          expect(
+            stopResult!.action === "noop",
+            `expected action=noop when nothing in_progress, got ${String(stopResult!.action)}`,
+          );
+          expect(
+            stopResult!.tidyCommitSha == null,
+            `expected tidyCommitSha=null on a no-activity session, got ${String(
+              stopResult!.tidyCommitSha,
+            )}`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -795,6 +890,16 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: default_base-stale refusal");
     const staleOutcomes = await runStaleBaseMiniRun();
     outcomes.push(...staleOutcomes);
+  }
+
+  // Fourth mini-run: exercise the cross-session stray-commit guard (story 3).
+  if (
+    !filter ||
+    filter.test("no orchestrator commits appear without a tool call in the current session")
+  ) {
+    console.log("[e2e] mini-run: cross-session stray-commit guard");
+    const strayOutcomes = await runCrossSessionStrayCommitMiniRun();
+    outcomes.push(...strayOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);
