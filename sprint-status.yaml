@@ -138,11 +138,11 @@ stories:
     orchestrator:
       claimed_by: dev-20260513-bmad-3
       claimed_at: 2026-05-13T13:46:59.242Z
-      rework_count: 0
       completed_at: 2026-05-13T13:51:44.191Z
       summary: README now documents adapt-bmad as the first concrete adaptor alongside universal /adopt,
         including the BMad-side Verification section convention with a fenced-shell example; backed
         by a new e2e mini-run and phrase-lock module.
+      rework_count: 0
       artefacts:
         - git:c8398d16a2491ca16d99c3539c9a5c34902ee6ad
         - plugins/sprint-orchestrator/README.md
@@ -178,7 +178,7 @@ stories:
         - Authoring a full schema doc.
   - id: "4"
     title: Ship gate — pnpm e2e + verify green
-    status: ready
+    status: done
     depends_on:
       - "1"
       - "2"
@@ -192,7 +192,12 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-20260513-bmad-4
+      claimed_at: 2026-05-13T13:52:13.575Z
       rework_count: 0
+      completed_at: 2026-05-13T13:54:24.315Z
+      summary: "Ship gate green: pnpm e2e (87/87) and pnpm verify (build, typecheck, lint, tests) both
+        pass, confirming stories 1-3 integrate cleanly."
     notes: >
       Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate
       cleanly and don't regress existing assertions.
