@@ -26,7 +26,9 @@ import { claimStory } from "../packages/mcp-server/src/tools/claim-story.js";
 import { commitStoryArtefacts } from "../packages/mcp-server/src/tools/commit-story-artefacts.js";
 import { markStoryComplete } from "../packages/mcp-server/src/tools/mark-story-complete.js";
 import { markStoryFailed } from "../packages/mcp-server/src/tools/mark-story-failed.js";
+import { markStoryNeedsRework } from "../packages/mcp-server/src/tools/mark-story-needs-rework.js";
 import { prepareStoryBranch } from "../packages/mcp-server/src/tools/prepare-story-branch.js";
+import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/validate-acceptance-criteria.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
 import { appendRunLog } from "../packages/hooks/src/post-tool-use.js";
@@ -887,6 +889,157 @@ async function runCrossSessionStrayCommitMiniRun(): Promise<AssertionOutcome[]> 
   return outcomes;
 }
 
+/**
+ * Mini-run for the reviewer-escalation contract: when an AC fails on the
+ * first reviewer pass, the reviewer MUST take the rework path (not failure)
+ * whenever the dev produced new code on this swing. This guards against the
+ * regression captured in the pr-per-story-1.1-triage run, where two stories
+ * hard-failed at rework_count: 0 despite having a valid feat commit on disk.
+ *
+ * The e2e cannot drive the reviewer LLM directly, so this mini-run drives the
+ * MCP-side state machine the reviewer commits to: it simulates a dev that
+ * produced a feat commit which does NOT satisfy the AC, then calls
+ * markStoryNeedsRework (the call the reviewer MUST make in this scenario) and
+ * asserts the post-state matches the contract — no failed status, rework_count
+ * advanced to 1, claim still in place.
+ */
+async function runReviewerReworkOnFirstACMissMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+
+  // Use pr_per_story: false so we don't need to manage a per-story branch for
+  // this assertion — the rework escalation logic is branch-agnostic.
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: false",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const agent = "agent-rework-on-first-miss";
+  const outcomes: AssertionOutcome[] = [];
+
+  try {
+    // Story C in the fixture has a never-passing AC
+    // (file_exists this/path/does/not/exist.txt). Perfect for this scenario:
+    // the dev "produces code" but the AC still fails.
+    const claim = await claimStory(ctx, "C", agent);
+    if (!claim.claimed) throw new Error(`could not claim C: holder=${claim.holder ?? "?"}`);
+
+    // Simulate the dev subagent producing a real feat commit that touches
+    // source files (but does NOT satisfy the AC). This is exactly the
+    // scenario from the triage run: dev produced plausible code, AC still
+    // fails on the first pass.
+    await fs.writeFile(path.join(root, "src", "attempt.txt"), "dev's attempt at C\n", "utf8");
+    const addAttempt = git(root, ["add", "src/attempt.txt"]);
+    if (addAttempt.status !== 0) throw new Error(`stage attempt failed: ${addAttempt.stderr}`);
+    const commitAttempt = git(root, [
+      "commit",
+      "-q",
+      "-m",
+      "feat(C): dev attempt that does not satisfy AC",
+    ]);
+    if (commitAttempt.status !== 0) {
+      throw new Error(`commit attempt failed: ${commitAttempt.stderr}`);
+    }
+
+    // Reviewer pass: validateAcceptanceCriteria should fail.
+    const validation = await validateAcceptanceCriteria(ctx, "C");
+
+    // Reviewer's decision per the new contract: AC failed AND there is a
+    // feat commit since claimed_at => call recordStoryRework, NOT
+    // recordStoryFailure.
+    const rework = await markStoryNeedsRework(
+      ctx,
+      "C",
+      agent,
+      `AC failed: ${JSON.stringify(validation)}`,
+    );
+
+    const finalState = await readSprintStatus(ctx.sprintStatusPath);
+    const storyC = finalState.stories.find((s) => s.id === "C");
+
+    const checks: Assertion[] = [
+      {
+        name: "reviewer escalates to rework, not failure, on first AC miss after dev produced code",
+        run: () => {
+          expect(!!storyC, "story C missing from final state");
+          // Core contract: rework path taken, not failure path.
+          expect(
+            storyC!.status !== "failed",
+            `story C status=${storyC!.status} — reviewer must NOT flip to failed on first AC miss when dev produced code`,
+          );
+          // No failed_at means recordStoryFailure was not called.
+          expect(
+            (storyC!.orchestrator as Record<string, unknown>).failed_at === undefined,
+            `story C orchestrator.failed_at=${String(
+              (storyC!.orchestrator as Record<string, unknown>).failed_at,
+            )} — must be unset on the rework path`,
+          );
+          // rework_count must have advanced to 1.
+          expect(
+            storyC!.orchestrator.rework_count === 1,
+            `story C rework_count=${String(
+              storyC!.orchestrator.rework_count,
+            )} (expected 1 after one rework escalation)`,
+          );
+          // Status must remain in_progress so the same dev can take another swing.
+          expect(
+            storyC!.status === "in_progress",
+            `story C status=${storyC!.status} (expected "in_progress" so the dev can retry)`,
+          );
+          // markStoryNeedsRework returned reworkCount=1, capReached=false (cap is 2).
+          expect(
+            rework.reworkCount === 1,
+            `recordStoryRework returned reworkCount=${rework.reworkCount} (expected 1)`,
+          );
+          expect(
+            rework.capReached === false,
+            `recordStoryRework returned capReached=${rework.capReached} (expected false on first rework)`,
+          );
+          // The reviewer's reason must be persisted as last_review_feedback so
+          // the dev on the next swing can read it.
+          expect(
+            typeof (storyC!.orchestrator as Record<string, unknown>).last_review_feedback ===
+              "string",
+            "story C last_review_feedback missing — dev cannot see the failure on retry",
+          );
+          // Claim stays in place so the same dev picks the story up again.
+          expect(
+            storyC!.orchestrator.claimed_by === agent,
+            `story C claimed_by=${String(
+              storyC!.orchestrator.claimed_by,
+            )} (expected the original agent; rework must not release the claim)`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -958,6 +1111,19 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: cross-session stray-commit guard");
     const strayOutcomes = await runCrossSessionStrayCommitMiniRun();
     outcomes.push(...strayOutcomes);
+  }
+
+  // Fifth mini-run: reviewer must escalate to rework (not failure) on the
+  // first AC miss when the dev produced new code.
+  if (
+    !filter ||
+    filter.test(
+      "reviewer escalates to rework, not failure, on first AC miss after dev produced code",
+    )
+  ) {
+    console.log("[e2e] mini-run: reviewer escalates to rework on first AC miss with dev code");
+    const reworkOutcomes = await runReviewerReworkOnFirstACMissMiniRun();
+    outcomes.push(...reworkOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);

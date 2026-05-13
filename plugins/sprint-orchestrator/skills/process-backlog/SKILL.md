@@ -32,7 +32,7 @@ Repeat until either `getReadyStories` returns `[]` or you have completed **5 sto
 7. After the reviewer returns, inspect its one-line status:
    - `done: <id>` — log it and move on to the next ready story.
    - `rework: <id> — <reason>` — the reviewer left the claim in place and incremented `rework_count`. Re-spawn the `dev` subagent for the same story ID (it will read `last_review_feedback` from the story and address it), then re-spawn the `reviewer` for the same story and `agentId`. Repeat until the reviewer returns `done` or `failed`. The `recordStoryRework` tool enforces a cap (default 2) — once `capReached` is true the reviewer will escalate to `recordStoryFailure` on its next pass, so the rework sub-loop terminates on its own.
-   - `failed: <id> — <reason>` — log it and move on.
+   - `failed: <id> — <reason>` — log it and move on. Note: the reviewer is contractually required to take the **rework** path (not failure) on the first AC miss whenever the dev produced new code on this swing. A `failed` on `rework_count: 0` means either the dev returned without producing any code, or the story is hopeless (e.g. contradictory criteria). It does **not** mean the implementation is wrong-and-fixable — that case must go through rework.
 8. Loop.
 
 ## Rules
