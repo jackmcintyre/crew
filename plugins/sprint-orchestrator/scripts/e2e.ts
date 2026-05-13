@@ -1959,6 +1959,151 @@ async function runProcessBacklogEndOfRunSummaryLinesMiniRun(): Promise<Assertion
   return outcomes;
 }
 
+/**
+ * Story 3 — README documents the /sprint-orchestrator:run-sprint wrapper as the
+ * recommended entrypoint, the computed turn-cap rule, and the three
+ * end-of-run summary line shapes.
+ *
+ * The README is the muscle-memory steering wheel: if it leads with /loop, users
+ * will keep reaching for /loop. This mini-run reads README.md and asserts:
+ *   - /sprint-orchestrator:run-sprint appears before any /loop mention in the
+ *     "Running a sprint" section.
+ *   - The cap formula (story_count * turn_cap_per_story) is documented.
+ *   - The three end-of-run summary line prefixes from story 2 appear verbatim.
+ */
+async function runReadmeDocumentsRunSprintEntrypointMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  const readmePath = path.resolve(HERE, "..", "README.md");
+  let readme = "";
+  try {
+    readme = await fs.readFile(readmePath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "README documents run-sprint wrapper computed turn cap and end-of-run summary lines: file readable",
+      passed: false,
+      error: `could not read README at ${readmePath}: ${msg}`,
+    });
+    return outcomes;
+  }
+
+  // Locate the "Running a sprint" section: from its heading to the next
+  // top-level (## ...) heading. The section is where muscle memory gets set,
+  // so the ordering check is scoped to it.
+  function extractRunningSection(text: string): string | null {
+    const m = text.match(/\n##\s+Running a sprint\b[\s\S]*?(?=\n##\s+|\n?$)/);
+    return m ? m[0] : null;
+  }
+
+  const section = extractRunningSection(readme);
+
+  const checks: Assertion[] = [
+    {
+      name: "README documents run-sprint wrapper computed turn cap and end-of-run summary lines: run-sprint section exists",
+      run: () => {
+        expect(
+          section !== null,
+          "README is missing the '## Running a sprint' section that documents the wrapper",
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint wrapper computed turn cap and end-of-run summary lines: run-sprint precedes /loop in the section",
+      run: () => {
+        if (!section) return;
+        const wrapperIdx = section.indexOf("/sprint-orchestrator:run-sprint");
+        const loopIdx = section.indexOf("/loop");
+        expect(
+          wrapperIdx >= 0,
+          "Running-a-sprint section does not mention /sprint-orchestrator:run-sprint",
+        );
+        if (loopIdx >= 0) {
+          expect(
+            wrapperIdx < loopIdx,
+            `/sprint-orchestrator:run-sprint must appear before any /loop mention in the Running-a-sprint section (run-sprint at ${wrapperIdx}, /loop at ${loopIdx})`,
+          );
+        }
+      },
+    },
+    {
+      name: "README documents run-sprint wrapper computed turn cap and end-of-run summary lines: cap formula is documented",
+      run: () => {
+        // The formula must be present and unambiguous. The canonical form is
+        // ceil(story_count * turn_cap_per_story); accept minor whitespace
+        // variants but require both factors and the multiplication.
+        const re = /ceil\(\s*story_count\s*\*\s*turn_cap_per_story\s*\)/;
+        expect(
+          re.test(readme),
+          "README does not document the cap formula 'ceil(story_count * turn_cap_per_story)'",
+        );
+        expect(
+          /turn_cap_per_story/.test(readme) && /default[^\n]*3/i.test(readme),
+          "README does not document the default turn_cap_per_story = 3",
+        );
+        expect(
+          /\.sprint-orchestrator\/config\.yaml/.test(readme),
+          "README does not point at .sprint-orchestrator/config.yaml as the override location",
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint wrapper computed turn cap and end-of-run summary lines: raw /goal manual override is documented",
+      run: () => {
+        // Canonical drain condition string from story 1 — shown verbatim so
+        // users can copy/adapt it.
+        const canonical =
+          "/goal /sprint-orchestrator:process-backlog UNTIL every story in sprint-status.yaml is status=done or status=failed, OR stop after";
+        expect(
+          readme.includes(canonical),
+          `README does not document the canonical /goal drain command (expected substring: '${canonical}')`,
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint wrapper computed turn cap and end-of-run summary lines: drain summary prefix appears",
+      run: () => {
+        expect(
+          readme.includes("Sprint drain confirmed:"),
+          "README does not document the drain end-of-run summary prefix 'Sprint drain confirmed:'",
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint wrapper computed turn cap and end-of-run summary lines: cap-stop summary prefix appears",
+      run: () => {
+        expect(
+          readme.includes("Sprint paused at hard cap:"),
+          "README does not document the cap-stop end-of-run summary prefix 'Sprint paused at hard cap:'",
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint wrapper computed turn cap and end-of-run summary lines: blocked summary prefix appears",
+      run: () => {
+        expect(
+          readme.includes("Sprint blocked:"),
+          "README does not document the blocked end-of-run summary prefix 'Sprint blocked:'",
+        );
+      },
+    },
+  ];
+
+  for (const a of checks) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -2097,6 +2242,20 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: run-sprint wrapper turn cap + refusal paths");
     const runSprintOutcomes = await runRunSprintWrapperMiniRun();
     outcomes.push(...runSprintOutcomes);
+  }
+
+  // Eleventh mini-run (story 3): README documents /sprint-orchestrator:run-sprint
+  // as the recommended entrypoint, the computed turn-cap rule, and the three
+  // end-of-run summary line prefixes from story 2.
+  if (
+    !filter ||
+    filter.test(
+      "README documents run-sprint wrapper computed turn cap and end-of-run summary lines",
+    )
+  ) {
+    console.log("[e2e] mini-run: README documents run-sprint as recommended entrypoint");
+    const readmeOutcomes = await runReadmeDocumentsRunSprintEntrypointMiniRun();
+    outcomes.push(...readmeOutcomes);
   }
 
   // Tenth mini-run (story 2): process-backlog end-of-run summary contract.
