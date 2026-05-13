@@ -162,43 +162,9 @@ stories:
 
       INTEGRATION AC: e2e harness asserts a backlog story with one done
       dep is returned by getReadyStories without manual flip.
-  - id: "4"
-    title: Fix markStoryFailed to write status="failed"
-    status: ready
-    depends_on:
-      - "1"
-    acceptance_criteria:
-      checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
-          pattern: status:\s*"failed"
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "failed status"
-          expect_exit: 0
-    orchestrator: {}
-    notes: |
-      ROOT CAUSE OF BUG 4: bugfix-1 story #4's dev probably updated the
-      enum and one or two consumers but missed the actual write site in
-      mark-story-failed.ts. The original AC (regex `status.*"failed"`)
-      matched the literal string somewhere in the file (likely a comment
-      or doc string) but didn't validate the write logic.
-
-      Fix: ensure mark-story-failed.ts contains the explicit literal
-      `status: "failed"` at its actual write site. The regex AC above
-      uses a tighter pattern to enforce assignment-shaped match.
-
-      INTEGRATION AC: e2e harness drives a story to failure and asserts
-      sprint-status.yaml contains `status: "failed"` (not "blocked")
-      after markStoryFailed returns.
-
-      Bonus check: getSprintReport renders the story under [failed]
-      group, not [blocked].
   - id: "5"
     title: Stage by artefact allowlist + ship default .sprint-orchestrator/ exclusion
-    status: ready
+    status: in_progress
     depends_on:
       - "1"
     acceptance_criteria:
@@ -212,7 +178,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "no junk files"
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-bugfix2-5
+      claimed_at: 2026-05-13T02:30:32.455Z
     notes: |
       ROOT CAUSE OF NEW BUGS 1+2: commitStoryArtefacts uses `git add -A`
       with only sprint-status.yaml excluded. In a real repo without a
@@ -237,35 +205,6 @@ stories:
       INTEGRATION AC: e2e harness fixture has no .gitignore, but the
       commit produced by commitStoryArtefacts contains no .DS_Store,
       .sprint-orchestrator/, or sprint-status.yaml entries.
-  - id: "6"
-    title: Align return shape across markStoryComplete/Failed/NeedsRework
-    status: ready
-    depends_on: []
-    acceptance_criteria:
-      checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
-          pattern: completed_at\|failed_at
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
-          pattern: rework_at
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-    orchestrator: {}
-    notes: |
-      Today markStoryComplete returns enriched data (status, completed_at)
-      while markStoryFailed returns only `{ ok: true }`. Reviewer
-      enriched-return strings (bugfix-1 story #5) become uninformative on
-      the failed path.
-
-      Fix: all three state-mutators return a uniform envelope:
-        { ok: true, status: <new status>, at: <iso timestamp>,
-          extra: { ... tool-specific fields, e.g. reworkCount,
-                   failed_at, capReached } }
-
-      Tests cover return shape for each tool. Reviewer.md updated to
-      reference the unified envelope in its enriched-return guidance.
   - id: "7"
     title: AC linter — flag structural-only ACs on state-mutator stories
     status: ready
@@ -315,7 +254,6 @@ stories:
       - "1"
       - "2"
       - "3"
-      - "4"
       - "5"
     acceptance_criteria:
       checks:
