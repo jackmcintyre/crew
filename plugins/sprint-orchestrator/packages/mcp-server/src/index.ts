@@ -17,6 +17,7 @@ import { getOrInitConfig } from "./tools/get-or-init-config.js";
 import { commitStoryArtefacts } from "./tools/commit-story-artefacts.js";
 import { lintSprint } from "./tools/lint-sprint.js";
 import { prepareStoryBranch } from "./tools/prepare-story-branch.js";
+import { recordStoryReopen } from "./tools/record-story-reopen.js";
 
 export const PLUGIN_NAME = "sprint-orchestrator";
 
@@ -163,6 +164,20 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
     },
     async ({ storyId, agentId, reason, reworkLimit }) => {
       const result = await markStoryNeedsRework(ctx, storyId, agentId, reason, reworkLimit);
+      return json({ ok: true, ...result });
+    },
+  );
+
+  server.registerTool(
+    "recordStoryReopen",
+    {
+      title: "Record story reopen",
+      description:
+        "Transition a failed story back to ready so the orchestrator picks it up again. Clears failed_at, last_failure_reason, claimed_by, claimed_at. Preserves rework_count for audit. Appends an entry to orchestrator.reopen_history. Refuses if status != failed. For human (or future supervisor agent) recovery — the automated reviewer never calls this.",
+      inputSchema: { storyId: z.string(), reason: z.string().min(1) },
+    },
+    async ({ storyId, reason }) => {
+      const result = await recordStoryReopen(ctx, storyId, reason);
       return json({ ok: true, ...result });
     },
   );

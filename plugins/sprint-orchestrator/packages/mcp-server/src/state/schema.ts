@@ -54,6 +54,26 @@ export const OrchestratorMeta = z
      * or its branch no longer exists locally).
      */
     base_branch_fallback_reason: z.string().optional(),
+    /**
+     * When `recordStoryReopen` transitions a story from `failed` back to
+     * `ready`, it appends an entry here capturing the prior failure reason +
+     * the reopen reason so the audit trail survives the reset. Never cleared
+     * once written.
+     */
+    reopen_history: z
+      .array(
+        z
+          .object({
+            reopened_at: z.string().datetime({ offset: true }),
+            reason: z.string().min(1),
+            prior_status: z.literal("failed"),
+            prior_failure_reason: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+    /** Timestamp of the last failure. Cleared by `recordStoryReopen`. */
+    failed_at: z.string().datetime({ offset: true }).optional(),
   })
   .passthrough()
   .default({});

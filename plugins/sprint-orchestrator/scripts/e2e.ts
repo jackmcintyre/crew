@@ -26,7 +26,12 @@ import { claimStory } from "../packages/mcp-server/src/tools/claim-story.js";
 import { commitStoryArtefacts } from "../packages/mcp-server/src/tools/commit-story-artefacts.js";
 import { markStoryComplete } from "../packages/mcp-server/src/tools/mark-story-complete.js";
 import { markStoryFailed } from "../packages/mcp-server/src/tools/mark-story-failed.js";
+import { markStoryNeedsRework } from "../packages/mcp-server/src/tools/mark-story-needs-rework.js";
 import { prepareStoryBranch } from "../packages/mcp-server/src/tools/prepare-story-branch.js";
+import { recordStoryReopen } from "../packages/mcp-server/src/tools/record-story-reopen.js";
+import { getReadyStories } from "../packages/mcp-server/src/tools/get-ready-stories.js";
+import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
+import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/validate-acceptance-criteria.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
 import { appendRunLog } from "../packages/hooks/src/post-tool-use.js";
@@ -887,6 +892,638 @@ async function runCrossSessionStrayCommitMiniRun(): Promise<AssertionOutcome[]> 
   return outcomes;
 }
 
+/**
+ * Mini-run for the reviewer-escalation contract: when an AC fails on the
+ * first reviewer pass, the reviewer MUST take the rework path (not failure)
+ * whenever the dev produced new code on this swing. This guards against the
+ * regression captured in the pr-per-story-1.1-triage run, where two stories
+ * hard-failed at rework_count: 0 despite having a valid feat commit on disk.
+ *
+ * The e2e cannot drive the reviewer LLM directly, so this mini-run drives the
+ * MCP-side state machine the reviewer commits to: it simulates a dev that
+ * produced a feat commit which does NOT satisfy the AC, then calls
+ * markStoryNeedsRework (the call the reviewer MUST make in this scenario) and
+ * asserts the post-state matches the contract — no failed status, rework_count
+ * advanced to 1, claim still in place.
+ */
+async function runReviewerReworkOnFirstACMissMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+
+  // Use pr_per_story: false so we don't need to manage a per-story branch for
+  // this assertion — the rework escalation logic is branch-agnostic.
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: false",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const agent = "agent-rework-on-first-miss";
+  const outcomes: AssertionOutcome[] = [];
+
+  try {
+    // Story C in the fixture has a never-passing AC
+    // (file_exists this/path/does/not/exist.txt). Perfect for this scenario:
+    // the dev "produces code" but the AC still fails.
+    const claim = await claimStory(ctx, "C", agent);
+    if (!claim.claimed) throw new Error(`could not claim C: holder=${claim.holder ?? "?"}`);
+
+    // Simulate the dev subagent producing a real feat commit that touches
+    // source files (but does NOT satisfy the AC). This is exactly the
+    // scenario from the triage run: dev produced plausible code, AC still
+    // fails on the first pass.
+    await fs.writeFile(path.join(root, "src", "attempt.txt"), "dev's attempt at C\n", "utf8");
+    const addAttempt = git(root, ["add", "src/attempt.txt"]);
+    if (addAttempt.status !== 0) throw new Error(`stage attempt failed: ${addAttempt.stderr}`);
+    const commitAttempt = git(root, [
+      "commit",
+      "-q",
+      "-m",
+      "feat(C): dev attempt that does not satisfy AC",
+    ]);
+    if (commitAttempt.status !== 0) {
+      throw new Error(`commit attempt failed: ${commitAttempt.stderr}`);
+    }
+
+    // Reviewer pass: validateAcceptanceCriteria should fail.
+    const validation = await validateAcceptanceCriteria(ctx, "C");
+
+    // Reviewer's decision per the new contract: AC failed AND there is a
+    // feat commit since claimed_at => call recordStoryRework, NOT
+    // recordStoryFailure.
+    const rework = await markStoryNeedsRework(
+      ctx,
+      "C",
+      agent,
+      `AC failed: ${JSON.stringify(validation)}`,
+    );
+
+    const finalState = await readSprintStatus(ctx.sprintStatusPath);
+    const storyC = finalState.stories.find((s) => s.id === "C");
+
+    const checks: Assertion[] = [
+      {
+        name: "reviewer escalates to rework, not failure, on first AC miss after dev produced code",
+        run: () => {
+          expect(!!storyC, "story C missing from final state");
+          // Core contract: rework path taken, not failure path.
+          expect(
+            storyC!.status !== "failed",
+            `story C status=${storyC!.status} — reviewer must NOT flip to failed on first AC miss when dev produced code`,
+          );
+          // No failed_at means recordStoryFailure was not called.
+          expect(
+            (storyC!.orchestrator as Record<string, unknown>).failed_at === undefined,
+            `story C orchestrator.failed_at=${String(
+              (storyC!.orchestrator as Record<string, unknown>).failed_at,
+            )} — must be unset on the rework path`,
+          );
+          // rework_count must have advanced to 1.
+          expect(
+            storyC!.orchestrator.rework_count === 1,
+            `story C rework_count=${String(
+              storyC!.orchestrator.rework_count,
+            )} (expected 1 after one rework escalation)`,
+          );
+          // Status must remain in_progress so the same dev can take another swing.
+          expect(
+            storyC!.status === "in_progress",
+            `story C status=${storyC!.status} (expected "in_progress" so the dev can retry)`,
+          );
+          // markStoryNeedsRework returned reworkCount=1, capReached=false (cap is 2).
+          expect(
+            rework.reworkCount === 1,
+            `recordStoryRework returned reworkCount=${rework.reworkCount} (expected 1)`,
+          );
+          expect(
+            rework.capReached === false,
+            `recordStoryRework returned capReached=${rework.capReached} (expected false on first rework)`,
+          );
+          // The reviewer's reason must be persisted as last_review_feedback so
+          // the dev on the next swing can read it.
+          expect(
+            typeof (storyC!.orchestrator as Record<string, unknown>).last_review_feedback ===
+              "string",
+            "story C last_review_feedback missing — dev cannot see the failure on retry",
+          );
+          // Claim stays in place so the same dev picks the story up again.
+          expect(
+            storyC!.orchestrator.claimed_by === agent,
+            `story C claimed_by=${String(
+              storyC!.orchestrator.claimed_by,
+            )} (expected the original agent; rework must not release the claim)`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
+/**
+ * Mini-run for story 2: when the reviewer attempts a state-mutating MCP call
+ * on a story whose status no longer allows that transition (e.g. another
+ * session moved it to `failed`), the MCP server rejects the call. The
+ * reviewer's contract is to surface a `blocked: <id>` status line and STOP
+ * the run — NOT to silently treat the rejection as a normal `done`/`failed`
+ * outcome.
+ *
+ * The e2e cannot drive the reviewer LLM directly, so this mini-run drives the
+ * MCP-side state machine the reviewer is supposed to commit to:
+ *   1. Pre-seed story C in `failed` state (simulating the cross-session drift).
+ *   2. Re-claim it for a "new" reviewer agent (without going through the
+ *      normal claimStory state-machine path — we hand-edit sprint-status so
+ *      the story is in_progress-looking only insofar as the reviewer would
+ *      try to call recordStorySuccess on it).
+ *   3. Attempt `markStoryComplete` (the dist-mode name for the tool the
+ *      reviewer calls). Expect it to throw `InvalidStateTransitionError`.
+ *   4. Mimic the reviewer's contract: write a `blocked` event into run.log
+ *      and synthesize the `blocked: <id> ...` stdout line.
+ *   5. Assert: story.status stays `failed`, the synthesized stdout line
+ *      matches the contract, and run.log carries a `blocked` event with the
+ *      offending tool name and error.
+ */
+async function runReviewerBlockedOnRejectedTransitionMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: false",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const agent = "agent-blocked-on-rejected-transition";
+  const outcomes: AssertionOutcome[] = [];
+
+  try {
+    // Step 1: pre-seed C in `failed` state via the normal path (this is the
+    // "prior session" leaving the bookkeeping in a state the new reviewer
+    // cannot transition out of).
+    const claim1 = await claimStory(ctx, "C", "agent-prior-session");
+    if (!claim1.claimed) throw new Error(`could not claim C: holder=${claim1.holder ?? "?"}`);
+    await markStoryFailed(ctx, "C", "prior session gave up");
+
+    // Sanity: story is now `failed`.
+    const midState = await readSprintStatus(ctx.sprintStatusPath);
+    const midC = midState.stories.find((s) => s.id === "C");
+    if (!midC || midC.status !== "failed") {
+      throw new Error(`expected C status=failed before reviewer pass, got ${String(midC?.status)}`);
+    }
+
+    // Step 2: the reviewer LLM is invoked for C with `agent`. The reviewer
+    // believes AC has passed (this is what it would do in a re-claimed
+    // scenario where it doesn't re-check the persisted status) and calls
+    // recordStorySuccess. We simulate that call directly.
+    //
+    // Step 3: expect rejection.
+    let captured: Error | null = null;
+    try {
+      await markStoryComplete(ctx, "C", agent, "reviewer believes C is done");
+    } catch (err) {
+      captured = err as Error;
+    }
+
+    // Step 4: mimic the reviewer's blocked-line contract + run.log event.
+    const toolName = "recordStorySuccess";
+    const errorText = captured ? captured.message : "<no error thrown>";
+    const reviewerStdoutLine = `blocked: C — state-machine rejected ${toolName}: ${errorText}`;
+    if (captured) {
+      await appendRunLog(root, {
+        event: "blocked",
+        at: new Date().toISOString(),
+        story_id: "C",
+        tool: toolName,
+        error: errorText,
+        agent_id: agent,
+      });
+    }
+
+    const finalState = await readSprintStatus(ctx.sprintStatusPath);
+    const storyC = finalState.stories.find((s) => s.id === "C");
+    const log = await readLog(root);
+
+    const checks: Assertion[] = [
+      {
+        name: "reviewer returns blocked status when state machine rejects recordStorySuccess",
+        run: () => {
+          // The MCP server must have rejected the transition.
+          expect(
+            captured !== null,
+            "expected markStoryComplete to throw on a failed story; got no error",
+          );
+          // Error message must carry the from/to context so the blocked: line is informative.
+          expect(
+            captured!.message.includes("failed") && captured!.message.includes("done"),
+            `expected error to mention failed→done transition, got: ${captured!.message}`,
+          );
+          // Reviewer's synthesized stdout line matches the contract.
+          expect(
+            reviewerStdoutLine.startsWith("blocked: C"),
+            `expected stdout line to start with "blocked: C", got: ${reviewerStdoutLine}`,
+          );
+          expect(
+            reviewerStdoutLine.includes(`state-machine rejected ${toolName}`),
+            `expected stdout line to name the rejected tool, got: ${reviewerStdoutLine}`,
+          );
+          expect(
+            reviewerStdoutLine.includes(captured!.message),
+            `expected stdout line to carry the verbatim error, got: ${reviewerStdoutLine}`,
+          );
+          // Story status must remain `failed` — no silent transition happened.
+          expect(!!storyC, "story C missing from final state");
+          expect(
+            storyC!.status === "failed",
+            `story C status=${storyC!.status} (expected "failed"; rejected transition must not mutate state)`,
+          );
+          // run.log must carry a `blocked` event so post-mortem analysis can find it.
+          const blocked = log.filter((e) => e.event === "blocked");
+          expect(
+            blocked.length >= 1,
+            `expected >=1 blocked event in run.log, got ${blocked.length}`,
+          );
+          const evt = blocked.find((e) => e.story_id === "C");
+          expect(!!evt, "no blocked event for story C in run.log");
+          expect(
+            evt!.tool === toolName,
+            `blocked event tool=${String(evt!.tool)} (expected ${toolName})`,
+          );
+          expect(
+            typeof evt!.error === "string" &&
+              (evt!.error as string).includes("failed") &&
+              (evt!.error as string).includes("done"),
+            `blocked event error missing transition context, got: ${String(evt!.error)}`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
+/**
+ * Mini-run for story 3: drive a story all the way to `failed` with rework
+ * activity, then call `recordStoryReopen` and assert the story is back in the
+ * ready queue with rework_count preserved, failure fields cleared, an entry
+ * appended to reopen_history, and a `chore(sprint): reopen` commit on HEAD.
+ */
+async function runRecordStoryReopenMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: false",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const agent = "agent-reopen-driver";
+  const outcomes: AssertionOutcome[] = [];
+
+  try {
+    // Story C has a never-passing AC. Drive it through one rework attempt to
+    // ensure rework_count > 0, then hit the cap and flip to failed via the
+    // reviewer's normal path (markStoryNeedsRework + markStoryFailed).
+    const claim = await claimStory(ctx, "C", agent);
+    if (!claim.claimed) throw new Error(`could not claim C: holder=${claim.holder ?? "?"}`);
+
+    // One rework attempt (cap default is 2). After this, rework_count=1.
+    await markStoryNeedsRework(ctx, "C", agent, "first reviewer rejection");
+
+    // Reviewer gives up. Flip to failed (cap reached, no-code failure, etc).
+    await markStoryFailed(ctx, "C", "rework cap reached after no progress");
+
+    const failedState = await readSprintStatus(ctx.sprintStatusPath);
+    const failedC = failedState.stories.find((s) => s.id === "C");
+    if (!failedC || failedC.status !== "failed") {
+      throw new Error(`expected C status=failed before reopen, got ${String(failedC?.status)}`);
+    }
+    const failedReworkCount = failedC.orchestrator.rework_count ?? 0;
+
+    const headBefore = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+
+    // The action under test.
+    const reopenReason = "human override: deferred work resolved";
+    const reopenResult = await recordStoryReopen(ctx, "C", reopenReason);
+
+    const finalState = await readSprintStatus(ctx.sprintStatusPath);
+    const storyC = finalState.stories.find((s) => s.id === "C");
+
+    const headAfter = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    const lastMsg = git(root, ["log", "-1", "--format=%s"]).stdout.trim();
+    const ready = await getReadyStories(ctx);
+    const readyIds = ready.map((s) => s.id);
+
+    const checks: Assertion[] = [
+      {
+        name: "recordStoryReopen transitions a failed story back to ready and clears failure fields",
+        run: () => {
+          expect(!!storyC, "story C missing from final state");
+          expect(
+            storyC!.status === "ready",
+            `story C status=${storyC!.status} (expected "ready" after reopen)`,
+          );
+          const orch = storyC!.orchestrator as Record<string, unknown>;
+          expect(
+            orch.failed_at === undefined,
+            `story C failed_at=${String(orch.failed_at)} (expected cleared)`,
+          );
+          expect(
+            orch.last_failure_reason === undefined,
+            `story C last_failure_reason=${String(orch.last_failure_reason)} (expected cleared)`,
+          );
+          expect(
+            orch.claimed_by === undefined,
+            `story C claimed_by=${String(orch.claimed_by)} (expected cleared)`,
+          );
+          expect(
+            orch.claimed_at === undefined,
+            `story C claimed_at=${String(orch.claimed_at)} (expected cleared)`,
+          );
+          // rework_count preserved.
+          expect(
+            (storyC!.orchestrator.rework_count ?? 0) === failedReworkCount,
+            `story C rework_count=${String(
+              storyC!.orchestrator.rework_count,
+            )} (expected preserved at ${failedReworkCount})`,
+          );
+          expect(
+            failedReworkCount >= 1,
+            `precondition: failed story should have rework_count >= 1 to prove preservation, got ${failedReworkCount}`,
+          );
+          // reopen_history carries the audit entry.
+          const history = orch.reopen_history as Array<Record<string, unknown>> | undefined;
+          expect(Array.isArray(history), "reopen_history missing or not an array");
+          expect(history!.length === 1, `expected reopen_history length 1, got ${history!.length}`);
+          expect(
+            history![0]!.reason === reopenReason,
+            `reopen_history[0].reason=${String(history![0]!.reason)} (expected ${reopenReason})`,
+          );
+          expect(
+            history![0]!.prior_status === "failed",
+            `reopen_history[0].prior_status=${String(history![0]!.prior_status)} (expected "failed")`,
+          );
+          expect(
+            history![0]!.prior_failure_reason === "rework cap reached after no progress",
+            `reopen_history[0].prior_failure_reason=${String(history![0]!.prior_failure_reason)}`,
+          );
+          // Tool return value.
+          expect(
+            reopenResult.status === "ready",
+            `reopenResult.status=${reopenResult.status} (expected "ready")`,
+          );
+          expect(
+            reopenResult.reworkCount === failedReworkCount,
+            `reopenResult.reworkCount=${reopenResult.reworkCount} (expected ${failedReworkCount})`,
+          );
+          // getReadyStories now includes C.
+          expect(
+            readyIds.includes("C"),
+            `expected C in ready set after reopen, got [${readyIds.join(", ")}]`,
+          );
+          // Chore commit on HEAD.
+          expect(
+            headAfter !== headBefore,
+            `expected a new commit after reopen, HEAD unchanged at ${headAfter}`,
+          );
+          expect(
+            /^chore\(sprint\): reopen C — /.test(lastMsg),
+            `expected HEAD message to match "chore(sprint): reopen C — ...", got: ${lastMsg}`,
+          );
+          expect(
+            lastMsg.includes(reopenReason),
+            `expected HEAD message to carry the reason, got: ${lastMsg}`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
+/**
+ * Mini-run for story 4: lintSprint must flag shell `cmd` fields that would
+ * break YAML.parse if dumped unquoted (e.g. unquoted apostrophe + colon
+ * inside a `--grep "x: y"` arg). The fixture sprint here writes such a cmd
+ * literally — the kind of content a sprint-planning LLM emits when it forgets
+ * to quote the value.
+ */
+async function runLintSprintYamlSafetyMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-lint-yaml-"));
+  const outcomes: AssertionOutcome[] = [];
+  try {
+    // Hand-author the sprint-status.yaml so the unquoted `"x: y"` reaches
+    // disk verbatim — that's the on-the-wire shape the regression-producing
+    // story shipped, and what lintSprint must reject.
+    const sprintPath = path.join(root, "sprint-status.yaml");
+    const sprintYaml = [
+      "schema_version: 1",
+      'sprint_id: "lint-yaml-safety-fixture"',
+      "stories:",
+      '  - id: "Y1"',
+      '    title: "shell cmd has unquoted colon inside double-quoted grep arg"',
+      "    status: ready",
+      "    depends_on: []",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: shell",
+      '          cmd: pnpm e2e --grep "x: y"',
+      "          expect_exit: 0",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+    await fs.writeFile(sprintPath, sprintYaml, "utf8");
+
+    const ctx: ToolContext = {
+      projectRoot: root,
+      sprintStatusPath: sprintPath,
+      configPath: path.join(root, ".sprint-orchestrator", "config.yaml"),
+    };
+
+    // The sprint file is intentionally malformed — YAML.parse on the raw doc
+    // would either fail or produce a nested mapping. lintSprint depends on
+    // readSprintStatus, which calls YAML.parse, so the unquoted cmd from disk
+    // either crashes the read or parses to something other than the literal
+    // string. Either way, lintSprint must NOT silently accept it.
+    //
+    // Empirically the yaml lib parses `cmd: pnpm e2e --grep "x: y"` as
+    // {cmd: 'pnpm e2e --grep "x', y: 'y"'}, which fails the zod schema. The
+    // contract for this story is that an LLM-emitted sprint with that exact
+    // wire form is rejected, with a YAML-safety lint issue pointing at the
+    // cmd's location.
+    //
+    // Two acceptable shapes for "rejected": (1) lintSprint throws while
+    // parsing, with an error message naming the offending location; or
+    // (2) lintSprint succeeds and reports a YAML-safety issue.
+    let parseError: Error | null = null;
+    let report: Awaited<ReturnType<typeof lintSprint>> | null = null;
+    try {
+      report = await lintSprint(ctx);
+    } catch (err) {
+      parseError = err as Error;
+    }
+
+    // If the readSprintStatus call swallowed the issue (parsed successfully),
+    // verify lintSprint produced the YAML-safety issue on its own. If it
+    // crashed, that's still a "reject" — but the integration AC for this
+    // story is the in-band issue path, so we additionally drive a second
+    // fixture whose cmd parses cleanly but is still YAML-ambiguous on dump.
+    const checks: Assertion[] = [
+      {
+        name: "lintSprint flags shell cmd fields with unquoted YAML-special characters",
+        run: async () => {
+          // Path B (the in-band one this story is really about): construct a
+          // sprint via the safe path (writeSprintStatus → quoted on dump) but
+          // mutate the cmd in memory to the dangerous wire form before
+          // lintSprint sees it. We do this by writing the fixture using the
+          // yaml lib's quoted-style emit so readSprintStatus succeeds, then
+          // verify lintSprint still flags it.
+          const safeSprintPath = path.join(root, "sprint-status-quoted.yaml");
+          const quotedYaml = [
+            "schema_version: 1",
+            'sprint_id: "lint-yaml-safety-quoted"',
+            "stories:",
+            '  - id: "Y1"',
+            '    title: "cmd quoted at rest, contains YAML-ambiguous chars"',
+            "    status: ready",
+            "    depends_on: []",
+            "    acceptance_criteria:",
+            "      checks:",
+            "        - type: shell",
+            // Quoted on disk so readSprintStatus is happy; the inner string
+            // still contains an unquoted-colon-in-flow-context that would
+            // break a future round-trip if someone hand-edits the yaml.
+            '          cmd: "pnpm e2e --grep \\"x: y\\""',
+            "          expect_exit: 0",
+            "    orchestrator: {}",
+            "",
+          ].join("\n");
+          await fs.writeFile(safeSprintPath, quotedYaml, "utf8");
+          const ctxB: ToolContext = {
+            projectRoot: root,
+            sprintStatusPath: safeSprintPath,
+            configPath: ctx.configPath,
+          };
+          const reportB = await lintSprint(ctxB, { sprintStatusPath: safeSprintPath });
+          const yamlIssue = reportB.issues.find(
+            (i) => i.storyId === "Y1" && /YAML-ambiguous/.test(i.message),
+          );
+          expect(!!yamlIssue, `expected a YAML-safety issue for Y1, got: ${reportB.rendered}`);
+          expect(
+            yamlIssue!.severity === "error",
+            `expected severity=error, got ${yamlIssue!.severity}`,
+          );
+          expect(
+            yamlIssue!.checkIndex === 0,
+            `expected checkIndex=0, got ${yamlIssue!.checkIndex}`,
+          );
+          expect(
+            /stories\[Y1\]\.acceptance_criteria\.checks\[0\]\.cmd/.test(yamlIssue!.message),
+            `expected message to point at stories[Y1]...checks[0].cmd, got: ${yamlIssue!.message}`,
+          );
+          // The wire-form path (sprintPath, the unquoted variant) must also
+          // be rejected. Either readSprintStatus threw, or lintSprint
+          // produced an issue. Anything else is the regression.
+          const wireRejected =
+            parseError !== null ||
+            (report !== null &&
+              report.issues.some((i) => i.storyId === "Y1" && /YAML-ambiguous/.test(i.message)));
+          expect(
+            wireRejected,
+            `unquoted-cmd sprint on disk was silently accepted (parseError=${String(
+              parseError,
+            )}, issues=${JSON.stringify(report?.issues ?? [])})`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -958,6 +1595,56 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: cross-session stray-commit guard");
     const strayOutcomes = await runCrossSessionStrayCommitMiniRun();
     outcomes.push(...strayOutcomes);
+  }
+
+  // Fifth mini-run: reviewer must escalate to rework (not failure) on the
+  // first AC miss when the dev produced new code.
+  if (
+    !filter ||
+    filter.test(
+      "reviewer escalates to rework, not failure, on first AC miss after dev produced code",
+    )
+  ) {
+    console.log("[e2e] mini-run: reviewer escalates to rework on first AC miss with dev code");
+    const reworkOutcomes = await runReviewerReworkOnFirstACMissMiniRun();
+    outcomes.push(...reworkOutcomes);
+  }
+
+  // Sixth mini-run: reviewer must return `blocked: <id>` when the MCP server
+  // rejects a state-mutating call (and the orchestrator skill must treat that
+  // as a hard stop). Guards the cross-session bookkeeping-drift regression
+  // from the triage-1 run.
+  if (
+    !filter ||
+    filter.test("reviewer returns blocked status when state machine rejects recordStorySuccess")
+  ) {
+    console.log("[e2e] mini-run: reviewer returns blocked when state machine rejects mutation");
+    const blockedOutcomes = await runReviewerBlockedOnRejectedTransitionMiniRun();
+    outcomes.push(...blockedOutcomes);
+  }
+
+  // Seventh mini-run: recordStoryReopen recovery path (story 3). Drives a
+  // story through to `failed` with rework activity, then reopens it.
+  if (
+    !filter ||
+    filter.test(
+      "recordStoryReopen transitions a failed story back to ready and clears failure fields",
+    )
+  ) {
+    console.log("[e2e] mini-run: recordStoryReopen recovery from failed");
+    const reopenOutcomes = await runRecordStoryReopenMiniRun();
+    outcomes.push(...reopenOutcomes);
+  }
+
+  // Eighth mini-run (story 4): lintSprint flags shell cmd fields whose string
+  // form is not YAML-safe (would crash a future YAML.parse round-trip).
+  if (
+    !filter ||
+    filter.test("lintSprint flags shell cmd fields with unquoted YAML-special characters")
+  ) {
+    console.log("[e2e] mini-run: lintSprint YAML-safety check on shell cmd fields");
+    const yamlSafetyOutcomes = await runLintSprintYamlSafetyMiniRun();
+    outcomes.push(...yamlSafetyOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);
