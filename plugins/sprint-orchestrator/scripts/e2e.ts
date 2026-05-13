@@ -34,6 +34,15 @@ import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
 import { validateAndWriteBacklog } from "../packages/mcp-server/src/tools/adopt-write.js";
 import { planRunSprint } from "../packages/mcp-server/src/tools/plan-run-sprint.js";
 import {
+  CLIPBOARD_AUTOCOPY_NOTE_LINE,
+  CLIPBOARD_OPT_OUT_ENV_VAR,
+  FRESH_CONTEXT_GUIDANCE_LINE,
+  buildClipboardEscape,
+  buildRunSprintFinalOutput,
+  formatGoalCommandLine,
+  isClipboardOptOut,
+} from "../packages/mcp-server/src/tools/run-sprint-output-format.js";
+import {
   countTerminalOutcomes,
   formatBlockedLine,
   formatCapStopLine,
@@ -46,6 +55,12 @@ import {
   ONE_WAY_COUPLING_STATEMENT,
   PRODUCER_EXAMPLE_FRAMING,
 } from "../packages/mcp-server/src/tools/readme-adopt-phrases.js";
+import {
+  CLIPBOARD_DEFERRED_ACKNOWLEDGEMENT,
+  CLIPBOARD_OPT_OUT_INSTRUCTION,
+  FRESH_CONTEXT_RATIONALE,
+  GOAL_FINAL_LINE_STATEMENT,
+} from "../packages/mcp-server/src/tools/readme-runsprint-phrases.js";
 import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/validate-acceptance-criteria.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
@@ -1760,6 +1775,278 @@ async function runRunSprintWrapperMiniRun(): Promise<AssertionOutcome[]> {
 }
 
 /**
+ * Mini-run for the goal-adoption sprint story 1: run-sprint emits the
+ * `/goal` command on a guaranteed single, last line of stdout, preceded
+ * by a one-line fresh-context-window guidance note. The format is locked
+ * by `run-sprint-output-format.ts` so the skill and this assertion stay
+ * in lockstep.
+ */
+async function runRunSprintGoalLastLineMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  const turnCaps = [1, 9, 15, 42];
+
+  for (const turnCap of turnCaps) {
+    const a: Assertion = {
+      name: "run-sprint emits goal on guaranteed last line with fresh-context guidance",
+      run: () => {
+        const block = buildRunSprintFinalOutput(turnCap);
+        const goalLine = formatGoalCommandLine(turnCap);
+
+        // (a) ends with the canonical /goal line for N (plus exactly one trailing newline).
+        expect(
+          block.endsWith(`${goalLine}\n`),
+          `expected block to end with the /goal line + single \\n, got: ${JSON.stringify(block)}`,
+        );
+
+        // The /goal line is the literal final non-empty line of stdout.
+        // Strip the single trailing newline, then the last line must equal goalLine.
+        const trimmed = block.endsWith("\n") ? block.slice(0, -1) : block;
+        const lines = trimmed.split("\n");
+        expect(
+          lines[lines.length - 1] === goalLine,
+          `expected last line to be the /goal command, got: ${JSON.stringify(lines[lines.length - 1])}`,
+        );
+
+        // (b) /goal line contains no embedded newlines.
+        expect(
+          !goalLine.includes("\n"),
+          `expected /goal line to have no embedded newlines, got: ${JSON.stringify(goalLine)}`,
+        );
+        expect(
+          goalLine.includes(`stop after ${turnCap} turns`),
+          `expected /goal line to contain 'stop after ${turnCap} turns', got: ${goalLine}`,
+        );
+
+        // (c) second-to-last non-empty line is the fresh-context guidance string.
+        const nonEmpty = lines.filter((l) => l.length > 0);
+        expect(
+          nonEmpty.length >= 2,
+          `expected at least two non-empty lines in final block, got: ${JSON.stringify(lines)}`,
+        );
+        expect(
+          nonEmpty[nonEmpty.length - 2] === FRESH_CONTEXT_GUIDANCE_LINE,
+          `expected second-to-last non-empty line to equal FRESH_CONTEXT_GUIDANCE_LINE, got: ${JSON.stringify(nonEmpty[nonEmpty.length - 2])}`,
+        );
+
+        // (d) nothing follows the /goal line except at most one trailing \n.
+        const afterGoal = block.slice(block.lastIndexOf(goalLine) + goalLine.length);
+        expect(
+          afterGoal === "" || afterGoal === "\n",
+          `expected nothing after /goal line except at most one \\n, got: ${JSON.stringify(afterGoal)}`,
+        );
+
+        // Sanity: the constant itself is non-empty and single-line.
+        expect(
+          FRESH_CONTEXT_GUIDANCE_LINE.length > 0 && !FRESH_CONTEXT_GUIDANCE_LINE.includes("\n"),
+          `expected FRESH_CONTEXT_GUIDANCE_LINE to be non-empty single line, got: ${JSON.stringify(FRESH_CONTEXT_GUIDANCE_LINE)}`,
+        );
+      },
+    };
+
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name} (turnCap=${turnCap})`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name} (turnCap=${turnCap})\n        ${msg}`);
+    }
+  }
+
+  // Integration sanity: planRunSprint() produces a command string equal to the
+  // /goal line that buildRunSprintFinalOutput would print for the same cap.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-runsprint-goal-lastline-"));
+  try {
+    const sprintYaml = [
+      "schema_version: 1",
+      'sprint_id: "run-sprint-goal-lastline-fixture"',
+      "stories:",
+      '  - id: "S1"',
+      '    title: "story S1"',
+      "    status: ready",
+      "    depends_on: []",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: file_exists",
+      "          path: src/S1.txt",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+    await fs.writeFile(path.join(tmp, "sprint-status.yaml"), sprintYaml, "utf8");
+
+    const plan = await planRunSprint({ cwd: tmp });
+
+    const a: Assertion = {
+      name: "run-sprint emits goal on guaranteed last line with fresh-context guidance",
+      run: () => {
+        expect(plan.kind === "ok", `expected kind=ok, got ${JSON.stringify(plan)}`);
+        if (plan.kind !== "ok") return;
+        const block = buildRunSprintFinalOutput(plan.turnCap);
+        expect(
+          block.endsWith(`${plan.command}\n`),
+          `expected final block to end with planner's command + \\n. block=${JSON.stringify(block)} command=${JSON.stringify(plan.command)}`,
+        );
+      },
+    };
+
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name} (planner integration)`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name} (planner integration)\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
+ * Mini-run for the goal-adoption sprint story 2: OSC 52 clipboard auto-copy
+ * spike + env-var opt-out safety.
+ *
+ * Outcome of the spike (recorded in `_bmad-output/planning-artifacts/follow-ups.md`):
+ * Claude Code's harness does NOT pass OSC 52 terminal escapes through to the
+ * user's terminal verbatim. The implementation branch is therefore inert,
+ * but the `SPRINT_ORCHESTRATOR_NO_CLIPBOARD` opt-out is still wired so a
+ * future harness change has a single, predictable gate to flip.
+ *
+ * These assertions verify the failure-path safety net:
+ *  (a) opt-out unset → output contains no OSC 52 sequence, no clipboard note;
+ *      /goal line is still the literal last line (Story 1 contract).
+ *  (b) opt-out set to "1" or "true" (any case) → identical output: no OSC 52
+ *      sequence, no clipboard note; perfect no-op safety.
+ *  (c) the env-var gate is observable via `isClipboardOptOut(env)` so future
+ *      callers (and the e2e itself) can prove it's wired.
+ *  (d) `buildClipboardEscape` is a pure helper that produces a well-formed
+ *      OSC 52 frame — kept alive as a tested function so the cost-to-revive
+ *      is near zero when the harness changes.
+ */
+async function runRunSprintOsc52ClipboardMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  // OSC 52 frame: ESC ] 52 ; c ; <base64> BEL. We assert ABSENCE of any
+  // substring matching this shape (with at least one base64 character) in
+  // the production output, given the spike failed and the emit branch is
+  // dead code today.
+  // eslint-disable-next-line no-control-regex
+  const OSC52_RE = /\x1b\]52;c;[A-Za-z0-9+/=]+\x07/;
+
+  const turnCaps = [1, 9, 42];
+  // Cover unset + the documented true-ish forms + a couple of false-ish
+  // forms to prove the parser is strict ("1"/"true" only, case-insensitive).
+  const envFixtures: Array<{ label: string; env: NodeJS.ProcessEnv; expectOptOut: boolean }> = [
+    { label: "unset", env: {}, expectOptOut: false },
+    { label: 'set to "1"', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "1" }, expectOptOut: true },
+    { label: 'set to "true"', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "true" }, expectOptOut: true },
+    { label: 'set to "TRUE"', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "TRUE" }, expectOptOut: true },
+    { label: 'set to "0"', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "0" }, expectOptOut: false },
+    { label: 'set to "false"', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "false" }, expectOptOut: false },
+    { label: 'set to ""', env: { [CLIPBOARD_OPT_OUT_ENV_VAR]: "" }, expectOptOut: false },
+  ];
+
+  for (const turnCap of turnCaps) {
+    for (const fixture of envFixtures) {
+      const a: Assertion = {
+        name: "run-sprint emits OSC 52 clipboard sequence for goal command with opt-out",
+        run: () => {
+          // (c) gate is observable and parses strictly.
+          expect(
+            isClipboardOptOut(fixture.env) === fixture.expectOptOut,
+            `expected isClipboardOptOut(${fixture.label})=${fixture.expectOptOut}, got ${isClipboardOptOut(fixture.env)}`,
+          );
+
+          const block = buildRunSprintFinalOutput(turnCap, fixture.env);
+          const goalLine = formatGoalCommandLine(turnCap);
+
+          // (a)/(b) NO OSC 52 sequence leaks into output, regardless of env.
+          expect(
+            !OSC52_RE.test(block),
+            `expected no OSC 52 escape in output (env=${fixture.label}), got: ${JSON.stringify(block)}`,
+          );
+
+          // (a)/(b) NO clipboard note line in output, regardless of env.
+          expect(
+            !block.includes(CLIPBOARD_AUTOCOPY_NOTE_LINE),
+            `expected clipboard auto-copy note absent (env=${fixture.label}), got: ${JSON.stringify(block)}`,
+          );
+
+          // Story 1 contract preserved: /goal line is the literal last line.
+          expect(
+            block.endsWith(`${goalLine}\n`),
+            `expected block to end with /goal line + \\n (env=${fixture.label}), got: ${JSON.stringify(block)}`,
+          );
+          const trimmed = block.endsWith("\n") ? block.slice(0, -1) : block;
+          const lines = trimmed.split("\n");
+          expect(
+            lines[lines.length - 1] === goalLine,
+            `expected last line to equal /goal command (env=${fixture.label}), got: ${JSON.stringify(lines[lines.length - 1])}`,
+          );
+
+          // Output with opt-out set must equal output with opt-out unset — perfect no-op.
+          const unsetBlock = buildRunSprintFinalOutput(turnCap, {});
+          expect(
+            block === unsetBlock,
+            `expected env=${fixture.label} output to equal unset output (no-op safety), got block=${JSON.stringify(block)} unsetBlock=${JSON.stringify(unsetBlock)}`,
+          );
+        },
+      };
+
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name} (turnCap=${turnCap}, env=${fixture.label})`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name} (turnCap=${turnCap}, env=${fixture.label})\n        ${msg}`);
+      }
+    }
+  }
+
+  // (d) buildClipboardEscape is a well-formed pure function — base64 round-trip
+  // confirms it would produce a valid OSC 52 frame the day the harness lets us
+  // ship it. This is the "kept alive, tested" guarantee.
+  const escapeFixtures = ["hello", "/goal /sprint-orchestrator:process-backlog UNTIL stop"];
+  for (const payload of escapeFixtures) {
+    const a: Assertion = {
+      name: "run-sprint emits OSC 52 clipboard sequence for goal command with opt-out",
+      run: () => {
+        const frame = buildClipboardEscape(payload);
+        // eslint-disable-next-line no-control-regex
+        const m = frame.match(/^\x1b\]52;c;([A-Za-z0-9+/=]+)\x07$/);
+        expect(m !== null, `expected OSC 52 frame shape, got: ${JSON.stringify(frame)}`);
+        if (!m) return;
+        const decoded = Buffer.from(m[1] ?? "", "base64").toString("utf8");
+        expect(
+          decoded === payload,
+          `expected base64 payload to round-trip to ${JSON.stringify(payload)}, got ${JSON.stringify(decoded)}`,
+        );
+      },
+    };
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name} (buildClipboardEscape payload=${JSON.stringify(payload)})`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(
+        `  FAIL  ${a.name} (buildClipboardEscape payload=${JSON.stringify(payload)})\n        ${msg}`,
+      );
+    }
+  }
+
+  return outcomes;
+}
+
+/**
  * Story 2 — end-of-run summary contract for /sprint-orchestrator:process-backlog.
  *
  * Three distinct, greppable final lines tell the /goal evaluator
@@ -2256,6 +2543,123 @@ async function runReadmeDocumentsAdoptAndAdaptorPatternMiniRun(): Promise<Assert
 }
 
 /**
+ * goal-adoption sprint, story 3 — README documents the new run-sprint
+ * output flow: /goal printed as the literal last line, the fresh-context
+ * rationale for pasting it elsewhere, and the deferred clipboard
+ * auto-copy (Story 2's OSC 52 spike failed; see follow-ups.md).
+ *
+ * The locked phrases live in `readme-runsprint-phrases.ts` and are the
+ * single source of truth — README and assertions cannot drift.
+ */
+async function runReadmeDocumentsRunSprintLastLineMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  const readmePath = path.resolve(HERE, "..", "README.md");
+  let readme = "";
+  try {
+    readme = await fs.readFile(readmePath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: file readable",
+      passed: false,
+      error: `could not read README at ${readmePath}: ${msg}`,
+    });
+    return outcomes;
+  }
+
+  function extractRunningSection(text: string): string | null {
+    const m = text.match(/\n##\s+Running a sprint\b[\s\S]*?(?=\n##\s+|\n?$)/);
+    return m ? m[0] : null;
+  }
+
+  const section = extractRunningSection(readme);
+
+  const checks: Assertion[] = [
+    {
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: running-a-sprint section exists",
+      run: () => {
+        expect(section !== null, "README is missing the '## Running a sprint' section");
+      },
+    },
+    {
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: fresh-context rationale present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(FRESH_CONTEXT_RATIONALE),
+          `Running-a-sprint section does not contain the fresh-context rationale verbatim. Expected: '${FRESH_CONTEXT_RATIONALE}'`,
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: /goal as final-line statement is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(GOAL_FINAL_LINE_STATEMENT),
+          `Running-a-sprint section does not describe /goal as the final line of output verbatim. Expected: '${GOAL_FINAL_LINE_STATEMENT}'`,
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: clipboard auto-copy is acknowledged as deferred with link to follow-ups.md",
+      run: () => {
+        if (!section) return;
+        // Spike-failed path (per follow-ups.md): README must NOT claim
+        // clipboard auto-copy exists. Instead, it must acknowledge the
+        // deferral verbatim and point at the follow-ups tracker.
+        expect(
+          section.includes(CLIPBOARD_DEFERRED_ACKNOWLEDGEMENT),
+          `Running-a-sprint section does not contain the deferred-clipboard acknowledgement verbatim. Expected: '${CLIPBOARD_DEFERRED_ACKNOWLEDGEMENT}'`,
+        );
+        expect(
+          section.includes("follow-ups.md"),
+          "Running-a-sprint section does not link to follow-ups.md alongside the deferred-clipboard acknowledgement",
+        );
+        // Inert export — must not be presented as a live opt-out
+        // instruction in the deferred path. Guard against accidental
+        // adoption of the auto-copy phrasing.
+        expect(
+          !section.includes(CLIPBOARD_OPT_OUT_INSTRUCTION),
+          "Running-a-sprint section presents the OSC 52 opt-out instruction as live, but Story 2's spike failed — the clipboard auto-copy path is deferred. Use CLIPBOARD_DEFERRED_ACKNOWLEDGEMENT instead.",
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: prior sprint content preserved",
+      run: () => {
+        // Guard against accidental deletion of the prior sprint's content.
+        expect(
+          /ceil\(\s*story_count\s*\*\s*turn_cap_per_story\s*\)/.test(readme),
+          "README no longer documents the cap formula 'ceil(story_count * turn_cap_per_story)' — story 3 edits must not delete prior sprint content",
+        );
+        expect(
+          readme.includes("Sprint drain confirmed:") &&
+            readme.includes("Sprint paused at hard cap:") &&
+            readme.includes("Sprint blocked:"),
+          "README no longer documents all three end-of-run summary prefixes — story 3 edits must not delete prior sprint content",
+        );
+      },
+    },
+  ];
+
+  for (const a of checks) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  return outcomes;
+}
+
+/**
  * Story 1.2 — deterministic e2e coverage for the adopt validate-and-write path.
  *
  * Exercises `validateAndWriteBacklog` directly (the LLM drafting step is an
@@ -2546,6 +2950,31 @@ async function main(): Promise<number> {
     outcomes.push(...runSprintOutcomes);
   }
 
+  // goal-adoption sprint, story 1: run-sprint locks the /goal command as the
+  // literal last line of stdout, preceded by a one-line fresh-context note.
+  if (
+    !filter ||
+    filter.test("run-sprint emits goal on guaranteed last line with fresh-context guidance")
+  ) {
+    console.log("[e2e] mini-run: run-sprint goal-on-last-line + fresh-context guidance");
+    const goalLastLineOutcomes = await runRunSprintGoalLastLineMiniRun();
+    outcomes.push(...goalLastLineOutcomes);
+  }
+
+  // goal-adoption sprint, story 2: OSC 52 clipboard auto-copy spike + env-var
+  // opt-out no-op safety. Spike failed (Claude Code does not pass escapes
+  // through verbatim — see follow-ups.md). These assertions guard the
+  // failure-path safety net: no OSC 52 leak in output, opt-out env var
+  // wired and parsed strictly, Story 1 last-line contract preserved.
+  if (
+    !filter ||
+    filter.test("run-sprint emits OSC 52 clipboard sequence for goal command with opt-out")
+  ) {
+    console.log("[e2e] mini-run: run-sprint OSC 52 clipboard auto-copy spike + opt-out safety");
+    const osc52Outcomes = await runRunSprintOsc52ClipboardMiniRun();
+    outcomes.push(...osc52Outcomes);
+  }
+
   // Eleventh mini-run (story 3): README documents /sprint-orchestrator:run-sprint
   // as the recommended entrypoint, the computed turn-cap rule, and the three
   // end-of-run summary line prefixes from story 2.
@@ -2566,6 +2995,20 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: README documents adopt and the adaptor pattern");
     const readmeAdoptOutcomes = await runReadmeDocumentsAdoptAndAdaptorPatternMiniRun();
     outcomes.push(...readmeAdoptOutcomes);
+  }
+
+  // goal-adoption sprint, story 3: README documents the new run-sprint output
+  // flow — /goal as the literal last line, fresh-context rationale, and the
+  // deferred clipboard auto-copy (Story 2 spike failed; see follow-ups.md).
+  if (
+    !filter ||
+    filter.test("README documents run-sprint last-line fresh-context and clipboard flow")
+  ) {
+    console.log(
+      "[e2e] mini-run: README documents run-sprint last-line + fresh-context + clipboard",
+    );
+    const readmeRunSprintOutputOutcomes = await runReadmeDocumentsRunSprintLastLineMiniRun();
+    outcomes.push(...readmeRunSprintOutputOutcomes);
   }
 
   // Tenth mini-run (story 2): process-backlog end-of-run summary contract.
