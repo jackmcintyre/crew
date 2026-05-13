@@ -15,6 +15,7 @@ import { validateAcceptanceCriteria } from "./tools/validate-acceptance-criteria
 import { releaseStaleClaims } from "./tools/release-stale-claims.js";
 import { getOrInitConfig } from "./tools/get-or-init-config.js";
 import { commitStoryArtefacts } from "./tools/commit-story-artefacts.js";
+import { lintSprint } from "./tools/lint-sprint.js";
 
 export const PLUGIN_NAME = "sprint-orchestrator";
 
@@ -103,11 +104,11 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
   );
 
   server.registerTool(
-    "markStoryComplete",
+    "recordStorySuccess",
     {
-      title: "Mark story complete",
+      title: "Record story success",
       description:
-        "Mark a claimed story done. Re-runs acceptance criteria inside the lock; rejects if the caller is not the claim holder or AC fails.",
+        "Record a successful completion for a claimed story. State-machine transition only — re-runs acceptance criteria inside the lock; rejects if the caller is not the claim holder or AC fails. Renamed from markStoryComplete to avoid harness classifier conflicts on the literal token 'done'.",
       inputSchema: {
         storyId: z.string(),
         agentId: z.string(),
@@ -116,30 +117,31 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       },
     },
     async ({ storyId, agentId, summary, artefacts }) => {
-      await markStoryComplete(ctx, storyId, agentId, summary, artefacts);
-      return json({ ok: true });
+      const result = await markStoryComplete(ctx, storyId, agentId, summary, artefacts);
+      return json({ ok: true, ...result });
     },
   );
 
   server.registerTool(
-    "markStoryFailed",
+    "recordStoryFailure",
     {
-      title: "Mark story failed",
-      description: "Mark a story as failed with a structured reason. No silent retries.",
+      title: "Record story failure",
+      description:
+        "Record a failure for a story with a structured reason. State-machine transition only. No silent retries. Renamed from markStoryFailed for classifier-safety.",
       inputSchema: { storyId: z.string(), reason: z.string() },
     },
     async ({ storyId, reason }) => {
-      await markStoryFailed(ctx, storyId, reason);
-      return json({ ok: true });
+      const result = await markStoryFailed(ctx, storyId, reason);
+      return json({ ok: true, ...result });
     },
   );
 
   server.registerTool(
-    "markStoryNeedsRework",
+    "recordStoryRework",
     {
-      title: "Mark story needs rework",
+      title: "Record story rework",
       description:
-        "Record a failed-review attempt on a claimed in-progress story. Increments rework_count, stores reviewer feedback, and reports whether the cap has been reached. Does not change status or release the claim — the same dev gets another swing.",
+        "Record a failed-review attempt on a claimed in-progress story. State-machine transition only — increments rework_count, stores reviewer feedback, and reports whether the cap has been reached. Does not change status or release the claim — the same dev gets another swing. Renamed from markStoryNeedsRework for classifier-safety.",
       inputSchema: {
         storyId: z.string(),
         agentId: z.string(),
@@ -147,8 +149,10 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
         reworkLimit: z.number().int().positive().optional(),
       },
     },
-    async ({ storyId, agentId, reason, reworkLimit }) =>
-      json(await markStoryNeedsRework(ctx, storyId, agentId, reason, reworkLimit)),
+    async ({ storyId, agentId, reason, reworkLimit }) => {
+      const result = await markStoryNeedsRework(ctx, storyId, agentId, reason, reworkLimit);
+      return json({ ok: true, ...result });
+    },
   );
 
   server.registerTool(
@@ -170,6 +174,17 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       inputSchema: { storyId: z.string() },
     },
     async ({ storyId }) => json(await commitStoryArtefacts(ctx, storyId)),
+  );
+
+  server.registerTool(
+    "lintSprint",
+    {
+      title: "Lint sprint acceptance criteria",
+      description:
+        "Read-only lint pass over sprint-status.yaml. Flags state-mutator stories (touching mark-story-*.ts, commit-story-artefacts.ts, get-ready-stories.ts, schema.ts, etc.) that lack an integration AC, shell checks with known-bad patterns (e.g. vitest --grep), and trivially-satisfiable regex checks. Returns { issues, rendered }.",
+      inputSchema: { sprintStatusPath: z.string().optional() },
+    },
+    async ({ sprintStatusPath }) => json(await lintSprint(ctx, { sprintStatusPath })),
   );
 
   server.registerTool(

@@ -4,14 +4,24 @@ import {
   ClaimConflictError,
   InvalidStateTransitionError,
 } from "../lib/errors.js";
+import { commitSprintState } from "../lib/commit-state.js";
 import { runChecks } from "../validators/acceptance.js";
 import { type ToolContext } from "./context.js";
+
+export interface MarkStoryCompleteResult {
+  status: "done";
+  completed_at: string;
+}
 
 /**
  * Mark a story as `done`. Validates that:
  *   - the caller (`agentId`) is the current claim holder
  *   - the story is currently `in_progress`
  *   - acceptance criteria pass (re-run inside the lock)
+ *
+ * Returns the new status + completion timestamp so MCP callers can surface
+ * them in their replies (the reviewer subagent uses this to enrich its
+ * one-line return).
  *
  * @throws ClaimConflictError, InvalidStateTransitionError, AcceptanceFailedError
  */
@@ -21,7 +31,8 @@ export async function markStoryComplete(
   agentId: string,
   summary: string,
   artefacts: string[] = [],
-): Promise<void> {
+): Promise<MarkStoryCompleteResult> {
+  let completed_at = "";
   await updateSprintStatus(ctx.sprintStatusPath, async (state) => {
     const story = findStory(state, storyId);
     if (story.status !== "in_progress") {
@@ -34,19 +45,31 @@ export async function markStoryComplete(
 
     const result = await runChecks(story.acceptance_criteria.checks, { cwd: ctx.projectRoot });
     if (!result.passed) {
-      throw new AcceptanceFailedError(storyId, result.results.filter((r) => !r.passed));
+      throw new AcceptanceFailedError(
+        storyId,
+        result.results.filter((r) => !r.passed),
+      );
     }
 
+    completed_at = new Date().toISOString();
     const updated = {
       ...story,
       status: "done" as const,
       orchestrator: {
         ...story.orchestrator,
-        completed_at: new Date().toISOString(),
+        completed_at,
         summary,
         ...(artefacts.length > 0 ? { artefacts } : {}),
       },
     };
     return { next: replaceStory(state, updated), result: undefined };
   });
+
+  // Persist the state mutation as its own `git commit` (touching ONLY
+  // sprint-status.yaml) so reverting a code commit does not roll back the
+  // orchestrator state machine. Idempotent: no-op when sprint-status.yaml is
+  // already clean (e.g. updateSprintStatus produced no textual diff).
+  await commitSprintState(ctx.projectRoot, `chore(sprint): persist ${storyId} completion`);
+
+  return { status: "done", completed_at };
 }

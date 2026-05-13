@@ -33,9 +33,9 @@ export const TEST_CMD_HINT = /\b(pnpm|npm|yarn)\s+(-\w+\s+)*(test|vitest|jest)\b
 export const STORY_START_TOOLS = new Set(["claimStory"]);
 /** MCP tool-name suffixes that signal a story is leaving the active set (story_end). */
 export const STORY_END_TOOLS = new Set([
-  "markStoryComplete",
-  "markStoryFailed",
-  "markStoryNeedsRework",
+  "recordStorySuccess",
+  "recordStoryFailure",
+  "recordStoryRework",
 ]);
 
 /**
@@ -88,9 +88,9 @@ export async function handlePostToolUse(input: PostToolUseInput | null): Promise
       });
     } else if (STORY_END_TOOLS.has(suffix) && storyId) {
       const outcome =
-        suffix === "markStoryComplete"
+        suffix === "recordStorySuccess"
           ? "complete"
-          : suffix === "markStoryFailed"
+          : suffix === "recordStoryFailure"
             ? "failed"
             : "needs_rework";
       await appendRunLog(projectRoot, {

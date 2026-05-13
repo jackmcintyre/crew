@@ -7,9 +7,44 @@ export interface CommitResult {
 }
 
 /**
+ * Pathspec exclusions applied to every `git add` / `git status` invocation
+ * inside `commitStoryArtefacts`. Built-in defaults so the tool stays clean
+ * even in repos whose `.gitignore` is missing or incomplete:
+ *
+ * - `sprint-status.yaml` — orchestrator state, committed separately by
+ *   markStoryComplete so reverting a code commit does not roll back the
+ *   state machine.
+ * - `.sprint-orchestrator/` — runtime artefacts (run.log, locks, etc.)
+ *   produced by hooks; never code.
+ * - `.claude/` — Claude Code's local harness state (settings.local.json,
+ *   scheduled_tasks.lock, …).
+ * - `**\/.DS_Store` — macOS finder noise at any depth.
+ * - `node_modules/` — package install output; should always be gitignored
+ *   but real-world repos sometimes forget.
+ *
+ * NOTE: this is the "option A" minimal-default approach. A future story may
+ * switch to an explicit artefact allowlist driven off
+ * `story.orchestrator.artefacts`. Until then this tool relies on the user's
+ * own `.gitignore` for any further cleanliness beyond the defaults above.
+ */
+const PATHSPEC_EXCLUSIONS = [
+  ":!sprint-status.yaml",
+  ":(exclude,glob)**/.sprint-orchestrator",
+  ":(exclude,glob)**/.sprint-orchestrator/**",
+  ":(exclude,glob)**/.claude",
+  ":(exclude,glob)**/.claude/**",
+  ":(exclude,glob)**/.DS_Store",
+  ":(exclude,glob)**/node_modules",
+  ":(exclude,glob)**/node_modules/**",
+  ":(exclude,glob)**/dist",
+  ":(exclude,glob)**/dist/**",
+];
+
+/**
  * Stage and commit the working tree as the result of completing one story.
  *
- * - Runs `git add -A` and `git commit -m "feat(<storyId>): <title>"` with a
+ * - Runs `git add -A` (with the {@link PATHSPEC_EXCLUSIONS} applied) and
+ *   `git commit -m "feat(<storyId>): <title>"` with a
  *   `Co-authored-by: Claude` trailer.
  * - Returns `{ sha: null }` when there are no changes to commit (legitimate
  *   for stories that only changed metadata) — callers should treat that as
@@ -24,15 +59,13 @@ export async function commitStoryArtefacts(
   const state = await readSprintStatus(ctx.sprintStatusPath);
   const story = findStory(state, storyId);
 
-  // Stage everything EXCEPT sprint-status.yaml — orchestrator state is
-  // committed separately by markStoryComplete so reverting a code commit
-  // does not roll back the state machine.
-  await run(ctx.projectRoot, "git", ["add", "-A", "--", ":!sprint-status.yaml"]);
+  await run(ctx.projectRoot, "git", ["add", "-A", "--", ".", ...PATHSPEC_EXCLUSIONS]);
   const status = await capture(ctx.projectRoot, "git", [
     "status",
     "--porcelain",
     "--",
-    ":!sprint-status.yaml",
+    ".",
+    ...PATHSPEC_EXCLUSIONS,
   ]);
   if (!status.stdout.trim()) return { sha: null };
 

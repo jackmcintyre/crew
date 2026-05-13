@@ -108,11 +108,11 @@ describe("post-tool-use", () => {
     expect(entry.agent_id).toBe("dev-1");
   });
 
-  it("handlePostToolUse logs story_end for markStoryComplete", async () => {
+  it("handlePostToolUse logs story_end for recordStorySuccess", async () => {
     const root = await makeRoot();
     await handlePostToolUse({
       cwd: root,
-      tool_name: "mcp__sprint-orchestrator__markStoryComplete",
+      tool_name: "mcp__sprint-orchestrator__recordStorySuccess",
       tool_input: { storyId: "2.2", summary: "done" },
     });
     const log = await fs.readFile(path.join(root, ".sprint-orchestrator", "run.log"), "utf8");
@@ -122,16 +122,16 @@ describe("post-tool-use", () => {
     expect(entry.outcome).toBe("complete");
   });
 
-  it("handlePostToolUse logs story_end for markStoryFailed and markStoryNeedsRework", async () => {
+  it("handlePostToolUse logs story_end for recordStoryFailure and recordStoryRework", async () => {
     const root = await makeRoot();
     await handlePostToolUse({
       cwd: root,
-      tool_name: "mcp__sprint-orchestrator__markStoryFailed",
+      tool_name: "mcp__sprint-orchestrator__recordStoryFailure",
       tool_input: { storyId: "2.2", reason: "blocked" },
     });
     await handlePostToolUse({
       cwd: root,
-      tool_name: "mcp__sprint-orchestrator__markStoryNeedsRework",
+      tool_name: "mcp__sprint-orchestrator__recordStoryRework",
       tool_input: { storyId: "2.2", feedback: "fix tests" },
     });
     const log = await fs.readFile(path.join(root, ".sprint-orchestrator", "run.log"), "utf8");
