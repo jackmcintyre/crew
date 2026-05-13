@@ -12,6 +12,8 @@ import { markStoryComplete } from "../src/tools/mark-story-complete.js";
 import { markStoryFailed } from "../src/tools/mark-story-failed.js";
 import { validateAcceptanceCriteria } from "../src/tools/validate-acceptance-criteria.js";
 import { releaseStaleClaims } from "../src/tools/release-stale-claims.js";
+import { prepareStoryBranch } from "../src/tools/prepare-story-branch.js";
+import { spawnSync } from "node:child_process";
 import {
   AcceptanceFailedError,
   ClaimConflictError,
@@ -467,5 +469,266 @@ describe("getSprintReport", () => {
     const ready = report.stories.find((s) => s.id === "R1");
     expect(ready?.summary).toBeUndefined();
     expect(ready?.lastFailure).toBeUndefined();
+  });
+});
+
+function git(cwd: string, args: string[]): { stdout: string; stderr: string; status: number } {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", status: r.status ?? 1 };
+}
+
+describe("prepareStoryBranch / default_base schema check", () => {
+  it("refuses with reason=default_base-stale when main lacks schema_version", async () => {
+    const initial = {
+      sprint_id: "stale-base-unit",
+      schema_version: 1,
+      stories: [
+        {
+          id: "A",
+          title: "Some story",
+          status: "ready",
+          depends_on: [],
+          acceptance_criteria: { checks: [] },
+          orchestrator: {},
+        },
+      ],
+    };
+    const { ctx } = await setup(initial as unknown as typeof baseSprint);
+    // Bootstrap a real git repo at projectRoot, commit current state on main,
+    // strip schema_version on main, branch off to a feature branch and put
+    // schema_version back. This mirrors the e2e fixture but stays inside the
+    // unit-test temp dir.
+    const root = ctx.projectRoot;
+    git(root, ["init", "-q", "-b", "main"]);
+    git(root, ["config", "user.email", "unit@example.com"]);
+    git(root, ["config", "user.name", "Unit Test"]);
+    git(root, ["config", "commit.gpgsign", "false"]);
+    git(root, ["add", "sprint-status.yaml"]);
+    const c1 = git(root, ["commit", "-q", "-m", "initial"]);
+    expect(c1.status).toBe(0);
+
+    // Drop schema_version on main.
+    const fsMod = await import("node:fs");
+    const raw = fsMod.readFileSync(ctx.sprintStatusPath, "utf8");
+    fsMod.writeFileSync(ctx.sprintStatusPath, raw.replace(/^schema_version:.*\n/m, ""), "utf8");
+    git(root, ["add", "sprint-status.yaml"]);
+    git(root, ["commit", "-q", "-m", "main: drop schema_version"]);
+
+    // Feature branch with schema_version restored.
+    git(root, ["checkout", "-q", "-b", "feat/x"]);
+    fsMod.writeFileSync(ctx.sprintStatusPath, raw, "utf8");
+    git(root, ["add", "sprint-status.yaml"]);
+    git(root, ["commit", "-q", "-m", "feat: schema_version"]);
+
+    // Configure pr_per_story=true, default_base=main.
+    fsMod.mkdirSync(path.dirname(ctx.configPath), { recursive: true });
+    fsMod.writeFileSync(
+      ctx.configPath,
+      [
+        "sprintStatusPath: sprint-status.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const headBefore = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    const branchBefore = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
+
+    const result = await prepareStoryBranch(ctx, "A", "agent-unit");
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toBe("default_base-stale");
+    expect(result.branch).toBeNull();
+    expect(result.message).toMatch(/default_base/);
+
+    const headAfter = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    const branchAfter = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
+    expect(headAfter).toBe(headBefore);
+    expect(branchAfter).toBe(branchBefore);
+  });
+
+  it("does not run the schema check when default_base == current HEAD", async () => {
+    const initial = {
+      sprint_id: "head-equals-base",
+      schema_version: 1,
+      stories: [
+        {
+          id: "A",
+          title: "Some story",
+          status: "ready",
+          depends_on: [],
+          acceptance_criteria: { checks: [] },
+          orchestrator: {},
+        },
+      ],
+    };
+    const { ctx } = await setup(initial as unknown as typeof baseSprint);
+    const root = ctx.projectRoot;
+    git(root, ["init", "-q", "-b", "main"]);
+    git(root, ["config", "user.email", "unit@example.com"]);
+    git(root, ["config", "user.name", "Unit Test"]);
+    git(root, ["config", "commit.gpgsign", "false"]);
+    git(root, ["add", "sprint-status.yaml"]);
+    git(root, ["commit", "-q", "-m", "initial"]);
+
+    const fsMod = await import("node:fs");
+    fsMod.mkdirSync(path.dirname(ctx.configPath), { recursive: true });
+    fsMod.writeFileSync(
+      ctx.configPath,
+      [
+        "sprintStatusPath: sprint-status.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    // HEAD is main here, so the stale-base check must short-circuit and a
+    // per-story branch should be created.
+    const result = await prepareStoryBranch(ctx, "A", "agent-unit");
+    expect(result.skipped).toBe(false);
+    expect(result.branch).toBe("a-some-story");
+    expect(result.reason).toBeUndefined();
+  });
+
+  it("roots from the last completed dependency's branch tip when chainable", async () => {
+    const initial = {
+      sprint_id: "chain-base",
+      schema_version: 1,
+      stories: [
+        {
+          id: "A",
+          title: "First done story",
+          status: "done",
+          depends_on: [],
+          acceptance_criteria: { checks: [] },
+          orchestrator: {
+            branch: "a-first-done-story",
+            completed_at: "2026-05-12T08:00:00Z",
+          },
+        },
+        {
+          id: "B",
+          title: "Depends on A",
+          status: "ready",
+          depends_on: ["A"],
+          acceptance_criteria: { checks: [] },
+          orchestrator: {},
+        },
+      ],
+    };
+    const { ctx } = await setup(initial as unknown as typeof baseSprint);
+    const root = ctx.projectRoot;
+    git(root, ["init", "-q", "-b", "main"]);
+    git(root, ["config", "user.email", "unit@example.com"]);
+    git(root, ["config", "user.name", "Unit Test"]);
+    git(root, ["config", "commit.gpgsign", "false"]);
+    git(root, ["add", "sprint-status.yaml"]);
+    git(root, ["commit", "-q", "-m", "initial"]);
+
+    // Create A's branch with an extra commit so we can verify B is rooted
+    // from A's tip (which is ahead of main).
+    git(root, ["checkout", "-q", "-b", "a-first-done-story"]);
+    const fsMod = await import("node:fs");
+    fsMod.writeFileSync(path.join(root, "from-a.txt"), "a\n", "utf8");
+    git(root, ["add", "from-a.txt"]);
+    git(root, ["commit", "-q", "-m", "A: marker commit"]);
+    const aTip = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    // Go back to main so prepareStoryBranch has to actively choose A's tip.
+    git(root, ["checkout", "-q", "main"]);
+
+    fsMod.mkdirSync(path.dirname(ctx.configPath), { recursive: true });
+    fsMod.writeFileSync(
+      ctx.configPath,
+      [
+        "sprintStatusPath: sprint-status.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await prepareStoryBranch(ctx, "B", "agent-unit");
+    expect(result.skipped).toBe(false);
+    expect(result.branch).toBe("b-depends-on-a");
+
+    // B's HEAD must equal A's tip (we haven't committed anything on B yet).
+    const bHead = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    expect(bHead).toBe(aTip);
+
+    // State must record the chosen base.
+    const stateRaw = fsMod.readFileSync(ctx.sprintStatusPath, "utf8");
+    expect(stateRaw).toMatch(/base_branch:\s*a-first-done-story/);
+    expect(stateRaw).not.toMatch(/base_branch_fallback_reason/);
+  });
+
+  it("falls back to default_base and records reason when a dep lacks orchestrator.branch", async () => {
+    const initial = {
+      sprint_id: "chain-fallback",
+      schema_version: 1,
+      stories: [
+        {
+          id: "A",
+          title: "Done without branch",
+          status: "done",
+          depends_on: [],
+          acceptance_criteria: { checks: [] },
+          // No orchestrator.branch — simulates A having run with pr_per_story=false.
+          orchestrator: { completed_at: "2026-05-12T08:00:00Z" },
+        },
+        {
+          id: "B",
+          title: "Depends on A",
+          status: "ready",
+          depends_on: ["A"],
+          acceptance_criteria: { checks: [] },
+          orchestrator: {},
+        },
+      ],
+    };
+    const { ctx } = await setup(initial as unknown as typeof baseSprint);
+    const root = ctx.projectRoot;
+    git(root, ["init", "-q", "-b", "main"]);
+    git(root, ["config", "user.email", "unit@example.com"]);
+    git(root, ["config", "user.name", "Unit Test"]);
+    git(root, ["config", "commit.gpgsign", "false"]);
+    git(root, ["add", "sprint-status.yaml"]);
+    git(root, ["commit", "-q", "-m", "initial"]);
+    const mainTip = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+
+    const fsMod = await import("node:fs");
+    fsMod.mkdirSync(path.dirname(ctx.configPath), { recursive: true });
+    fsMod.writeFileSync(
+      ctx.configPath,
+      [
+        "sprintStatusPath: sprint-status.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await prepareStoryBranch(ctx, "B", "agent-unit");
+    expect(result.skipped).toBe(false);
+    expect(result.branch).toBe("b-depends-on-a");
+    // Branch should be rooted from main (the only commit so far).
+    const bHead = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    expect(bHead).toBe(mainTip);
+    // State should record the fallback reason.
+    const stateRaw = fsMod.readFileSync(ctx.sprintStatusPath, "utf8");
+    expect(stateRaw).toMatch(/base_branch:\s*main/);
+    expect(stateRaw).toMatch(/base_branch_fallback_reason:.*no orchestrator\.branch/);
   });
 });

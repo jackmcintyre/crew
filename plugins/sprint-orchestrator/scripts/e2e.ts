@@ -30,6 +30,7 @@ import { prepareStoryBranch } from "../packages/mcp-server/src/tools/prepare-sto
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
 import { appendRunLog } from "../packages/hooks/src/post-tool-use.js";
+import { handleStop } from "../packages/hooks/src/stop.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_ROOT = path.resolve(HERE, "..", "__fixtures__", "tiny-sprint");
@@ -462,6 +463,64 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
       },
     },
     {
+      name: "branch-per-story: dependent story's branch is rooted at the dependency's branch tip",
+      run: () => {
+        // Story B depends on A. With pr_per_story=true and A already done on
+        // its own per-story branch, prepareStoryBranch must root B from A's
+        // branch tip (not from main), so the dev subagent on B can see A's
+        // commits via plain `git log`.
+        expect(!!bDriven, "story B was not driven; auto-promotion path likely broke");
+        const aBranch = "a-happy-path-story";
+        const bBranch = "b-backlog-story-that-should-auto-promote-w";
+        expect(
+          bDriven!.preparedBranch === bBranch,
+          `expected preparedBranch=${bBranch}, got ${String(bDriven!.preparedBranch)}`,
+        );
+        // A's commits must be reachable from B's branch (i.e. B was rooted
+        // from A's tip, not from main).
+        const aShas = git(ctx.projectRoot, ["rev-list", aBranch])
+          .stdout.trim()
+          .split("\n")
+          .filter(Boolean);
+        const bShas = git(ctx.projectRoot, ["rev-list", bBranch])
+          .stdout.trim()
+          .split("\n")
+          .filter(Boolean);
+        for (const sha of aShas) {
+          expect(
+            bShas.includes(sha),
+            `A's commit ${sha} not reachable from ${bBranch} — B is not rooted at A's tip`,
+          );
+        }
+        // B's first new commit's parent must be reachable from A's tip.
+        const bNewShas = bDriven!.shasAfter.filter((s) => !bDriven!.shasBefore.includes(s));
+        expect(bNewShas.length > 0, "no new commits found for story B");
+        // The oldest of B's new commits is at the end of bNewShas (rev-list
+        // is newest-first). Walk to the first commit on B that is NOT an
+        // A-reachable commit; its parent must be A's tip.
+        const oldestBNew = bNewShas[bNewShas.length - 1]!;
+        const parentSha = git(ctx.projectRoot, ["rev-parse", `${oldestBNew}^`]).stdout.trim();
+        expect(
+          aShas.includes(parentSha),
+          `B's first commit ${oldestBNew} has parent ${parentSha} which is not reachable from ${aBranch}`,
+        );
+        // State should record the chosen base.
+        expect(
+          (storyB!.orchestrator as Record<string, unknown>).base_branch === aBranch,
+          `story B orchestrator.base_branch=${String(
+            (storyB!.orchestrator as Record<string, unknown>).base_branch,
+          )} (expected ${aBranch})`,
+        );
+        expect(
+          (storyB!.orchestrator as Record<string, unknown>).base_branch_fallback_reason ===
+            undefined,
+          `unexpected base_branch_fallback_reason=${String(
+            (storyB!.orchestrator as Record<string, unknown>).base_branch_fallback_reason,
+          )}`,
+        );
+      },
+    },
+    {
       name: "branch-per-story: story A's commits land on its own branch when flag is on",
       run: () => {
         // The primary run writes pr_per_story: true into config above, so
@@ -611,6 +670,223 @@ async function runOptOutMiniRun(): Promise<AssertionOutcome[]> {
   return outcomes;
 }
 
+/**
+ * Mini-run: spin up a temp repo whose `main` branch's sprint-status.yaml is
+ * missing the current `schema_version`, advance the invocation branch with a
+ * schema-shaped change, and drive one story with `pr_per_story=true`. Asserts
+ * that `prepareStoryBranch` refuses with `reason="default_base-stale"` and
+ * does NOT move HEAD off the invocation branch. Guards against the
+ * 200+-line-chore-commit regression captured on slice 1.1.
+ */
+async function runStaleBaseMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+
+  // The initial commit (setupTempRepo) seeded main with the fixture, which
+  // ships `schema_version: 1`. Rewrite main's sprint-status to drop the
+  // schema_version field so it looks "stale" to a server expecting v1, then
+  // commit that on main directly.
+  const sprintPath = path.join(root, "sprint-status.yaml");
+  const original = await fs.readFile(sprintPath, "utf8");
+  const stale = original.replace(/^schema_version:.*\n/m, "");
+  await fs.writeFile(sprintPath, stale, "utf8");
+  const stageStale = git(root, ["add", "sprint-status.yaml"]);
+  if (stageStale.status !== 0) throw new Error(`stage stale failed: ${stageStale.stderr}`);
+  const commitStale = git(root, [
+    "commit",
+    "-q",
+    "-m",
+    "main: drop schema_version (simulate stale)",
+  ]);
+  if (commitStale.status !== 0) throw new Error(`commit stale failed: ${commitStale.stderr}`);
+
+  // Now create a feature branch and re-add schema_version on it — this is
+  // the "invocation branch advances with a schema-shaped change" the story
+  // calls out. The fixture's other branches/files are untouched.
+  const invocation = "feat/schema-bump";
+  const checkoutFeat = git(root, ["checkout", "-q", "-b", invocation]);
+  if (checkoutFeat.status !== 0) throw new Error(`checkout feat failed: ${checkoutFeat.stderr}`);
+  await fs.writeFile(sprintPath, original, "utf8");
+  const stageFeat = git(root, ["add", "sprint-status.yaml"]);
+  if (stageFeat.status !== 0) throw new Error(`stage feat failed: ${stageFeat.stderr}`);
+  const commitFeat = git(root, ["commit", "-q", "-m", "feat: bump schema_version to 1"]);
+  if (commitFeat.status !== 0) throw new Error(`commit feat failed: ${commitFeat.stderr}`);
+
+  // Configure pr_per_story=true with default_base=main so the new check
+  // fires.
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: true",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const branchBefore = currentBranch(root);
+  const headBefore = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+
+  // Drive: claim then call prepareStoryBranch. We deliberately do NOT call
+  // the full happy-path driver — once prepareStoryBranch refuses, the skill
+  // is meant to stop, so faking a commit on top would defeat the assertion.
+  await logStoryStart(root, "A", "agent-stale");
+  const claim = await claimStory(ctx, "A", "agent-stale");
+
+  const outcomes: AssertionOutcome[] = [];
+  try {
+    if (!claim.claimed) throw new Error(`could not claim A: holder=${claim.holder ?? "?"}`);
+    const prep = await prepareStoryBranch(ctx, "A", "agent-stale");
+    const branchAfter = currentBranch(root);
+    const headAfter = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+
+    const checks: Assertion[] = [
+      {
+        name: "refuses when default_base lacks orchestrator schema: prep.skipped=true with reason=default_base-stale",
+        run: () => {
+          expect(prep.skipped === true, `expected prep.skipped=true, got ${String(prep.skipped)}`);
+          expect(
+            prep.reason === "default_base-stale",
+            `expected reason=default_base-stale, got ${String(prep.reason)}`,
+          );
+          expect(prep.branch === null, `expected branch=null, got ${String(prep.branch)}`);
+          expect(
+            typeof prep.message === "string" && prep.message.includes("default_base"),
+            `expected message to mention default_base, got ${String(prep.message)}`,
+          );
+        },
+      },
+      {
+        name: "refuses when default_base lacks orchestrator schema: HEAD does not move off the invocation branch",
+        run: () => {
+          expect(
+            branchAfter === branchBefore,
+            `expected HEAD on ${branchBefore}, got ${branchAfter}`,
+          );
+          expect(
+            headAfter === headBefore,
+            `expected HEAD sha unchanged (${headBefore}), got ${headAfter}`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
+/**
+ * Mini-run for story 3: simulate a "fresh session" on a repo whose
+ * sprint-status.yaml carries leftover dirt from a prior, crashed session —
+ * i.e. NO orchestrator MCP tool has been called in this session. Then fire
+ * the Stop hook (which is what Claude Code invokes at session end) and
+ * assert that no new commits land.
+ *
+ * BEFORE the story-3 fix, the stop hook unconditionally ran
+ * `commitMetadataOnly`, producing a `chore(sprint): persist story metadata`
+ * commit attributable to a session that did nothing. That is the
+ * cross-session leak users reported (a stray `chore(sprint): persist 1.1
+ * failure`-style commit appearing on the next session for a branch).
+ *
+ * AFTER the fix, the tidy step only runs when handleClaimed actually
+ * transitioned a story (completed or failed) in this session; a noop session
+ * leaves the dirt alone.
+ */
+async function runCrossSessionStrayCommitMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+  const sprintPath = ctx.sprintStatusPath;
+
+  // Capture HEAD before we do anything.
+  const headBefore = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+  const commitsBefore = git(root, ["rev-list", "HEAD"]).stdout.trim().split("\n").filter(Boolean);
+
+  // Simulate residue from a prior session: append a harmless-but-real edit to
+  // sprint-status.yaml without going through any orchestrator tool. Use an
+  // appended YAML comment so the file still parses (handleStop reads it).
+  const original = await fs.readFile(sprintPath, "utf8");
+  await fs.writeFile(sprintPath, `${original}# stray edit from a prior session\n`, "utf8");
+
+  // CRUCIAL: do NOT call any MCP orchestrator tool in this "session". Just
+  // fire the Stop hook directly, as the Claude Code harness would when the
+  // user closes a session that never touched the orchestrator.
+  let stopResult: Awaited<ReturnType<typeof handleStop>> | null = null;
+  const outcomes: AssertionOutcome[] = [];
+  try {
+    stopResult = await handleStop({ cwd: root });
+
+    const headAfter = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+    const commitsAfter = git(root, ["rev-list", "HEAD"]).stdout.trim().split("\n").filter(Boolean);
+    const newCommits = commitsAfter.filter((s) => !commitsBefore.includes(s));
+    const newMessages = newCommits.map((sha) =>
+      git(root, ["log", "-1", "--format=%s", sha]).stdout.trim(),
+    );
+
+    const checks: Assertion[] = [
+      {
+        name: "no orchestrator commits appear without a tool call in the current session",
+        run: () => {
+          // No tool called this session => no commits should be created by
+          // the stop hook, even if sprint-status.yaml was dirty on entry.
+          expect(
+            newCommits.length === 0,
+            `expected 0 new commits when no orchestrator tool was called this session, got ${
+              newCommits.length
+            } (messages: ${JSON.stringify(newMessages)})`,
+          );
+          expect(
+            headAfter === headBefore,
+            `expected HEAD unchanged (${headBefore}), got ${headAfter}`,
+          );
+          expect(
+            stopResult!.action === "noop",
+            `expected action=noop when nothing in_progress, got ${String(stopResult!.action)}`,
+          );
+          expect(
+            stopResult!.tidyCommitSha == null,
+            `expected tidyCommitSha=null on a no-activity session, got ${String(
+              stopResult!.tidyCommitSha,
+            )}`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -634,11 +910,10 @@ async function main(): Promise<number> {
   }
 
   const filtered = filter ? assertions.filter((a) => filter.test(a.name)) : assertions;
-  if (filter && filtered.length === 0) {
-    console.error(`[e2e] --grep ${args.grep} matched 0 assertions`);
-    if (!args.keep) await fs.rm(root, { recursive: true, force: true });
-    return 1;
-  }
+  // Note: we do NOT bail out here when --grep matches 0 primary assertions —
+  // the mini-runs below (opt-out, default_base-stale) run their own
+  // assertions and may match the same --grep. The final tally below
+  // surfaces a hard failure if 0 assertions total ran.
 
   for (const a of filtered) {
     try {
@@ -668,11 +943,32 @@ async function main(): Promise<number> {
     outcomes.push(...optOutOutcomes);
   }
 
+  // Third mini-run: exercise the stale-default_base refusal path.
+  if (!filter || filter.test("refuses when default_base lacks orchestrator schema")) {
+    console.log("[e2e] mini-run: default_base-stale refusal");
+    const staleOutcomes = await runStaleBaseMiniRun();
+    outcomes.push(...staleOutcomes);
+  }
+
+  // Fourth mini-run: exercise the cross-session stray-commit guard (story 3).
+  if (
+    !filter ||
+    filter.test("no orchestrator commits appear without a tool call in the current session")
+  ) {
+    console.log("[e2e] mini-run: cross-session stray-commit guard");
+    const strayOutcomes = await runCrossSessionStrayCommitMiniRun();
+    outcomes.push(...strayOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
       (filter ? ` (grep=${args.grep})` : ""),
   );
+  if (outcomes.length === 0) {
+    console.error(`[e2e] --grep ${args.grep} matched 0 assertions across primary + mini-runs`);
+    return 1;
+  }
   return failed.length === 0 ? 0 : 1;
 }
 
