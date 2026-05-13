@@ -40,3 +40,16 @@ Repeat until either `getReadyStories` returns `[]` or you have completed **5 sto
 - Do not call `markStoryComplete` or `markStoryFailed` directly. You don't have permission and shouldn't try.
 - If you see stale claims (stories stuck in `in_progress` from a prior crashed run), the user can call `releaseStaleClaims` themselves — do not call it automatically unless the config has `force_release_stale` set (see Setup step 2).
 - Never narrate intermediate work. One status line per story is enough.
+
+## Sprint authoring rule: every sprint MUST end with a ship gate
+
+Every sprint plan MUST include, as its final story, a **ship gate** story whose acceptance criteria run the full end-to-end test suite (`pnpm e2e`, or the project equivalent declared in config). The ship gate exists so that no sprint can be declared "done" unless all of its stories integrate cleanly end-to-end — a green per-story review is necessary but not sufficient.
+
+Guidance for sprint authors (e.g. the `sprint-planning` skill, or a human writing a backlog by hand):
+
+- The last story in `sprint-status.yaml` MUST be a ship gate story.
+- Its `depends_on` SHOULD list every other substantive story in the sprint, so it can only be claimed after the rest of the sprint has landed.
+- Its `acceptance_criteria.checks` MUST include a `shell` check that runs the project's full e2e command and asserts `expect_exit: 0` (typically `pnpm e2e` or `pnpm --dir <plugin> e2e`).
+- The ship gate story itself usually requires no production code change — its job is to prove the sprint as a whole holds together. If the e2e run fails, the ship gate fails, and the sprint is not shippable until the underlying stories are fixed (via rework or follow-up stories).
+
+The orchestrator does not enforce this rule mechanically; it is an author-facing discipline. Skills that generate sprint plans should emit a ship gate story by default, and human reviewers should reject sprint plans that lack one.
