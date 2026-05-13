@@ -282,11 +282,27 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
   const ready = await getReadyStoriesViaDist(ctx);
   const readyIds = ready.map((s) => s.id);
 
-  // Drive B (the auto-promoted story). Dev creates src/world.txt to satisfy AC.
+  // Drive B (the auto-promoted story). Dev creates src/world.txt to satisfy AC,
+  // AND seeds a NESTED workspace package's node_modules + dist directories.
+  // This is the regression captured from PR #16 retest: top-level pathspec
+  // exclusions (`:!node_modules`) only match repo-root, not deep paths like
+  // apps/server/node_modules/. The fix is `:(exclude,glob)**/node_modules/**`.
   let bDriven: DriveResult | null = null;
   if (readyIds.includes("B")) {
     bDriven = await driveHappyPathStory(ctx, "B", "agent-B", async () => {
       await fs.writeFile(path.join(root, "src", "world.txt"), "world\n", "utf8");
+      // Simulate a nested workspace package whose tooling produces dist + node_modules.
+      const nested = path.join(root, "apps", "server");
+      await fs.mkdir(path.join(nested, "node_modules", "fake-dep"), { recursive: true });
+      await fs.writeFile(
+        path.join(nested, "node_modules", "fake-dep", "index.js"),
+        "// dep\n",
+        "utf8",
+      );
+      await fs.mkdir(path.join(nested, "dist"), { recursive: true });
+      await fs.writeFile(path.join(nested, "dist", "bundle.js"), "// built\n", "utf8");
+      await fs.mkdir(path.join(nested, "src"), { recursive: true });
+      await fs.writeFile(path.join(nested, "src", "app.ts"), "// real source\n", "utf8");
     });
   }
 
@@ -363,7 +379,10 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
             f.startsWith(".sprint-orchestrator/") ||
             f === ".sprint-orchestrator" ||
             f.startsWith(".claude/") ||
-            f.includes("/node_modules/"),
+            f.includes("/node_modules/") ||
+            f.includes("/dist/") ||
+            f.endsWith("/dist") ||
+            f === "dist",
         );
         expect(
           junk.length === 0,

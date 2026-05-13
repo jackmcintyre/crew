@@ -29,13 +29,15 @@ export interface CommitResult {
  */
 const PATHSPEC_EXCLUSIONS = [
   ":!sprint-status.yaml",
-  ":!.sprint-orchestrator",
-  ":!.sprint-orchestrator/**",
-  ":!.claude",
-  ":!.claude/**",
-  ":!**/.DS_Store",
-  ":!node_modules",
-  ":!node_modules/**",
+  ":(exclude,glob)**/.sprint-orchestrator",
+  ":(exclude,glob)**/.sprint-orchestrator/**",
+  ":(exclude,glob)**/.claude",
+  ":(exclude,glob)**/.claude/**",
+  ":(exclude,glob)**/.DS_Store",
+  ":(exclude,glob)**/node_modules",
+  ":(exclude,glob)**/node_modules/**",
+  ":(exclude,glob)**/dist",
+  ":(exclude,glob)**/dist/**",
 ];
 
 /**
