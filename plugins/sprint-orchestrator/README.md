@@ -157,7 +157,12 @@ a story spec), but be aware:
 
 The reviewer's flow is `validateAcceptanceCriteria → commitStoryArtefacts → recordStorySuccess`. If the final `recordStorySuccess` call fails for any reason (file lock, schema validation error, harness classifier intercepts), the code commit produced by `commitStoryArtefacts` has already landed on the branch with no matching state commit. The state machine is split between the working tree (committed) and `sprint-status.yaml` (still `in_progress`).
 
-Recovery: hand-edit `sprint-status.yaml` to set the story's status back to `ready` and clear `claimed_by`/`claimed_at`, then re-run `/sprint-orchestrator:process-backlog`. The reviewer will re-validate and complete the state transition. The orphan code commit is real and reverting it will undo the work.
+Recovery (4 steps):
+
+1. Hand-edit `sprint-status.yaml`: set the story's `status: ready` and clear `claimed_by` / `claimed_at`.
+2. Re-run `/sprint-orchestrator:process-backlog`. The reviewer will re-validate and complete the state transition.
+3. Verify by calling `getSprintStatus` (via MCP) — confirm the story is now `status: done` with a fresh `completed_at`.
+4. The orphan code commit from before the failure is real and stays in history. Reverting it will undo the work; leave it unless you know you want it gone.
 
 A future sprint will replace this with proper atomic commit-and-mark or rollback-on-failure semantics. Until then, this is the documented workaround.
 

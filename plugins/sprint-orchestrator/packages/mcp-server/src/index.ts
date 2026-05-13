@@ -117,8 +117,8 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       },
     },
     async ({ storyId, agentId, summary, artefacts }) => {
-      await markStoryComplete(ctx, storyId, agentId, summary, artefacts);
-      return json({ ok: true });
+      const result = await markStoryComplete(ctx, storyId, agentId, summary, artefacts);
+      return json({ ok: true, ...result });
     },
   );
 
@@ -131,8 +131,8 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       inputSchema: { storyId: z.string(), reason: z.string() },
     },
     async ({ storyId, reason }) => {
-      await markStoryFailed(ctx, storyId, reason);
-      return json({ ok: true });
+      const result = await markStoryFailed(ctx, storyId, reason);
+      return json({ ok: true, ...result });
     },
   );
 
@@ -149,8 +149,10 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
         reworkLimit: z.number().int().positive().optional(),
       },
     },
-    async ({ storyId, agentId, reason, reworkLimit }) =>
-      json(await markStoryNeedsRework(ctx, storyId, agentId, reason, reworkLimit)),
+    async ({ storyId, agentId, reason, reworkLimit }) => {
+      const result = await markStoryNeedsRework(ctx, storyId, agentId, reason, reworkLimit);
+      return json({ ok: true, ...result });
+    },
   );
 
   server.registerTool(
