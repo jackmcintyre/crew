@@ -62,6 +62,34 @@ describe("commitStoryArtefacts", () => {
     expect(r.sha).toBeNull();
   });
 
+  it("excludes sprint-status.yaml from the produced commit", async () => {
+    const { root, ctx } = await makeRepoWithSprint("S1", "Add a thing");
+    // Mutate both code and sprint-status.yaml — the commit should only include code.
+    await fs.writeFile(path.join(root, "thing.txt"), "hello", "utf8");
+    const sprintPath = path.join(root, "sprint-status.yaml");
+    const prior = await fs.readFile(sprintPath, "utf8");
+    await fs.writeFile(sprintPath, prior + "\n# touched\n", "utf8");
+
+    const r = await commitStoryArtefacts(ctx, "S1");
+    expect(r.sha).toMatch(/^[a-f0-9]{40}$/);
+
+    const files = spawnSync("git", ["show", "--name-only", "--pretty=format:", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    const names = files.stdout
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(names).toContain("thing.txt");
+    expect(names).not.toContain("sprint-status.yaml");
+
+    // sprint-status.yaml mutation must remain in the working tree (unstaged)
+    // so markStoryComplete can commit it separately.
+    const status = spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" });
+    expect(status.stdout).toContain("sprint-status.yaml");
+  });
+
   it("throws StoryNotFoundError for an unknown story", async () => {
     const { ctx } = await makeRepoWithSprint();
     await expect(commitStoryArtefacts(ctx, "ghost")).rejects.toBeInstanceOf(StoryNotFoundError);

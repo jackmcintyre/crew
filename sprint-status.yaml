@@ -2,20 +2,23 @@ sprint_id: orchestrator-bugfix-sprint-1
 stories:
   - id: "1"
     title: Split state and code commits in commitStoryArtefacts
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
-          pattern: ":!sprint-status.yaml"
+          pattern: :!sprint-status.yaml
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator/packages/mcp-server test -- --grep "commitStoryArtefacts"
+          cmd: pnpm --dir plugins/sprint-orchestrator/packages/mcp-server test -- --grep
+            "commitStoryArtefacts"
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-bugfix-1
+      claimed_at: 2026-05-13T00:30:02.985Z
     notes: |
       Today commitStoryArtefacts runs `git add -A && git commit -m "feat(<id>): <title>"` which
       bundles dev's code AND sprint-status.yaml mutations into one commit. Reverting that
@@ -28,7 +31,6 @@ stories:
       Add a unit test asserting the commit produced by commitStoryArtefacts does NOT
       include sprint-status.yaml. Existing behavior (commit subject, trailer, returned sha)
       preserved.
-
   - id: "2"
     title: Auto-promote backlog stories to ready when dependencies are complete
     status: ready
@@ -56,7 +58,6 @@ stories:
 
       Decision: do the promotion in getReadyStories so it's idempotent and self-healing
       (works even if the state file was authored without ready stories).
-
   - id: "3"
     title: Shield reviewer and dev subagents from user-global Claude preferences
     status: ready
@@ -65,10 +66,10 @@ stories:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/agents/reviewer.md
-          pattern: "state-machine action"
+          pattern: state-machine action
         - type: regex
           cmd: cat plugins/sprint-orchestrator/agents/dev.md
-          pattern: "state-machine action"
+          pattern: state-machine action
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
@@ -89,7 +90,6 @@ stories:
 
       Acceptance: both files contain the phrase "state-machine action" (or equivalent
       explicit override).
-
   - id: "4"
     title: Unify failed vocabulary across status enum, run.log, and reports
     status: ready
@@ -101,7 +101,7 @@ stories:
           pattern: '"failed"'
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
-          pattern: 'status.*"failed"'
+          pattern: status.*"failed"
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-sprint-report.ts
           pattern: failed
@@ -124,7 +124,6 @@ stories:
         - Update existing sprint-status.yaml fixtures and tests.
 
       No backwards-compat shim needed.
-
   - id: "5"
     title: Enrich reviewer subagent return strings with tool-call results
     status: ready
@@ -133,7 +132,7 @@ stories:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/agents/reviewer.md
-          pattern: "include the tool result"
+          pattern: include the tool result
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
@@ -150,7 +149,6 @@ stories:
         rework: 3.3 - reason (markStoryNeedsRework returned reworkCount=2, capReached=true)
 
       Acceptance: reviewer.md contains the phrase "include the tool result" (or equivalent).
-
   - id: "6"
     title: README docs for AC-writing guidance and out-of-band edit caveat
     status: ready
@@ -159,10 +157,10 @@ stories:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: "Writing acceptance criteria"
+          pattern: Writing acceptance criteria
         - type: regex
           cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: "Hand-editing sprint-status.yaml"
+          pattern: Hand-editing sprint-status.yaml
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
