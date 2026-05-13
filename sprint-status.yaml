@@ -13,10 +13,10 @@ stories:
     orchestrator:
       claimed_by: dev-20260513-1
       claimed_at: 2026-05-13T10:44:31.720Z
-      rework_count: 0
       completed_at: 2026-05-13T10:49:24.529Z
       summary: Shipped run-sprint wrapper skill that computes turn cap from story count and invokes /goal
         with the canonical drain condition, plus refusal paths for missing/drained backlogs.
+      rework_count: 0
       artefacts:
         - git:332ec0ab3b0c92aa271f2b1201d9df5f7ef10596
         - plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
@@ -86,7 +86,7 @@ stories:
           (new mini-run + assertion + grep tag)
   - id: "2"
     title: Three distinct end-of-run summary lines in process-backlog (drain / cap-stop / blocked)
-    status: ready
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -95,7 +95,17 @@ stories:
             summary lines for drain cap-stop and blocked"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-20260513-2
+      claimed_at: 2026-05-13T10:49:33.660Z
       rework_count: 0
+      completed_at: 2026-05-13T10:53:54.151Z
+      summary: Codified three distinct end-of-run summary lines (drain / cap-stop / blocked) in
+        process-backlog SKILL.md and added e2e mini-runs asserting each line shape.
+      artefacts:
+        - git:c9c65d74700cbedcdc7a3a98799cbaff645e0996
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/format-end-of-run-line.ts
     notes: >
       PROBLEM: the /goal evaluator (a Haiku-class model) reads the
 
