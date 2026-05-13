@@ -13,9 +13,10 @@ stories:
     orchestrator:
       claimed_by: dev-loop-20260513
       claimed_at: 2026-05-13T04:46:35.348Z
-      rework_count: 0
       completed_at: 2026-05-13T05:30:00.000Z
-      manual_recovery: "code on dbbd276; AC re-verified post-fact; reviewer hard-failed without rework — see follow-up"
+      rework_count: 0
+      manual_recovery: code on dbbd276; AC re-verified post-fact; reviewer hard-failed without rework —
+        see follow-up
     notes: |
       PROBLEM: When invoked on a feature branch whose `default_base`
       (e.g. `main`) lags behind on the orchestrator schema version, the
@@ -58,7 +59,7 @@ stories:
         - skills/process-backlog/SKILL.md (handle the skipped reason)
   - id: "2"
     title: prepareStoryBranch roots from the last completed dependency's branch tip
-    status: ready
+    status: done
     depends_on:
       - "1"
     acceptance_criteria:
@@ -68,7 +69,19 @@ stories:
             is rooted at the dependency's branch tip\""
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-loop-20260513-s2
+      claimed_at: 2026-05-13T05:19:20.367Z
       rework_count: 0
+      completed_at: 2026-05-13T05:23:55.265Z
+      summary: prepareStoryBranch now roots a story's per-story branch from the most recent completed
+        dependency's branch tip, with fallback reason recorded when deps lack branches.
+      artefacts:
+        - git:55d84b96974796d211064d074d0c1e2a55be1a3b
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/prepare-story-branch.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/tools.test.ts
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+        - sprint-status.yaml
     notes: |
       PROBLEM: With per-story branches all rooted from `default_base`
       (typically `main`), a story whose `depends_on` includes an
@@ -118,9 +131,10 @@ stories:
     orchestrator:
       claimed_by: dev-loop-20260513-s3
       claimed_at: 2026-05-13T04:52:19.970Z
-      rework_count: 0
       completed_at: 2026-05-13T05:30:00.000Z
-      manual_recovery: "code on c2195a1; AC re-verified post-fact; reviewer hard-failed without rework — see follow-up"
+      rework_count: 0
+      manual_recovery: code on c2195a1; AC re-verified post-fact; reviewer hard-failed without rework —
+        see follow-up
     notes: |
       PROBLEM: between two test sessions on the same branch
       (retest-pps-1.1), a commit `chore(sprint): persist 1.1 failure`
