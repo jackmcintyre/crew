@@ -146,11 +146,11 @@ stories:
     orchestrator:
       claimed_by: dev-2026-05-13T3
       claimed_at: 2026-05-13T10:07:48.423Z
-      rework_count: 0
       completed_at: 2026-05-13T10:16:52.176Z
       summary: Added recordStoryReopen MCP tool that transitions a failed story back to ready, clears
         failure/claim fields, preserves rework_count, and appends to reopen_history with an audit
         commit.
+      rework_count: 0
       artefacts:
         - git:155fbad87ca912803ec194498a6c18d0fcb9220b
         - plugins/sprint-orchestrator/packages/mcp-server/src/tools/record-story-reopen.ts
@@ -211,7 +211,7 @@ stories:
       reviewer prompt). Can ship in any order.
   - id: "4"
     title: lintSprint validates that every shell `cmd` field is YAML-safe
-    status: ready
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -220,7 +220,18 @@ stories:
             unquoted YAML-special characters"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-2026-05-13T4
+      claimed_at: 2026-05-13T10:16:59.145Z
       rework_count: 0
+      completed_at: 2026-05-13T10:20:29.677Z
+      summary: lintSprint now flags shell cmd fields whose raw text fails to round-trip through a
+        synthetic YAML mapping, catching unquoted-colon regressions; covered by unit tests and a new
+        e2e assertion.
+      artefacts:
+        - git:4f36750a0ca6ba45071d88b50276ed1c7d8ad385
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/lint-sprint.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/lint-sprint.test.ts
+        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: |
       PROBLEM: triage-1 story 2 had cmd:
         cmd: pnpm ... --grep "branch-per-story: dependent ..."
