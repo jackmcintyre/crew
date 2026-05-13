@@ -24,8 +24,16 @@ export async function commitStoryArtefacts(
   const state = await readSprintStatus(ctx.sprintStatusPath);
   const story = findStory(state, storyId);
 
-  await run(ctx.projectRoot, "git", ["add", "-A"]);
-  const status = await capture(ctx.projectRoot, "git", ["status", "--porcelain"]);
+  // Stage everything EXCEPT sprint-status.yaml — orchestrator state is
+  // committed separately by markStoryComplete so reverting a code commit
+  // does not roll back the state machine.
+  await run(ctx.projectRoot, "git", ["add", "-A", "--", ":!sprint-status.yaml"]);
+  const status = await capture(ctx.projectRoot, "git", [
+    "status",
+    "--porcelain",
+    "--",
+    ":!sprint-status.yaml",
+  ]);
   if (!status.stdout.trim()) return { sha: null };
 
   const message = `feat(${story.id}): ${story.title}`;
