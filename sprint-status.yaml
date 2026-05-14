@@ -118,7 +118,7 @@ stories:
         failure_details[0].exit_code matches reality.
   - id: "3"
     title: prepareStoryBranch understands dependency-rooted bases
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -138,6 +138,10 @@ stories:
       branch_prepared_by: dev-2026-05-14-s3
       branch_prepared_at: 2026-05-14T03:41:25.630Z
       dev_returned_at: 2026-05-14T03:44:31.140Z
+      completed_at: 2026-05-14T03:46:09.922Z
+      summary: Added runPrepareStoryBranchDependencyBaseMiniRun e2e mini-run validating prepare-story-branch.ts roots off depends_on story branch tip when present and falls back to default_base when depends_on is empty. Shipped via PR #31.
+      artefacts:
+        - git:PR#31
     notes: >
       With pr_per_story=true, story N+1's prepareStoryBranch today roots off default_base instead of
       story N's branch tip. Two failure modes observed: explicit default_base-stale refusal, AND
