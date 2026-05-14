@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { findStory, readSprintStatus } from "../state/sprint-status.js";
+import { type Story } from "../state/schema.js";
 import { type ToolContext } from "./context.js";
+import { getOrInitConfig } from "./get-or-init-config.js";
+import { shipGateEmptyCommitMessage } from "./ship-gate-phrases.js";
 
 export interface CommitResult {
   sha: string | null;
@@ -69,7 +72,17 @@ export async function commitStoryArtefacts(
     ".",
     ...PATHSPEC_EXCLUSIONS,
   ]);
-  if (!status.stdout.trim()) return { sha: null };
+  if (!status.stdout.trim()) {
+    // No working-tree changes. Under `pr_per_story: true`, a per-story
+    // branch with zero commits ahead of its base produces a "No commits
+    // between <base> and <branch>" error from `gh pr create`. That hard-
+    // wedges any verification-only ship-gate story. Detect that case
+    // structurally (clean tree + zero commits ahead of recorded
+    // `base_branch`) and lay down one empty commit so the push + PR
+    // can proceed.
+    const empty = await maybeLayDownShipGateEmptyCommit(ctx, story);
+    return { sha: empty };
+  }
 
   const message = `feat(${story.id}): ${story.title}`;
   const r = await run(ctx.projectRoot, "git", [
@@ -83,6 +96,59 @@ export async function commitStoryArtefacts(
 
   const sha = await capture(ctx.projectRoot, "git", ["rev-parse", "HEAD"]);
   return { sha: sha.stdout.trim() || null };
+}
+
+/**
+ * Ship-gate fallback: if `pr_per_story` is on AND the per-story branch
+ * has zero commits ahead of its recorded `base_branch`, lay down one
+ * empty commit so `git push -u origin <branch>` + `gh pr create` can
+ * succeed. Returns the new commit's sha or `null` when no empty
+ * commit was created (any precondition unmet, or git refused).
+ *
+ * Trigger is structural — name-agnostic — so any verification-only
+ * story (not just ones titled "ship gate") benefits.
+ */
+async function maybeLayDownShipGateEmptyCommit(
+  ctx: ToolContext,
+  story: Story,
+): Promise<string | null> {
+  const cfgRes = await getOrInitConfig(ctx);
+  if (!cfgRes.config || cfgRes.config.pr_per_story !== true) return null;
+
+  const baseBranch = (story.orchestrator as Record<string, unknown>).base_branch;
+  if (typeof baseBranch !== "string" || baseBranch.length === 0) return null;
+
+  // Ensure the recorded base actually exists locally. If not (e.g. the
+  // story was authored outside the orchestrator), bail rather than
+  // committing speculatively.
+  const baseExists = await capture(ctx.projectRoot, "git", [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    baseBranch,
+  ]);
+  if (baseExists.exitCode !== 0) return null;
+
+  const ahead = await capture(ctx.projectRoot, "git", [
+    "rev-list",
+    "--count",
+    `${baseBranch}..HEAD`,
+  ]);
+  const aheadCount = Number.parseInt(ahead.stdout.trim(), 10);
+  if (!Number.isFinite(aheadCount) || aheadCount !== 0) return null;
+
+  const r = await run(ctx.projectRoot, "git", [
+    "commit",
+    "--allow-empty",
+    "-m",
+    shipGateEmptyCommitMessage(story.id),
+    "--trailer",
+    "Co-authored-by: Claude <noreply@anthropic.com>",
+  ]);
+  if (r.exitCode !== 0) return null;
+
+  const sha = await capture(ctx.projectRoot, "git", ["rev-parse", "HEAD"]);
+  return sha.stdout.trim() || null;
 }
 
 async function run(cwd: string, cmd: string, args: string[]): Promise<{ exitCode: number }> {

@@ -4029,6 +4029,19 @@ async function main(): Promise<number> {
     outcomes.push(...prEnforcementOutcomes);
   }
 
+  // orchestrator-state-and-shipgate sprint, story 2 (B8 fix):
+  // verification-only stories under pr_per_story=true must still open a PR.
+  // commitStoryArtefacts lays down one empty commit when the working tree
+  // is clean AND the per-story branch has zero commits ahead of base.
+  if (
+    !filter ||
+    filter.test("zero-diff story under pr_per_story=true successfully opens a PR via empty commit")
+  ) {
+    console.log("[e2e] mini-run: ship-gate empty-commit on zero-diff stories");
+    const shipGateOutcomes = await runShipGateEmptyCommitMiniRun();
+    outcomes.push(...shipGateOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -5659,6 +5672,185 @@ async function runPrepareStoryBranchDependencyBaseMiniRun(): Promise<AssertionOu
  *
  * Grep tag: "recordStorySuccess refuses when pr_per_story=true and branch is unpushed"
  */
+/**
+ * orchestrator-state-and-shipgate sprint, story 2 (B8 fix) —
+ * verification-only stories under `pr_per_story: true` must still be able
+ * to open a PR. Reviewer/commitStoryArtefacts detects "zero working-tree
+ * diff AND zero commits ahead of base_branch" and lays down one empty
+ * commit prefixed with SHIP_GATE_EMPTY_COMMIT_MESSAGE_PREFIX so
+ * `git push -u origin <branch>` and `gh pr create` succeed.
+ *
+ * Grep tag: "zero-diff story under pr_per_story=true successfully opens a
+ * PR via empty commit".
+ */
+async function runShipGateEmptyCommitMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-shipgate-"));
+  try {
+    const g = (args: string[]) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+    g(["init", "-q", "--initial-branch=main"]);
+    g(["config", "user.email", "test@example.com"]);
+    g(["config", "user.name", "Test"]);
+    g(["config", "commit.gpgsign", "false"]);
+
+    // Verification-only story: its acceptance criterion already passes on
+    // main without any dev change. The dev swing legitimately produces no
+    // code edit; the per-story branch ends up zero commits ahead of base.
+    const sprintYaml = [
+      "schema_version: 1",
+      "sprint_id: shipgate-test",
+      "stories:",
+      "  - id: s1",
+      "    title: Verification only ship gate",
+      "    status: ready",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: shell",
+      '          cmd: "exit 0"',
+      "          exit_code: 0",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+    // Seed state in the canonical out-of-git location so orchestrator
+    // updates (claim, prepareStoryBranch) don't dirty the working tree
+    // and accidentally produce a non-empty diff for commitStoryArtefacts.
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(path.join(configDir, "state.yaml"), sprintYaml, "utf8");
+    // Drop a .gitignore so the harness doesn't try to commit the
+    // orchestrator's runtime directory.
+    await fs.writeFile(path.join(tmp, ".gitignore"), ".sprint-orchestrator/\n", "utf8");
+    g(["add", ".gitignore"]);
+    g(["commit", "-q", "-m", "init"]);
+
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: .sprint-orchestrator/state.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, ".sprint-orchestrator", "state.yaml"),
+      configPath: path.join(tmp, ".sprint-orchestrator", "config.yaml"),
+    };
+
+    // Stand up a bare repo OUTSIDE the working tree as `origin` so
+    // `git push -u origin <branch>` succeeds and the hundreds of hook
+    // samples in the bare repo's hooks/ dir don't pollute `git status`
+    // in the sandbox.
+    const bareRemote = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-shipgate-origin-"));
+    spawnSync("git", ["init", "--bare", "-q", bareRemote], { encoding: "utf8" });
+    g(["remote", "add", "origin", bareRemote]);
+    // Push main so the bare repo knows the base. Without this, the
+    // post-push `rev-list main..<branch>` against the bare repo fails
+    // because the bare repo has no `main` ref.
+    g(["push", "-u", "origin", "main"]);
+
+    // Drive the verification-only flow: claim → prepareBranch → (no dev
+    // edit) → commitStoryArtefacts. The commit step is where the B8
+    // fallback must fire.
+    await claimStory(ctx, "s1", "agent-shipgate");
+    const prep = await prepareStoryBranch(ctx, "s1", "agent-shipgate");
+    const result = await commitStoryArtefacts(ctx, "s1");
+
+    await runOne({
+      name: "zero-diff story under pr_per_story=true successfully opens a PR via empty commit: commitStoryArtefacts returns a non-null sha",
+      run: () => {
+        expect(
+          typeof result.sha === "string" && result.sha.length > 0,
+          `expected non-null sha from commitStoryArtefacts but got ${JSON.stringify(result)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "zero-diff story under pr_per_story=true successfully opens a PR via empty commit: HEAD subject uses the ship-gate prefix",
+      run: () => {
+        const subject = g(["log", "-1", "--format=%s"]).stdout.trim();
+        expect(
+          subject.startsWith("chore(ship-gate):"),
+          `expected HEAD subject to start with chore(ship-gate): — got ${JSON.stringify(subject)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "zero-diff story under pr_per_story=true successfully opens a PR via empty commit: HEAD is an empty commit (tree matches parent)",
+      run: () => {
+        const headTree = g(["rev-parse", "HEAD^{tree}"]).stdout.trim();
+        const parentTree = g(["rev-parse", "HEAD~1^{tree}"]).stdout.trim();
+        expect(
+          headTree === parentTree && headTree.length > 0,
+          `expected HEAD tree to equal parent tree (empty commit) — got HEAD=${headTree} parent=${parentTree}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "zero-diff story under pr_per_story=true successfully opens a PR via empty commit: branch is now one commit ahead of base_branch",
+      run: () => {
+        expect(
+          typeof prep.branch === "string" && prep.branch.length > 0,
+          `expected prep.branch set, got ${JSON.stringify(prep)}`,
+        );
+        const ahead = g(["rev-list", "--count", `main..${prep.branch}`]).stdout.trim();
+        expect(ahead === "1", `expected branch to be 1 commit ahead of main, got ${ahead}`);
+      },
+    });
+
+    await runOne({
+      name: "zero-diff story under pr_per_story=true successfully opens a PR via empty commit: push to origin succeeds (gh pr create would not see 'No commits between')",
+      run: () => {
+        const push = g(["push", "-u", "origin", prep.branch as string]);
+        expect(
+          push.status === 0,
+          `expected push to succeed, got status=${push.status} stderr=${push.stderr}`,
+        );
+        // Verify the remote actually received the empty commit on the
+        // per-story branch — this is the precondition `gh pr create`
+        // demands (without it, the "No commits between" error fires).
+        const remoteAhead = spawnSync(
+          "git",
+          ["--git-dir", bareRemote, "rev-list", "--count", `main..${prep.branch}`],
+          { encoding: "utf8" },
+        );
+        expect(
+          remoteAhead.stdout.trim() === "1",
+          `expected remote branch 1 commit ahead of main, got ${remoteAhead.stdout.trim()}`,
+        );
+      },
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+// (bareRemote dirs are mkdtemp'd into os.tmpdir(); leaving them is harmless
+// for the e2e and matches behaviour of other mini-runs that do the same.)
+
 async function runPrPerStoryEnforcementMiniRun(): Promise<AssertionOutcome[]> {
   const outcomes: AssertionOutcome[] = [];
 
