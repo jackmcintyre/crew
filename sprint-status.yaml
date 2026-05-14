@@ -2,7 +2,7 @@ sprint_id: orchestrator-hardening-followup
 stories:
   - id: "1"
     title: Fix the 5 happy-path e2e regressions surfaced by hardening sprint's ship gate
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -20,6 +20,11 @@ stories:
       branch_prepared_by: dev-retry2-1747258500
       branch_prepared_at: 2026-05-14T07:19:26.727Z
       base_branch: main
+      completed_at: 2026-05-14T07:34:05.285Z
+      artefacts:
+        - "git:2c9d001"
+        - "pr:34"
+        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: >
       Five happy-path e2e assertions broke when the orchestrator-hardening guards landed (PRs
       #29–#33). The failures were correctly caught by hardening's ship gate (story 6, failed by
