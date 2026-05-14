@@ -153,7 +153,7 @@ stories:
       during the ship-gate smoketest.
   - id: "4"
     title: Clean-machine install path verified and documented
-    status: in_progress
+    status: done
     depends_on:
       - "3"
     acceptance_criteria:
@@ -168,9 +168,17 @@ stories:
           cmd: grep -E "pnpm install|/plugin" plugins/sprint-orchestrator/README.md
           expect_exit: 0
     orchestrator:
-      rework_count: 0
       claimed_by: dev-1747268400-s4
       claimed_at: 2026-05-14T01:41:26.803Z
+      rework_count: 0
+      completed_at: 2026-05-14T01:44:08.045Z
+      summary: Canonical install path documented in both repo-root README.md and
+        plugins/sprint-orchestrator/README.md, including prerequisites, clone, pnpm install, /plugin
+        install, and hello-sprint example reference.
+      artefacts:
+        - git:d0d97b34a750d2766475f6d8e4137db467778b02
+        - README.md
+        - plugins/sprint-orchestrator/README.md
     notes: |
       Author the canonical install commands in BOTH READMEs. Identical command sequence in repo-root and plugin READMEs. Includes prerequisite list (Node, pnpm, Claude Code), clone, install deps, build if needed, add marketplace + install via /plugin, run the example sprint.
 
