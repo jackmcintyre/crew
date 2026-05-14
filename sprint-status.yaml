@@ -1,10 +1,8 @@
 sprint_id: smoketest-followups
-# Source: 2026-05-14 manual install-from-clean smoketest after mvp-polish.
-# Four real issues surfaced; each becomes a story below. Ship gate as story 5.
 stories:
   - id: "1"
     title: Reviewer scope guardrail — only touch the assigned story
-    status: ready
+    status: failed
     depends_on: []
     acceptance_criteria:
       checks:
@@ -12,7 +10,8 @@ stories:
           cmd: grep -q "ONLY operate on the storyId" plugins/sprint-orchestrator/agents/reviewer.md
           expect_exit: 0
         - type: shell
-          cmd: "grep -qE 'storyId.*mismatch|wrong.story' plugins/sprint-orchestrator/packages/mcp-server/src/tools/record-story-success.ts"
+          cmd: grep -qE 'storyId.*mismatch|wrong.story'
+            plugins/sprint-orchestrator/packages/mcp-server/src/tools/record-story-success.ts
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "reviewer scope guardrail"
@@ -20,10 +19,16 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      claimed_by: dev-run-1
+      claimed_at: 2026-05-14T02:24:30.785Z
+      rework_count: 0
+      last_failure_reason: "Acceptance criteria failed: shell, shell, shell"
+      failed_at: 2026-05-14T02:25:00.377Z
     notes: >
-      During the mvp-polish smoketest, the reviewer subagent spawned for story 1 silently
-      processed story 2 as well — both stories ended up done with a single explicit dev/reviewer
-      pair. That breaks the audit trail and the one-story-at-a-time concurrency guarantee.
+      During the mvp-polish smoketest, the reviewer subagent spawned for story 1 silently processed
+      story 2 as well — both stories ended up done with a single explicit dev/reviewer pair. That
+      breaks the audit trail and the one-story-at-a-time concurrency guarantee.
 
 
       Two layers of defence required:
@@ -35,9 +40,8 @@ stories:
            trying to record success for a story it didn't claim.
 
 
-      New e2e test "reviewer scope guardrail" must assert: a reviewer that tries to record
-      success for a non-claimed story is rejected by the MCP layer with a clear error.
-
+      New e2e test "reviewer scope guardrail" must assert: a reviewer that tries to record success
+      for a non-claimed story is rejected by the MCP layer with a clear error.
   - id: "2"
     title: Reviewer must push branch before opening PR
     status: ready
@@ -45,7 +49,8 @@ stories:
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: grep -qE "git push.*-u origin|git push.*--set-upstream" plugins/sprint-orchestrator/agents/reviewer.md
+          cmd: grep -qE "git push.*-u origin|git push.*--set-upstream"
+            plugins/sprint-orchestrator/agents/reviewer.md
           expect_exit: 0
         - type: shell
           cmd: grep -q "before calling gh pr create" plugins/sprint-orchestrator/agents/reviewer.md
@@ -56,10 +61,12 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      rework_count: 0
     notes: >
       During the smoketest with pr_per_story enabled, the reviewer committed story work to a
-      per-story branch but never pushed it to origin. `gh pr create` either failed silently
-      or was never invoked. Result: zero PRs on GitHub despite both stories shipping locally.
+      per-story branch but never pushed it to origin. `gh pr create` either failed silently or was
+      never invoked. Result: zero PRs on GitHub despite both stories shipping locally.
 
 
       Reviewer agent prompt must mandate the sequence:
@@ -69,14 +76,13 @@ stories:
         4. then call recordStorySuccess
 
 
-      e2e test "reviewer pushes branch before pr create" must assert (via a fake git/gh
-      shim) that push happens before pr create, and that the reviewer surfaces a clear
-      failure if push fails (rather than calling recordStorySuccess on un-pushed work).
+      e2e test "reviewer pushes branch before pr create" must assert (via a fake git/gh shim) that
+      push happens before pr create, and that the reviewer surfaces a clear failure if push fails
+      (rather than calling recordStorySuccess on un-pushed work).
 
 
-      Out of scope: actually opening real PRs in the test — use a shim that records the
-      command order. Real-PR integration tested manually.
-
+      Out of scope: actually opening real PRs in the test — use a shim that records the command
+      order. Real-PR integration tested manually.
   - id: "3"
     title: pr_per_story prompt fires before first claim, not mid-sprint
     status: ready
@@ -84,7 +90,8 @@ stories:
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: grep -qE "pr_per_story.*before.*claimStory|setup.*before.*main loop" plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+          cmd: grep -qE "pr_per_story.*before.*claimStory|setup.*before.*main loop"
+            plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "pr_per_story setup fires before first claim"
@@ -92,25 +99,24 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      rework_count: 0
     notes: >
       Symptom from the smoketest: the pr_per_story setup prompt fires correctly on first
-      `getOrInitConfig`, but only inside the main loop. By the time the user answers "yes
-      per-story PRs," story 1 has already been claimed and committed on the invocation
-      branch — meaning `default_base` is now stale relative to story 1's branch, so
-      `prepareStoryBranch` for story 2 fails with the default_base-stale guard. Sprint stops
-      mid-flight.
+      `getOrInitConfig`, but only inside the main loop. By the time the user answers "yes per-story
+      PRs," story 1 has already been claimed and committed on the invocation branch — meaning
+      `default_base` is now stale relative to story 1's branch, so `prepareStoryBranch` for story 2
+      fails with the default_base-stale guard. Sprint stops mid-flight.
 
 
-      Fix: the SKILL.md `process-backlog` setup section must explicitly run the pr_per_story
-      setup question and persistence step BEFORE the main loop's first `claimStory`. If the
-      user opts in mid-sprint, surface a clear "rerun from a clean branch" message rather
-      than partial-application.
+      Fix: the SKILL.md `process-backlog` setup section must explicitly run the pr_per_story setup
+      question and persistence step BEFORE the main loop's first `claimStory`. If the user opts in
+      mid-sprint, surface a clear "rerun from a clean branch" message rather than
+      partial-application.
 
 
-      e2e test "pr_per_story setup fires before first claim" must assert: when config is
-      missing pr_per_story, the orchestrator stops with the setup question before any story
-      is claimed.
-
+      e2e test "pr_per_story setup fires before first claim" must assert: when config is missing
+      pr_per_story, the orchestrator stops with the setup question before any story is claimed.
   - id: "4"
     title: releaseClaimForStory MCP tool for fast recovery
     status: ready
@@ -129,11 +135,13 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      rework_count: 0
     notes: >
-      During the smoketest, when `prepareStoryBranch` for story 2 hit the default_base-stale
-      guard immediately after `claimStory`, story 2 was stuck in `in_progress` with a fresh
-      claim. `releaseStaleClaims` couldn't help (claim too recent), and the only recovery
-      was hand-editing sprint-status.yaml. Bad UX for a state the orchestrator created.
+      During the smoketest, when `prepareStoryBranch` for story 2 hit the default_base-stale guard
+      immediately after `claimStory`, story 2 was stuck in `in_progress` with a fresh claim.
+      `releaseStaleClaims` couldn't help (claim too recent), and the only recovery was hand-editing
+      sprint-status.yaml. Bad UX for a state the orchestrator created.
 
 
       New tool `releaseClaimForStory(storyId, agentId)`:
@@ -144,13 +152,12 @@ stories:
         - No time-based threshold — this is the immediate-recovery path.
 
 
-      e2e test "releaseClaimForStory" must cover: happy path (claim then release), agentId
-      mismatch rejection, and idempotency.
+      e2e test "releaseClaimForStory" must cover: happy path (claim then release), agentId mismatch
+      rejection, and idempotency.
 
 
-      Document in SKILL.md as the recovery tool to call when prepareStoryBranch fails
-      immediately after claimStory.
-
+      Document in SKILL.md as the recovery tool to call when prepareStoryBranch fails immediately
+      after claimStory.
   - id: "5"
     title: Ship gate — pnpm e2e + pnpm verify green
     status: ready
@@ -167,12 +174,13 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      rework_count: 0
     notes: >
-      Verification-only ship gate per planning-discipline Rule 3. All four follow-up
-      stories must integrate cleanly — green per-story review is necessary but not
-      sufficient.
+      Verification-only ship gate per planning-discipline Rule 3. All four follow-up stories must
+      integrate cleanly — green per-story review is necessary but not sufficient.
 
 
-      No manual gate this time — the manual install-from-clean smoketest is what surfaced
-      these issues in the first place. Re-running it is a sensible bonus check but not part
-      of this sprint's mechanical gate.
+      No manual gate this time — the manual install-from-clean smoketest is what surfaced these
+      issues in the first place. Re-running it is a sensible bonus check but not part of this
+      sprint's mechanical gate.
