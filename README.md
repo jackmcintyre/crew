@@ -9,13 +9,18 @@ replacing hands-on-keyboards.
 
 ## Run your first example sprint in 5 minutes
 
-**Prerequisites:** [Claude Code](https://claude.ai/code) installed and running.
+**Prerequisites:**
+
+- [Node.js](https://nodejs.org/) 20 or later
+- [pnpm](https://pnpm.io/installation) 9 or later (`npm install -g pnpm`)
+- [Claude Code](https://claude.ai/code) installed and running
 
 **1. Install the plugin**
 
 ```bash
 git clone https://github.com/jackmcintyre/claude-dev-loop.git
 cd claude-dev-loop
+pnpm install        # installs deps and builds the plugin
 ```
 
 Then inside Claude Code, from the repo root:
@@ -23,6 +28,9 @@ Then inside Claude Code, from the repo root:
 ```
 /plugin install plugins/sprint-orchestrator
 ```
+
+> **After installing**, restart Claude Code so the new MCP tools register correctly.
+> `/reload-plugins` alone is not enough — a full restart is required.
 
 **2. Run the bundled example sprint**
 

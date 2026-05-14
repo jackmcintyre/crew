@@ -132,9 +132,9 @@ stories:
     orchestrator:
       claimed_by: dev-1747268400-s3
       claimed_at: 2026-05-14T01:35:24.090Z
-      rework_count: 0
       completed_at: 2026-05-14T01:39:03.450Z
       summary: "feat(3): Outside-in READMEs (root + plugin) with cost transparency"
+      rework_count: 0
       artefacts:
         - git:3f7b566b65a67bd91f393d65b5e01f9f3e16e3cc
     notes: >
@@ -153,7 +153,7 @@ stories:
       during the ship-gate smoketest.
   - id: "4"
     title: Clean-machine install path verified and documented
-    status: ready
+    status: in_progress
     depends_on:
       - "3"
     acceptance_criteria:
@@ -169,6 +169,8 @@ stories:
           expect_exit: 0
     orchestrator:
       rework_count: 0
+      claimed_by: dev-1747268400-s4
+      claimed_at: 2026-05-14T01:41:26.803Z
     notes: |
       Author the canonical install commands in BOTH READMEs. Identical command sequence in repo-root and plugin READMEs. Includes prerequisite list (Node, pnpm, Claude Code), clone, install deps, build if needed, add marketplace + install via /plugin, run the example sprint.
 

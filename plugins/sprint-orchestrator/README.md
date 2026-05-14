@@ -7,13 +7,18 @@ stack of shipped, reviewed PRs.
 
 ## 1. Install and run the example
 
-**Prerequisites:** [Claude Code](https://claude.ai/code) installed and running.
+**Prerequisites:**
+
+- [Node.js](https://nodejs.org/) 20 or later
+- [pnpm](https://pnpm.io/installation) 9 or later (`npm install -g pnpm`)
+- [Claude Code](https://claude.ai/code) installed and running
 
 **Install from the repo:**
 
 ```bash
 git clone https://github.com/jackmcintyre/claude-dev-loop.git
 cd claude-dev-loop
+pnpm install        # installs deps and builds the plugin
 ```
 
 Then inside Claude Code, from the repo root:
@@ -21,6 +26,17 @@ Then inside Claude Code, from the repo root:
 ```
 /plugin install plugins/sprint-orchestrator
 ```
+
+> **After installing**, restart Claude Code so the new MCP tools register correctly.
+> `/reload-plugins` alone is not enough — the deferred-tools registry only refreshes on
+> a full restart. If `/sprint-orchestrator:run-sprint` is not visible after install, exit
+> and relaunch Claude Code.
+
+**Troubleshooting prerequisites:**
+
+- `pnpm install` fails with "Unsupported engine" → your Node version is below 20. Install
+  Node 20+ via [nvm](https://github.com/nvm-sh/nvm) or the official installer, then retry.
+- `pnpm: command not found` → run `npm install -g pnpm`, then re-open your terminal.
 
 > **Heads-up — adding or renaming MCP tools requires a full Claude Code restart.**
 > `/reload-plugins` reloads the MCP server but does not refresh Claude Code's
