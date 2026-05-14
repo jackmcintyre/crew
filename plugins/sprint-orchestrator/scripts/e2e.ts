@@ -23,6 +23,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { claimStory } from "../packages/mcp-server/src/tools/claim-story.js";
+import { releaseClaimForStory } from "../packages/mcp-server/src/tools/release-claim-for-story.js";
 import { commitStoryArtefacts } from "../packages/mcp-server/src/tools/commit-story-artefacts.js";
 import { markStoryComplete } from "../packages/mcp-server/src/tools/mark-story-complete.js";
 import { markStoryFailed } from "../packages/mcp-server/src/tools/mark-story-failed.js";
@@ -3118,6 +3119,162 @@ async function runAdaptBmadMiniRun(): Promise<AssertionOutcome[]> {
   return outcomes;
 }
 
+/**
+ * smoketest-followups sprint, story 4: releaseClaimForStory immediate-recovery
+ * path.
+ *
+ * Three assertions in one mini-run:
+ *  1. happy path — claim then release resets status to `ready` and clears
+ *     claimed_by / claimed_at.
+ *  2. agentId mismatch — a different agent's release attempt throws
+ *     ClaimConflictError; the claim survives untouched.
+ *  3. idempotency — releasing an unclaimed story succeeds silently with
+ *     `alreadyFree: true`.
+ *
+ * Grep tag: "releaseClaimForStory".
+ */
+async function runReleaseClaimForStoryMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: false",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  try {
+    // --- Assertion 1: happy path ---
+    {
+      const agentId = "agent-release-happy";
+      const claim = await claimStory(ctx, "A", agentId);
+      if (!claim.claimed)
+        throw new Error(`precondition: could not claim A (holder=${claim.holder ?? "?"})`);
+
+      const result = await releaseClaimForStory(ctx, "A", agentId);
+
+      const state = await readSprintStatus(ctx.sprintStatusPath);
+      const storyA = state.stories.find((s) => s.id === "A");
+      const orch = storyA?.orchestrator as Record<string, unknown> | undefined;
+
+      await runOne({
+        name: "releaseClaimForStory happy path resets story to ready and clears claim fields",
+        run: () => {
+          expect(
+            result.released === true,
+            `expected released=true, got ${String(result.released)}`,
+          );
+          expect(
+            result.alreadyFree !== true,
+            `expected alreadyFree to be absent on a genuine release`,
+          );
+          expect(
+            storyA?.status === "ready",
+            `expected story A status="ready" after release, got ${String(storyA?.status)}`,
+          );
+          expect(
+            orch?.claimed_by === undefined,
+            `expected claimed_by cleared, got ${String(orch?.claimed_by)}`,
+          );
+          expect(
+            orch?.claimed_at === undefined,
+            `expected claimed_at cleared, got ${String(orch?.claimed_at)}`,
+          );
+        },
+      });
+    }
+
+    // --- Assertion 2: agentId mismatch rejection ---
+    {
+      const realAgent = "agent-real-holder";
+      const wrongAgent = "agent-impostor";
+
+      const claim = await claimStory(ctx, "A", realAgent);
+      if (!claim.claimed)
+        throw new Error(
+          `precondition: could not claim A for mismatch test (holder=${claim.holder ?? "?"})`,
+        );
+
+      let threwConflict = false;
+      try {
+        await releaseClaimForStory(ctx, "A", wrongAgent);
+      } catch (err) {
+        if ((err as { code?: string }).code === "CLAIM_CONFLICT") threwConflict = true;
+        else throw err;
+      }
+
+      const stateAfter = await readSprintStatus(ctx.sprintStatusPath);
+      const storyAAfter = stateAfter.stories.find((s) => s.id === "A");
+      const orchAfter = storyAAfter?.orchestrator as Record<string, unknown> | undefined;
+
+      await runOne({
+        name: "releaseClaimForStory rejects agentId mismatch and leaves claim intact",
+        run: () => {
+          expect(threwConflict, `expected ClaimConflictError when agentId does not match holder`);
+          expect(
+            storyAAfter?.status === "in_progress",
+            `expected story A to remain in_progress after mismatch rejection, got ${String(storyAAfter?.status)}`,
+          );
+          expect(
+            orchAfter?.claimed_by === realAgent,
+            `expected claimed_by to remain ${realAgent}, got ${String(orchAfter?.claimed_by)}`,
+          );
+        },
+      });
+
+      // Release the claim so story A is free for any further assertions.
+      await releaseClaimForStory(ctx, "A", realAgent);
+    }
+
+    // --- Assertion 3: idempotency — release an unclaimed story ---
+    {
+      // Story A is now ready (released above). Releasing again should succeed silently.
+      const idempotentResult = await releaseClaimForStory(ctx, "A", "any-agent");
+
+      await runOne({
+        name: "releaseClaimForStory is idempotent when story is not claimed",
+        run: () => {
+          expect(
+            idempotentResult.released === true,
+            `expected released=true on idempotent call, got ${String(idempotentResult.released)}`,
+          );
+          expect(
+            idempotentResult.alreadyFree === true,
+            `expected alreadyFree=true on idempotent call, got ${String(idempotentResult.alreadyFree)}`,
+          );
+        },
+      });
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -3407,6 +3564,14 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: pr_per_story setup fires before first claim");
     const prPerStoryBeforeClaimOutcomes = await runPrPerStorySetupBeforeFirstClaimMiniRun();
     outcomes.push(...prPerStoryBeforeClaimOutcomes);
+  }
+
+  // smoketest-followups sprint, story 4: releaseClaimForStory immediate-recovery
+  // path. Happy path, agentId mismatch rejection, and idempotency.
+  if (!filter || filter.test("releaseClaimForStory")) {
+    console.log("[e2e] mini-run: releaseClaimForStory immediate-recovery");
+    const releaseClaimOutcomes = await runReleaseClaimForStoryMiniRun();
+    outcomes.push(...releaseClaimOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);

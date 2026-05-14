@@ -13,6 +13,7 @@ import { markStoryFailed } from "./tools/mark-story-failed.js";
 import { markStoryNeedsRework } from "./tools/mark-story-needs-rework.js";
 import { validateAcceptanceCriteria } from "./tools/validate-acceptance-criteria.js";
 import { releaseStaleClaims } from "./tools/release-stale-claims.js";
+import { releaseClaimForStory } from "./tools/release-claim-for-story.js";
 import { getOrInitConfig } from "./tools/get-or-init-config.js";
 import { commitStoryArtefacts } from "./tools/commit-story-artefacts.js";
 import { lintSprint } from "./tools/lint-sprint.js";
@@ -250,6 +251,17 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       inputSchema: { olderThanMinutes: z.number().positive() },
     },
     async ({ olderThanMinutes }) => json(await releaseStaleClaims(ctx, olderThanMinutes)),
+  );
+
+  server.registerTool(
+    "releaseClaimForStory",
+    {
+      title: "Release claim for story",
+      description:
+        "Immediately reset an in_progress story back to ready, but only when the supplied agentId matches the current claim holder. Idempotent when the story is not claimed. Use for fast recovery when prepareStoryBranch fails immediately after claimStory — before releaseStaleClaims would kick in.",
+      inputSchema: { storyId: z.string(), agentId: z.string() },
+    },
+    async ({ storyId, agentId }) => json(await releaseClaimForStory(ctx, storyId, agentId)),
   );
 
   return server;
