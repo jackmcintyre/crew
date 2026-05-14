@@ -74,6 +74,14 @@ export const OrchestratorMeta = z
       .optional(),
     /** Timestamp of the last failure. Cleared by `recordStoryReopen`. */
     failed_at: z.string().datetime({ offset: true }).optional(),
+    /**
+     * ISO timestamp written by `markDevReturned` when the dev subagent
+     * finishes its implementation swing. `recordStoryFailure` and
+     * `validateAcceptanceCriteria` refuse when this is absent, preventing
+     * the reviewer from evaluating ACs before any dev work has happened.
+     * Cleared by `recordStoryReopen` alongside other failure fields.
+     */
+    dev_returned_at: z.string().datetime({ offset: true }).optional(),
   })
   .passthrough()
   .default({});

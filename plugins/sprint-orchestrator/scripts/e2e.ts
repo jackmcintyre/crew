@@ -26,6 +26,7 @@ import { claimStory } from "../packages/mcp-server/src/tools/claim-story.js";
 import { commitStoryArtefacts } from "../packages/mcp-server/src/tools/commit-story-artefacts.js";
 import { markStoryComplete } from "../packages/mcp-server/src/tools/mark-story-complete.js";
 import { markStoryFailed } from "../packages/mcp-server/src/tools/mark-story-failed.js";
+import { markDevReturned } from "../packages/mcp-server/src/tools/mark-dev-returned.js";
 import { markStoryNeedsRework } from "../packages/mcp-server/src/tools/mark-story-needs-rework.js";
 import { prepareStoryBranch } from "../packages/mcp-server/src/tools/prepare-story-branch.js";
 import { recordStoryReopen } from "../packages/mcp-server/src/tools/record-story-reopen.js";
@@ -313,6 +314,7 @@ async function driveFailingStory(
   await logStoryStart(ctx.projectRoot, storyId, agent);
   const claim = await claimStory(ctx, storyId, agent);
   if (!claim.claimed) throw new Error(`could not claim ${storyId}`);
+  await markDevReturned(ctx, storyId, agent);
   await markStoryFailed(ctx, storyId, reason);
   await logStoryEnd(ctx.projectRoot, storyId, "failed");
 }
@@ -1000,6 +1002,10 @@ async function runReviewerReworkOnFirstACMissMiniRun(): Promise<AssertionOutcome
       throw new Error(`commit attempt failed: ${commitAttempt.stderr}`);
     }
 
+    // Signal that the dev subagent has finished its swing before the reviewer
+    // evaluates ACs. Without this, validateAcceptanceCriteria refuses.
+    await markDevReturned(ctx, "C", agent);
+
     // Reviewer pass: validateAcceptanceCriteria should fail.
     const validation = await validateAcceptanceCriteria(ctx, "C");
 
@@ -1140,6 +1146,7 @@ async function runReviewerBlockedOnRejectedTransitionMiniRun(): Promise<Assertio
     // cannot transition out of).
     const claim1 = await claimStory(ctx, "C", "agent-prior-session");
     if (!claim1.claimed) throw new Error(`could not claim C: holder=${claim1.holder ?? "?"}`);
+    await markDevReturned(ctx, "C", "agent-prior-session");
     await markStoryFailed(ctx, "C", "prior session gave up");
 
     // Sanity: story is now `failed`.
@@ -1289,6 +1296,7 @@ async function runRecordStoryReopenMiniRun(): Promise<AssertionOutcome[]> {
     if (!claim.claimed) throw new Error(`could not claim C: holder=${claim.holder ?? "?"}`);
 
     // One rework attempt (cap default is 2). After this, rework_count=1.
+    await markDevReturned(ctx, "C", agent);
     await markStoryNeedsRework(ctx, "C", agent, "first reviewer rejection");
 
     // Reviewer gives up. Flip to failed (cap reached, no-code failure, etc).
@@ -3409,6 +3417,16 @@ async function main(): Promise<number> {
     outcomes.push(...prPerStoryBeforeClaimOutcomes);
   }
 
+  // acs-only-evaluate-after-dev sprint, story 1: dev_returned_at guard prevents
+  // ACs from being evaluated before the dev subagent has produced any work.
+  if (!filter || filter.test("orchestrator refuses to evaluate ACs before dev has produced work")) {
+    console.log(
+      "[e2e] mini-run: dev_returned_at guard on recordStoryFailure + validateAcceptanceCriteria",
+    );
+    const devReturnedOutcomes = await runDevReturnedGuardMiniRun();
+    outcomes.push(...devReturnedOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -4306,6 +4324,160 @@ async function runPrPerStorySetupBeforeFirstClaimMiniRun(): Promise<AssertionOut
           hasPrompt,
           `expected PR_PER_STORY_SETUP_PROMPT in setupQuestions when pr_per_story is absent from config, ` +
             `got ${JSON.stringify(questions)}`,
+        );
+      },
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
+ * story 1 of acs-only-evaluate-after-dev sprint:
+ * ACs only evaluate after the dev subagent returns.
+ *
+ * Sets up a temp dir with a real sprint-status.yaml, claims a story (real MCP
+ * tool), then tries to call recordStoryFailure / validateAcceptanceCriteria
+ * WITHOUT setting dev_returned_at. Asserts the refusal fires with the
+ * structured reason "ac_evaluation_before_dev_returned".
+ *
+ * Grep tag: "orchestrator refuses to evaluate ACs before dev has produced work"
+ */
+async function runDevReturnedGuardMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-dev-returned-guard-"));
+  try {
+    await fs.writeFile(
+      path.join(tmp, "sprint-status.yaml"),
+      [
+        "sprint_id: dev-returned-guard-fixture",
+        "schema_version: 1",
+        "stories:",
+        "  - id: 'G1'",
+        "    title: Guard test story",
+        "    status: ready",
+        "    depends_on: []",
+        "    acceptance_criteria:",
+        "      checks: []",
+        "    orchestrator: {}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: sprint-status.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: false",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, "sprint-status.yaml"),
+      configPath: path.join(configDir, "config.yaml"),
+    };
+
+    // Claim the story so it is in_progress — exactly as it would be right after
+    // claimStory and before the dev subagent has done any work.
+    const claim = await claimStory(ctx, "G1", "agent-guard-test");
+    if (!claim.claimed) {
+      outcomes.push({
+        name: "orchestrator refuses to evaluate ACs before dev has produced work: setup claim",
+        passed: false,
+        error: `could not claim G1: holder=${claim.holder ?? "?"}`,
+      });
+      return outcomes;
+    }
+
+    // ── Attempt 1: recordStoryFailure without dev_returned_at ────────────────
+    let failureRefused = false;
+    let failureReason = "";
+    try {
+      await markStoryFailed(ctx, "G1", "should not reach this");
+    } catch (err) {
+      failureRefused = true;
+      failureReason = (err as Error & { code?: string }).code ?? (err as Error).message;
+    }
+
+    await runOne({
+      name: "orchestrator refuses to evaluate ACs before dev has produced work: recordStoryFailure refused",
+      run: () => {
+        expect(
+          failureRefused,
+          "recordStoryFailure must throw when dev_returned_at is absent — it did not throw",
+        );
+        expect(
+          failureReason === "ac_evaluation_before_dev_returned",
+          `expected error code "ac_evaluation_before_dev_returned", got "${failureReason}"`,
+        );
+      },
+    });
+
+    // ── Attempt 2: validateAcceptanceCriteria without dev_returned_at ────────
+    let validateRefused = false;
+    let validateReason = "";
+    try {
+      await validateAcceptanceCriteria(ctx, "G1");
+    } catch (err) {
+      validateRefused = true;
+      validateReason = (err as Error & { code?: string }).code ?? (err as Error).message;
+    }
+
+    await runOne({
+      name: "orchestrator refuses to evaluate ACs before dev has produced work: validateAcceptanceCriteria refused",
+      run: () => {
+        expect(
+          validateRefused,
+          "validateAcceptanceCriteria must throw when dev_returned_at is absent — it did not throw",
+        );
+        expect(
+          validateReason === "ac_evaluation_before_dev_returned",
+          `expected error code "ac_evaluation_before_dev_returned", got "${validateReason}"`,
+        );
+      },
+    });
+
+    // ── After markDevReturned, both calls must be allowed ────────────────────
+    await markDevReturned(ctx, "G1", "agent-guard-test");
+
+    let validateAllowedAfterReturn = false;
+    try {
+      await validateAcceptanceCriteria(ctx, "G1");
+      validateAllowedAfterReturn = true;
+    } catch {
+      validateAllowedAfterReturn = false;
+    }
+
+    await runOne({
+      name: "orchestrator refuses to evaluate ACs before dev has produced work: validateAcceptanceCriteria allowed after markDevReturned",
+      run: () => {
+        expect(
+          validateAllowedAfterReturn,
+          "validateAcceptanceCriteria must succeed after markDevReturned — it threw",
         );
       },
     });

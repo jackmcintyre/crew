@@ -83,7 +83,9 @@ stories:
     status: in_progress
     depends_on: []
     acceptance_criteria: { checks: [] }
-    orchestrator: { claimed_by: me }
+    orchestrator:
+      claimed_by: me
+      dev_returned_at: "2026-05-14T00:00:00.000Z"
 `,
     );
     // Stage a change so commitAll has something to commit
@@ -106,7 +108,9 @@ stories:
         - type: shell
           cmd: exit 1
           expect_exit: 0
-    orchestrator: { claimed_by: me }
+    orchestrator:
+      claimed_by: me
+      dev_returned_at: "2026-05-14T00:00:00.000Z"
 `,
     );
     const r = await handleStop({ cwd: root });

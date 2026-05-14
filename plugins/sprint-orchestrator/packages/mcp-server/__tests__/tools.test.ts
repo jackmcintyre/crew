@@ -10,6 +10,7 @@ import { getStoryContext } from "../src/tools/get-story-context.js";
 import { claimStory } from "../src/tools/claim-story.js";
 import { markStoryComplete } from "../src/tools/mark-story-complete.js";
 import { markStoryFailed } from "../src/tools/mark-story-failed.js";
+import { markDevReturned } from "../src/tools/mark-dev-returned.js";
 import { recordStoryReopen } from "../src/tools/record-story-reopen.js";
 import { validateAcceptanceCriteria } from "../src/tools/validate-acceptance-criteria.js";
 import { releaseStaleClaims } from "../src/tools/release-stale-claims.js";
@@ -233,6 +234,7 @@ describe("markStoryComplete", () => {
 describe("markStoryFailed", () => {
   it("transitions to failed with reason", async () => {
     const { ctx } = await setup();
+    await markDevReturned(ctx, "S1", "agent-a");
     await markStoryFailed(ctx, "S1", "compiler exploded");
     const state = await getSprintStatus(ctx);
     const s1 = state.stories.find((s) => s.id === "S1")!;
@@ -244,6 +246,7 @@ describe("markStoryFailed", () => {
 describe("validateAcceptanceCriteria", () => {
   it("returns passed=true when all checks pass", async () => {
     const { ctx } = await setup();
+    await markDevReturned(ctx, "S1", "agent-a");
     const r = await validateAcceptanceCriteria(ctx, "S1"); // S1 has empty checks
     expect(r.passed).toBe(true);
     expect(r.results).toEqual([]);
@@ -266,6 +269,7 @@ describe("validateAcceptanceCriteria", () => {
       ],
     };
     const { ctx } = await setup(variant as unknown as typeof baseSprint);
+    await markDevReturned(ctx, "S1", "agent-a");
     const r = await validateAcceptanceCriteria(ctx, "S1");
     expect(r.passed).toBe(true);
     expect(r.results.map((x) => x.type)).toEqual(["shell", "file_exists", "regex"]);
@@ -288,6 +292,7 @@ describe("validateAcceptanceCriteria", () => {
       ],
     };
     const { ctx } = await setup(variant as unknown as typeof baseSprint);
+    await markDevReturned(ctx, "S1", "agent-a");
     const r = await validateAcceptanceCriteria(ctx, "S1");
     expect(r.passed).toBe(false);
     expect(r.results[0]!.passed).toBe(false);
@@ -310,6 +315,7 @@ describe("validateAcceptanceCriteria", () => {
       ],
     };
     const { ctx } = await setup(variant as unknown as typeof baseSprint);
+    await markDevReturned(ctx, "S1", "agent-a");
     const r = await validateAcceptanceCriteria(ctx, "S1");
     expect(r.passed).toBe(false);
     expect(r.results.every((c) => !c.passed)).toBe(true);
@@ -748,6 +754,7 @@ describe("recordStoryReopen", () => {
     // last_failure_reason get populated.
     const claim = await claimStory(ctx, "S1", "agent-orig");
     expect(claim.claimed).toBe(true);
+    await markDevReturned(ctx, "S1", "agent-orig");
     await markStoryFailed(ctx, "S1", "designed-to-fail");
     return { ctx, root };
   }

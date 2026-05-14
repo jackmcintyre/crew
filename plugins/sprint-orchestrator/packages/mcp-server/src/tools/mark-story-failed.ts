@@ -1,5 +1,6 @@
 import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-status.js";
 import { commitSprintState } from "../lib/commit-state.js";
+import { DevNotReturnedError } from "../lib/errors.js";
 import { type ToolContext } from "./context.js";
 
 export interface MarkStoryFailedResult {
@@ -27,6 +28,9 @@ export async function markStoryFailed(
   const failed_at = new Date().toISOString();
   await updateSprintStatus(ctx.sprintStatusPath, async (state) => {
     const story = findStory(state, storyId);
+    if (!story.orchestrator.dev_returned_at) {
+      throw new DevNotReturnedError(storyId);
+    }
     const updated = {
       ...story,
       status: "failed" as const,
