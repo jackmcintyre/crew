@@ -6,7 +6,7 @@ Works standalone or with BMAD v6 planning artefacts. When BMAD layout is detecte
 
 ## Status
 
-**Phase 1 — skeleton.** Scaffolding only. Tools, hooks, and agents are stubs. See `project.md` for the full build spec.
+**Active development.** Core state machine is shipped; tools, hooks, and agents are live.
 
 ## Quickstart
 
@@ -162,6 +162,16 @@ Then in Claude Code:
 ```
 
 > **Heads-up — adding or renaming MCP tools requires a full Claude Code restart.** `/reload-plugins` reloads the MCP server but does not refresh Claude Code's deferred-tools registry, so newly registered tools (or renames) stay invisible until you exit and relaunch. If you upgrade this plugin and the orchestrator can't see a new tool, restart Claude Code.
+
+## Configuration
+
+On first run the orchestrator writes `.sprint-orchestrator/config.yaml` automatically via `getOrInitConfig`. To pre-configure or customise knobs before the first run, copy the example and edit it:
+
+```bash
+cp plugins/sprint-orchestrator/docs/example-config.yaml .sprint-orchestrator/config.yaml
+```
+
+See [`docs/example-config.yaml`](docs/example-config.yaml) for the full list of optional settings (`turn_cap_per_story`, `pr_per_story`, `force_release_stale`, etc.).
 
 ## Story lifecycle
 
