@@ -62,3 +62,14 @@ export class AcceptanceFailedError extends OrchestratorError {
     super(`Acceptance criteria failed for ${storyId}`, "ACCEPTANCE_FAILED", { storyId, failures });
   }
 }
+
+export class DevNotReturnedError extends OrchestratorError {
+  constructor(storyId: string) {
+    super(
+      `AC evaluation refused for ${storyId}: dev_returned_at is not set. ` +
+        `The dev subagent must call markDevReturned before the reviewer evaluates ACs.`,
+      "ac_evaluation_before_dev_returned",
+      { storyId, reason: "ac_evaluation_before_dev_returned" },
+    );
+  }
+}

@@ -6,6 +6,7 @@ import { readSprintStatus } from "@sprint-orchestrator/mcp-server/dist/state/spr
 import { validateAcceptanceCriteria } from "@sprint-orchestrator/mcp-server/dist/tools/validate-acceptance-criteria.js";
 import { markStoryComplete } from "@sprint-orchestrator/mcp-server/dist/tools/mark-story-complete.js";
 import { markStoryFailed } from "@sprint-orchestrator/mcp-server/dist/tools/mark-story-failed.js";
+import { DevNotReturnedError } from "@sprint-orchestrator/mcp-server/dist/lib/errors.js";
 
 /**
  * v1 (MAX=1 concurrency): if exactly one story is in_progress, treat it as
@@ -63,7 +64,18 @@ async function handleClaimed(
   const holder = story.orchestrator.claimed_by;
   if (!holder) return { action: "noop", reason: "in_progress story has no claimant" };
 
-  const result = await validateAcceptanceCriteria(ctx, story.id);
+  // Guard: if dev_returned_at is not set, the dev subagent hasn't finished its
+  // swing yet. We cannot evaluate ACs on a pre-dev state, so bail out as a
+  // noop rather than spuriously failing the story.
+  let result;
+  try {
+    result = await validateAcceptanceCriteria(ctx, story.id);
+  } catch (err) {
+    if (err instanceof DevNotReturnedError) {
+      return { action: "noop", reason: "dev has not returned yet; skipping AC evaluation" };
+    }
+    throw err;
+  }
   if (!result.passed) {
     const failed = result.results.filter((r) => !r.passed);
     const reason = `Acceptance criteria failed: ${failed.map((r) => r.type).join(", ")}`;

@@ -20,6 +20,7 @@ import { prepareStoryBranch } from "./tools/prepare-story-branch.js";
 import { recordStoryReopen } from "./tools/record-story-reopen.js";
 import { resolveSpawnModel } from "./tools/resolve-spawn-model.js";
 import { setConfigPrPerStory } from "./tools/set-config-pr-per-story.js";
+import { markDevReturned } from "./tools/mark-dev-returned.js";
 
 export const PLUGIN_NAME = "sprint-orchestrator";
 
@@ -116,6 +117,17 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       inputSchema: { storyId: z.string(), agentId: z.string() },
     },
     async ({ storyId, agentId }) => json(await prepareStoryBranch(ctx, storyId, agentId)),
+  );
+
+  server.registerTool(
+    "markDevReturned",
+    {
+      title: "Mark dev returned",
+      description:
+        "Persist orchestrator.dev_returned_at for a story. The dev subagent calls this immediately before returning its summary. recordStoryFailure and validateAcceptanceCriteria refuse when this timestamp is absent, preventing spurious reviewer failures before any dev work has happened.",
+      inputSchema: { storyId: z.string(), agentId: z.string() },
+    },
+    async ({ storyId, agentId }) => json(await markDevReturned(ctx, storyId, agentId)),
   );
 
   server.registerTool(
