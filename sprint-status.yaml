@@ -31,11 +31,11 @@ stories:
     orchestrator:
       claimed_by: dev-1747268400-s1
       claimed_at: 2026-05-14T01:21:19.103Z
-      rework_count: 0
       completed_at: 2026-05-14T01:25:07.497Z
       summary: Deleted the orphan sdk-runner package, removed stale project.md, moved example-config.yaml
         to plugins/sprint-orchestrator/docs/ (tracked in git, linked from README), and cleaned up
         the stale run.log; all 127 tests pass.
+      rework_count: 0
       artefacts:
         - git:7c0477a6cf4659da46aae03a7947e4408b29084a
         - plugins/sprint-orchestrator/docs/example-config.yaml
@@ -48,7 +48,7 @@ stories:
       DO NOT touch the repo-root .gitignore line `.sprint-orchestrator/` — it protects real runtime state. The replacement example config must live at a path that doesn't match that pattern.
   - id: "2"
     title: Bundled examples/hello-sprint/ quickstart
-    status: ready
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -74,7 +74,16 @@ stories:
           cmd: "grep -qE 'type: (shell|file_exists)' examples/hello-sprint/sprint-status.yaml"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-1747268400-s2
+      claimed_at: 2026-05-14T01:25:14.636Z
       rework_count: 0
+      completed_at: 2026-05-14T01:29:04.331Z
+      summary: Added examples/hello-sprint/ with a 2-story sprint-status.yaml and README, no node deps,
+        all 7 acceptance checks pass.
+      artefacts:
+        - examples/hello-sprint/sprint-status.yaml
+        - examples/hello-sprint/README.md
+        - git:0762cb70bbe075d7420acf2ec2f737997cf2d7b4
     notes: >
       Create examples/hello-sprint/ — minimal bundled example sprint that proves the loop end-to-end
       in under 5 minutes. Contains orchestrator-schema sprint-status.yaml with 2 stories (trivial
