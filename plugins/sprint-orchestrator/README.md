@@ -18,7 +18,7 @@ stack of shipped, reviewed PRs.
 ```bash
 git clone https://github.com/jackmcintyre/claude-dev-loop.git
 cd claude-dev-loop
-pnpm install        # installs deps and builds the plugin
+pnpm --dir plugins/sprint-orchestrator install
 ```
 
 Then inside Claude Code, from the repo root:
