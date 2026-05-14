@@ -76,6 +76,7 @@ import {
   DEFAULT_REVIEWER_MODEL,
 } from "../packages/mcp-server/src/tools/model-tiering-defaults.js";
 import { RESOLVE_SPAWN_MODEL_INSTRUCTION } from "../packages/mcp-server/src/tools/process-backlog-spawn-phrases.js";
+import { PR_PER_STORY_SETUP_PROMPT } from "../packages/mcp-server/src/tools/pr-per-story-setup-phrases.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
@@ -3380,6 +3381,15 @@ async function main(): Promise<number> {
     outcomes.push(...escalationOutcomes);
   }
 
+  // mvp-polish sprint, story 5: getOrInitConfig surfaces pr_per_story setup
+  // question when the field is absent from the config (or no config exists),
+  // and omits it when the field is explicitly set.
+  if (!filter || filter.test("getOrInitConfig surfaces pr_per_story setup question when missing")) {
+    console.log("[e2e] mini-run: getOrInitConfig pr_per_story setup prompt");
+    const prPerStoryOutcomes = await runGetOrInitConfigPrPerStoryMiniRun();
+    outcomes.push(...prPerStoryOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -3773,6 +3783,187 @@ async function runResolveSpawnModelEscalationMiniRun(): Promise<AssertionOutcome
       await fs.rm(tmp, { recursive: true, force: true });
     }
   }
+
+  return outcomes;
+}
+
+/**
+ * mvp-polish sprint, story 5 — getOrInitConfig surfaces pr_per_story setup question.
+ *
+ * Three fixtures:
+ *  1. no-config — no .sprint-orchestrator/config.yaml exists; question must appear.
+ *  2. existing-without-field — config exists but pr_per_story is absent; question must appear.
+ *  3. existing-with-field — config exists with pr_per_story: true; question must NOT appear.
+ *
+ * Each fixture builds a real temp directory and invokes the **registered**
+ * `getOrInitConfig` MCP tool through an in-memory client/server pair (NOT the
+ * helper directly). Also asserts SKILL.md contains PR_PER_STORY_SETUP_PROMPT verbatim.
+ *
+ * Grep tag: "getOrInitConfig surfaces pr_per_story setup question when missing".
+ */
+async function runGetOrInitConfigPrPerStoryMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  interface FixtureSpec {
+    name: string;
+    /** Whether to write a config.yaml file at all. */
+    writeConfig: boolean;
+    /** pr_per_story value to write, or undefined to omit the field. */
+    prPerStory?: boolean;
+    /** Whether the setup question should appear in the response. */
+    expectQuestion: boolean;
+  }
+
+  const fixtures: FixtureSpec[] = [
+    {
+      name: "no-config",
+      writeConfig: false,
+      expectQuestion: true,
+    },
+    {
+      name: "existing-without-field",
+      writeConfig: true,
+      prPerStory: undefined,
+      expectQuestion: true,
+    },
+    {
+      name: "existing-with-field",
+      writeConfig: true,
+      prPerStory: true,
+      expectQuestion: false,
+    },
+  ];
+
+  for (const fx of fixtures) {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), `sprint-orch-pr-per-story-${fx.name}-`));
+    try {
+      // Real sprint-status.yaml fixture — minimum the schema accepts.
+      await fs.writeFile(
+        path.join(tmp, "sprint-status.yaml"),
+        [
+          "sprint_id: pr-per-story-fixture",
+          "schema_version: 1",
+          "stories:",
+          "  - id: '1'",
+          "    title: fixture story",
+          "    status: ready",
+          "    depends_on: []",
+          "    acceptance_criteria:",
+          "      checks: []",
+          "    orchestrator: {}",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const configDir = path.join(tmp, ".sprint-orchestrator");
+      await fs.mkdir(configDir, { recursive: true });
+
+      if (fx.writeConfig) {
+        const configLines = [
+          "sprintStatusPath: sprint-status.yaml",
+          "layout: custom",
+          "autoDetected: false",
+        ];
+        if (fx.prPerStory !== undefined) {
+          configLines.push(`pr_per_story: ${fx.prPerStory}`);
+        }
+        configLines.push("");
+        await fs.writeFile(path.join(configDir, "config.yaml"), configLines.join("\n"), "utf8");
+      }
+
+      const ctx: ToolContext = {
+        projectRoot: tmp,
+        sprintStatusPath: path.join(tmp, "sprint-status.yaml"),
+        configPath: path.join(configDir, "config.yaml"),
+      };
+      const server = buildServer(ctx);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client(
+        { name: "e2e-pr-per-story-setup", version: "0.0.1" },
+        { capabilities: {} },
+      );
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+      let parsed: { setupQuestions?: unknown[]; needsSetup?: unknown } = {};
+      try {
+        const result = (await client.callTool({
+          name: "getOrInitConfig",
+          arguments: {},
+        })) as { content?: Array<{ type: string; text?: string }> };
+        const textPart = result.content?.find((c) => c.type === "text");
+        if (textPart?.text) {
+          parsed = JSON.parse(textPart.text) as {
+            setupQuestions?: unknown[];
+            needsSetup?: unknown;
+          };
+        }
+      } finally {
+        await client.close();
+        await server.close();
+      }
+
+      const questions: unknown[] = Array.isArray(parsed.setupQuestions)
+        ? parsed.setupQuestions
+        : [];
+      const hasPrompt = questions.some((q) => q === PR_PER_STORY_SETUP_PROMPT);
+
+      await runOne({
+        name: `getOrInitConfig surfaces pr_per_story setup question when missing: fixture=${fx.name} expectQuestion=${fx.expectQuestion}`,
+        run: () => {
+          if (fx.expectQuestion) {
+            expect(
+              hasPrompt,
+              `expected PR_PER_STORY_SETUP_PROMPT in setupQuestions for fixture ${fx.name}, got ${JSON.stringify(questions)}`,
+            );
+          } else {
+            expect(
+              !hasPrompt,
+              `expected PR_PER_STORY_SETUP_PROMPT to be absent from setupQuestions for fixture ${fx.name}, got ${JSON.stringify(questions)}`,
+            );
+          }
+        },
+      });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  }
+
+  // Phrase-lock assertion: SKILL.md must contain PR_PER_STORY_SETUP_PROMPT verbatim.
+  const skillPath = path.resolve(HERE, "..", "skills", "process-backlog", "SKILL.md");
+  let skillText = "";
+  try {
+    skillText = await fs.readFile(skillPath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "getOrInitConfig surfaces pr_per_story setup question when missing: SKILL.md is readable",
+      passed: false,
+      error: `could not read SKILL.md at ${skillPath}: ${msg}`,
+    });
+    return outcomes;
+  }
+  await runOne({
+    name: "getOrInitConfig surfaces pr_per_story setup question when missing: SKILL.md contains PR_PER_STORY_SETUP_PROMPT verbatim",
+    run: () => {
+      expect(
+        skillText.includes(PR_PER_STORY_SETUP_PROMPT),
+        `SKILL.md does not contain the phrase-locked PR_PER_STORY_SETUP_PROMPT verbatim. Expected: '${PR_PER_STORY_SETUP_PROMPT}'`,
+      );
+    },
+  });
 
   return outcomes;
 }

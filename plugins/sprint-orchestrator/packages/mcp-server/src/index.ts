@@ -19,6 +19,7 @@ import { lintSprint } from "./tools/lint-sprint.js";
 import { prepareStoryBranch } from "./tools/prepare-story-branch.js";
 import { recordStoryReopen } from "./tools/record-story-reopen.js";
 import { resolveSpawnModel } from "./tools/resolve-spawn-model.js";
+import { setConfigPrPerStory } from "./tools/set-config-pr-per-story.js";
 
 export const PLUGIN_NAME = "sprint-orchestrator";
 
@@ -227,6 +228,17 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       },
     },
     async ({ storyId, role }) => json(await resolveSpawnModel(ctx, { storyId, role })),
+  );
+
+  server.registerTool(
+    "setConfigPrPerStory",
+    {
+      title: "Set config pr_per_story",
+      description:
+        "Persist the user's pr_per_story preference (true = open a branch + PR per story; false = commit directly to the working branch) to `.sprint-orchestrator/config.yaml`. Refuses if no config file exists yet — the user must complete layout setup via `getOrInitConfig` first.",
+      inputSchema: { value: z.boolean() },
+    },
+    async ({ value }) => json(await setConfigPrPerStory(ctx, value)),
   );
 
   server.registerTool(

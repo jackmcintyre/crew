@@ -4,6 +4,7 @@ description: Drive the sprint backlog by claiming ready stories one at a time an
 user-invocable: true
 allowed-tools:
   - "mcp__sprint-orchestrator__getOrInitConfig"
+  - "mcp__sprint-orchestrator__setConfigPrPerStory"
   - "mcp__sprint-orchestrator__getSprintStatus"
   - "mcp__sprint-orchestrator__getReadyStories"
   - "mcp__sprint-orchestrator__claimStory"
@@ -17,7 +18,9 @@ You orchestrate sprint execution. You do not implement stories yourself and you 
 
 ## Setup (run once per invocation)
 
-1. Call `getOrInitConfig`. If `needsSetup` is true, ask the user the `setupQuestions` it returned, then stop and tell them to re-invoke once their layout is documented in `.sprint-orchestrator/config.yaml`. Do not guess paths.
+1. Call `getOrInitConfig`.
+   - If `needsSetup` is true, ask the user the `setupQuestions` it returned, then stop and tell them to re-invoke once their layout is documented in `.sprint-orchestrator/config.yaml`. Do not guess paths.
+   - If `needsSetup` is false but the response includes a non-empty `setupQuestions[]`, surface each question to the user now. The most common case is the `pr_per_story` first-run prompt: "Should the orchestrator open a branch + PR per story (more reviewable, more GitHub churn), or let stories commit directly to the current working branch (faster, less inspectable)? Reply `yes` to enable per-story PRs or `no` to use shared-branch mode. This choice is persisted; you can change it later by editing `pr_per_story` in `.sprint-orchestrator/config.yaml`." — after the user answers, call `setConfigPrPerStory` with `value: true` (yes) or `value: false` (no) to persist the answer, then continue without stopping the run.
 2. If the returned config has `force_release_stale` set to a positive number `N`, call `releaseStaleClaims` with `olderThanMinutes: N` exactly once before entering the main loop. This is the only situation in which you may release stale claims automatically — without that opt-in flag, leave stale claims alone (see Rules).
 
 ## Main loop

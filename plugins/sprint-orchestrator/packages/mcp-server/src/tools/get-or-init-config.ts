@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as YAML from "yaml";
 import { type ToolContext } from "./context.js";
+import { PR_PER_STORY_SETUP_PROMPT } from "./pr-per-story-setup-phrases.js";
 
 export interface OrchestratorConfig {
   /** Where the sprint-status file lives, relative to projectRoot. */
@@ -82,7 +83,10 @@ export interface ConfigResult {
   config: OrchestratorConfig | null;
   needsSetup: boolean;
   /**
-   * If needsSetup, suggested questions for Claude to ask the human.
+   * Suggested questions for Claude to ask the human. Present when `needsSetup`
+   * is true (layout questions) AND/OR when the config exists but `pr_per_story`
+   * was not explicitly set (the PR_PER_STORY_SETUP_PROMPT is appended). The
+   * orchestrator skill should surface all entries regardless of `needsSetup`.
    */
   setupQuestions?: string[];
 }
@@ -94,12 +98,23 @@ export interface ConfigResult {
  */
 export async function getOrInitConfig(ctx: ToolContext): Promise<ConfigResult> {
   const existing = await readExisting(ctx.configPath);
-  if (existing) return { config: withPrPerStoryDefaults(existing), needsSetup: false };
+  if (existing) {
+    const needsPrPrompt = existing.pr_per_story === undefined;
+    return {
+      config: withPrPerStoryDefaults(existing),
+      needsSetup: false,
+      ...(needsPrPrompt ? { setupQuestions: [PR_PER_STORY_SETUP_PROMPT] } : {}),
+    };
+  }
 
   const detected = await detectBmadV6(ctx.projectRoot);
   if (detected) {
     await writeConfig(ctx.configPath, detected);
-    return { config: withPrPerStoryDefaults(detected), needsSetup: false };
+    return {
+      config: withPrPerStoryDefaults(detected),
+      needsSetup: false,
+      setupQuestions: [PR_PER_STORY_SETUP_PROMPT],
+    };
   }
 
   return {
@@ -110,6 +125,7 @@ export async function getOrInitConfig(ctx: ToolContext): Promise<ConfigResult> {
       "Where is your PRD? (relative path, optional)",
       "Where is your architecture / solution-design doc? (relative path, optional)",
       "Where do individual story files live? (directory, optional)",
+      PR_PER_STORY_SETUP_PROMPT,
     ],
   };
 }
