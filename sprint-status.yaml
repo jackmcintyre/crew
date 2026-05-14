@@ -194,7 +194,7 @@ stories:
       implementation summary so the reviewer can decide whether to expand scope or defer.
   - id: "3"
     title: run-sprint refuses to launch with uncommitted sprint-status.yaml
-    status: ready
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -202,7 +202,7 @@ stories:
           cmd: grep -qE "git status|uncommitted|dirty" plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
           expect_exit: 0
         - type: shell
-          cmd: grep -q UNCOMMITTED_BACKLOG_REFUSAL plugins/sprint-orchestrator/packages/mcp-server/src/tools
+          cmd: grep -rq UNCOMMITTED_BACKLOG_REFUSAL plugins/sprint-orchestrator/packages/mcp-server/src/tools
           expect_exit: 0
         - type: shell
           cmd: grep -q "Commit sprint-status.yaml" _bmad-output/planning-artifacts/planning-discipline.md
@@ -215,6 +215,8 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-90219e38-s3-recover2
+      claimed_at: 2026-05-14T09:30:09.902Z
       rework_count: 1
       last_review_feedback: "AC #2 is a planning-discipline Rule 4 violation — the shell command `grep -q
         UNCOMMITTED_BACKLOG_REFUSAL plugins/sprint-orchestrator/packages/mcp-server/src/tools` exits
@@ -230,10 +232,6 @@ stories:
         repair."
       last_review_at: 2026-05-14T09:07:00.771Z
       base_branch: main
-      dev_returned_at: 2026-05-14T09:02:25.103Z
-      branch: 3-run-sprint-refuses-to-launch-with-uncomm
-      branch_prepared_by: dev-90219e38-s3
-      branch_prepared_at: 2026-05-14T08:54:45.808Z
       reopen_history:
         - reopened_at: 2026-05-14T09:26:48.233Z
           reason: "story 3's persist-3-completion commit (9325c5c) didn't make it onto PR #36 before merge;
@@ -241,6 +239,19 @@ stories:
           prior_status: failed
           prior_failure_reason: "Acceptance criteria failed: shell"
           reopened_by_agent_id: human-jack
+      dev_returned_at: 2026-05-14T09:30:29.555Z
+      branch: 3-run-sprint-refuses-to-launch-with-uncomm
+      branch_prepared_by: dev-90219e38-s3-recover
+      branch_prepared_at: 2026-05-14T09:27:35.386Z
+      completed_at: 2026-05-14T09:31:43.545Z
+      summary: run-sprint preflight check now refuses to launch when sprint-status.yaml has uncommitted
+        changes, with phrase-locked refusal constant UNCOMMITTED_BACKLOG_REFUSAL, updated SKILL.md,
+        planning-discipline.md rule, and 3/3 e2e assertions passing.
+      artefacts:
+        - git:bf45226f55f0e8fb96b2772c05f666bf0cfa74f6
+        - plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-preflight-phrases.ts
+        - _bmad-output/planning-artifacts/planning-discipline.md
     notes: >
       During the hardening sprint launch, sprint-status.yaml was never committed. When PR #29 merged
       to main, the merge overwrote the live backlog file. Manual recovery from a dangling git blob
