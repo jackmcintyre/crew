@@ -170,11 +170,11 @@ stories:
     orchestrator:
       claimed_by: dev-1747268400-s4
       claimed_at: 2026-05-14T01:41:26.803Z
-      rework_count: 0
       completed_at: 2026-05-14T01:44:08.045Z
       summary: Canonical install path documented in both repo-root README.md and
         plugins/sprint-orchestrator/README.md, including prerequisites, clone, pnpm install, /plugin
         install, and hello-sprint example reference.
+      rework_count: 0
       artefacts:
         - git:d0d97b34a750d2766475f6d8e4137db467778b02
         - README.md
@@ -248,7 +248,7 @@ stories:
       via in-memory MCP client. Do NOT reinvent; copy the resolveSpawnModel mini-run shape.
   - id: "6"
     title: Ship gate — pnpm e2e + pnpm verify green + manual install-from-clean smoketest
-    status: ready
+    status: in_progress
     depends_on:
       - "1"
       - "2"
@@ -270,7 +270,55 @@ stories:
           cmd: test -f README.md && test -f plugins/sprint-orchestrator/README.md
           expect_exit: 0
     orchestrator:
-      rework_count: 0
+      claimed_by: dev-1747268400-s6
+      claimed_at: 2026-05-14T01:44:52.729Z
+      rework_count: 1
+      last_review_feedback: >-
+        AC1 (pnpm e2e) fails: 5 assertions fail, all because plugins/sprint-orchestrator/README.md
+        is missing a '## Running a sprint' section. Specific failures:
+
+
+        1. 'run-sprint section exists' — the e2e test looks for a heading literally matching '##
+        Running a sprint' and does not find it.
+
+        2. 'raw /goal manual override is documented' — the section must contain the exact substring:
+        '/goal /sprint-orchestrator:process-backlog UNTIL every story in sprint-status.yaml is
+        status=done or status=failed, OR stop after'
+
+        3. Three additional 'running-a-sprint section exists' checks from the adopt,
+        last-line/clipboard, and adapt-bmad mini-runs all fail for the same root cause.
+
+
+        All other 96 assertions pass. ACs 2, 3, 4 pass.
+
+
+        Fix required: add a '## Running a sprint' section to plugins/sprint-orchestrator/README.md
+        that:
+
+        - Has a heading exactly '## Running a sprint'
+
+        - Documents /sprint-orchestrator:run-sprint as the recommended entrypoint (precedes /loop
+        mention)
+
+        - Includes the cap formula (e.g. 'turns = N stories × turn_cap_per_story')
+
+        - Contains the exact string: '/goal /sprint-orchestrator:process-backlog UNTIL every story
+        in sprint-status.yaml is status=done or status=failed, OR stop after'
+
+        - Mentions fresh-context rationale and /goal as the guaranteed-last-line
+
+        - Acknowledges clipboard auto-copy as deferred with a link to follow-ups.md
+
+        - Documents /sprint-orchestrator:adopt and the adaptor pattern, with one-way-coupling
+        statement, BMad-as-example framing, no-adaptors-ship disclaimer, and introduces adopt before
+        run-sprint in the section
+
+        - Documents adapt-bmad fast path and verification convention (adapt-bmad intro, verification
+        requirement, fenced shell example, names both adapt-bmad and universal adopt so the reader
+        sees the choice)
+
+        - Preserves all prior sprint content already in the file
+      last_review_at: 2026-05-14T01:47:14.189Z
     notes: |
       Verification-only ship gate per planning-discipline Rule 3. Mechanical gates (e2e + verify + presence of bundled example + presence of both READMEs) are checked above. The MANUAL gate — Jack clearing the plugin cache, following the README install path from cold, and running the example sprint to drain in under 10 minutes — is recorded out-of-band in the reviewer summary before recordStorySuccess.
 
