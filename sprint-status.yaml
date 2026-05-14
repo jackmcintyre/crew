@@ -179,7 +179,7 @@ stories:
         story with empty depends_on roots off default_base as before.
   - id: "4"
     title: recordStorySuccess refuses without a pushed PR when pr_per_story=true
-    status: in_progress
+    status: done
     depends_on:
       - "1"
     acceptance_criteria:
