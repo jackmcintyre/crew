@@ -267,12 +267,12 @@ stories:
       claimed_by: dev-2026-05-14-s5
       claimed_at: 2026-05-14T03:54:41.237Z
       rework_count: 0
+      base_branch: main
+      base_branch_fallback_reason: dep 1's branch '1-acs-only-evaluate-after-the-dev-subagent' no longer exists locally
       branch: 5-document-recordstoryreopen-as-the-manual
       branch_prepared_by: dev-2026-05-14-s5
       branch_prepared_at: 2026-05-14T03:54:44.416Z
       dev_returned_at: 2026-05-14T13:59:00.000Z
-      base_branch: main
-      base_branch_fallback_reason: dep 1's branch '1-acs-only-evaluate-after-the-dev-subagent' no longer exists locally
     notes: >
       recordStoryReopen already exists as an MCP tool but its semantics, when-to-use guidance, and
       user-facing surface are undocumented. When the orchestrator state gets wedged, the user has no
@@ -315,7 +315,7 @@ stories:
         gets a new entry with the previous failure_reason preserved.
   - id: "6"
     title: Ship gate — pnpm e2e + pnpm verify green + manual pr_per_story=true smoketest
-    status: ready
+    status: failed
     depends_on:
       - "1"
       - "2"
@@ -331,7 +331,24 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-2026-05-14-s6
+      claimed_at: 2026-05-14T04:02:45.959Z
       rework_count: 0
+      base_branch: main
+      base_branch_fallback_reason: dep 1's branch '1-acs-only-evaluate-after-the-dev-subagent' no longer exists locally
+      branch: 6-ship-gate-pnpm-e2e-pnpm-verify-green-man
+      branch_prepared_by: dev-2026-05-14-s6
+      branch_prepared_at: 2026-05-14T04:02:49.937Z
+      last_failure_reason: "pnpm e2e exit_code=1, 5/123 assertions failed. Failing checks: (1)
+        two-commits-per-story — story A got 1 commit, expected 2; (2) completed_at/status=done —
+        story A remained in_progress after recordStorySuccess; (3) auto-promotion chain — story B
+        absent from ready set after A done (got [C]); (4) auto-promoted story B status=backlog
+        (expected done, auto-promotion path broken); (5) branch-rooted-at-dep — story B was never
+        driven due to auto-promotion failure. pnpm verify passed (exit_code=0). Root cause:
+        pre-existing regressions in auto-promotion and recordStorySuccess state transitions now
+        exposed by the ship gate. Per story 6 design, rework should be routed to the offending
+        stories (1–5), not to the ship gate itself."
+      failed_at: 2026-05-14T04:04:45.100Z
     notes: >
       Verification-only ship gate per planning-discipline Rule 3. Mechanical gates above. Plus a
       MANUAL gate: Jack runs a small 2-3 story sprint with pr_per_story=true (the same
