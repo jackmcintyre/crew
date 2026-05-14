@@ -31,7 +31,7 @@ stories:
       the line: hello from sprint-orchestrator
   - id: "2"
     title: Ship gate — HELLO file is present
-    status: in_progress
+    status: done
     depends_on:
       - "1"
     acceptance_criteria:
@@ -40,9 +40,13 @@ stories:
           cmd: test -f HELLO.md && grep -q "hello from sprint-orchestrator" HELLO.md
           expect_exit: 0
     orchestrator:
-      rework_count: 0
       claimed_by: dev-1747268001
       claimed_at: 2026-05-14T02:09:04.655Z
+      rework_count: 0
+      completed_at: 2026-05-14T02:09:33.691Z
+      summary: "feat(2): Ship gate — HELLO file is present"
+      artefacts:
+        - git:b97038460cc83df9c0a790bc34b6e81ead522b50
     notes: >
       Verification-only ship gate per planning-discipline Rule 3 — every sprint ends with a ship
       gate. This story requires no code change; its job is to prove the prior story landed
