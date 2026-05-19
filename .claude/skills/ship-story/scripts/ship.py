@@ -12,8 +12,16 @@ Subcommands:
   worktree <story_key>            create worktree + branch off origin/main
   set-status <key> <status>       atomic mutation of sprint-status.yaml
   verify-ac-table <results.json>  hard gate: fail if any AC row not green
+  pre-pr-gate <story_key>         pre-PR smoke gate for user-surface ACs;
+                                  exits 42 (USER_SURFACE_UNVERIFIED) if any
+                                  user-surface AC lacks valid verification
+                                  evidence in the run log.
   pr-body <story_key> <results.json> <review_passes>   emit markdown PR body
   record <story_key> <event>      append JSONL event to run log (resumability)
+  record-verification <story_key> --type ... --data ...
+                                  schema-validated wrapper over `record` for
+                                  automated_e2e_verified / user_surface_verified
+                                  events.
   state <story_key> [--get STEP]  read run state for resume
   cleanup <story_key>             post-merge: status→done, remove worktree,
                                   delete branch, sync main, tidy /tmp
@@ -45,7 +53,29 @@ except ImportError:
 REPO = Path(__file__).resolve().parents[4]
 STATUS_FILE = REPO / "_bmad-output/implementation-artifacts/sprint-status.yaml"
 EPICS_DIR = REPO / "_bmad-output/planning-artifacts/epics"
-RUNS_DIR = REPO / ".claude/skills/ship-story/.runs"
+# Tests can override RUNS_DIR via CREW_SHIP_RUNS_DIR so the suite never
+# pollutes the real run log.
+RUNS_DIR = Path(
+    os.environ.get(
+        "CREW_SHIP_RUNS_DIR",
+        str(REPO / ".claude/skills/ship-story/.runs"),
+    )
+)
+
+# Exit code mnemonic for the pre-PR user-surface gate.
+EXIT_USER_SURFACE_UNVERIFIED = 42
+
+# AC tag extraction regex for the user-surface gate.
+USER_SURFACE_AC_RE = re.compile(
+    r"^\*\*AC(\d+)\s*\(user-surface\)\s*:\*\*", re.MULTILINE
+)
+
+# Verification event types known to the schema validator.
+_VERIFICATION_EVENT_TYPES = {"automated_e2e_verified", "user_surface_verified"}
+
+
+class MalformedVerificationEvent(ValueError):
+    """Raised when an *_verified event payload fails its expected shape."""
 
 
 # ---------------------------------------------------------------- helpers
@@ -611,6 +641,267 @@ def cmd_pending_cleanup(args) -> None:
     print(json.dumps({"pending": pending}, indent=2))
 
 
+# ---------------------------------------------------------------- pre-pr-gate (user-surface)
+
+
+def _parse_user_surface_acs(spec_text: str) -> set[int]:
+    """Return the set of AC indexes tagged `(user-surface)` in a story spec."""
+    return {int(m.group(1)) for m in USER_SURFACE_AC_RE.finditer(spec_text)}
+
+
+def _validate_verification_event(event: dict) -> None:
+    """Raise `MalformedVerificationEvent` if the event payload is malformed.
+
+    Validates only the two `*_verified` event types this gate cares about.
+    Other event types pass through (this validator is called by the gate
+    only for matching types).
+    """
+    if not isinstance(event, dict):
+        raise MalformedVerificationEvent("event must be a JSON object")
+    etype = event.get("event") or event.get("type")
+    if etype not in _VERIFICATION_EVENT_TYPES:
+        raise MalformedVerificationEvent(
+            f"unknown verification event type: {etype!r}"
+        )
+    data = event.get("data")
+    if not isinstance(data, dict):
+        raise MalformedVerificationEvent("event.data must be a JSON object")
+
+    ac_refs = data.get("ac_refs")
+    if not isinstance(ac_refs, list) or not ac_refs:
+        raise MalformedVerificationEvent(
+            "data.ac_refs must be a non-empty array of positive integers"
+        )
+    for n in ac_refs:
+        if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+            raise MalformedVerificationEvent(
+                "data.ac_refs entries must be positive integers"
+            )
+
+    if etype == "automated_e2e_verified":
+        test_path = data.get("test_path")
+        test_command = data.get("test_command")
+        if not isinstance(test_path, str) or not test_path.strip():
+            raise MalformedVerificationEvent(
+                "data.test_path must be a non-empty string"
+            )
+        if not isinstance(test_command, str) or not test_command.strip():
+            raise MalformedVerificationEvent(
+                "data.test_command must be a non-empty string"
+            )
+        return
+
+    # user_surface_verified
+    operator = data.get("operator")
+    if not isinstance(operator, str) or not operator.strip():
+        raise MalformedVerificationEvent(
+            "data.operator must be a non-empty string"
+        )
+    obs = data.get("observations")
+    if not isinstance(obs, list) or not obs:
+        raise MalformedVerificationEvent(
+            "data.observations must be a non-empty array"
+        )
+    observed_refs: set[int] = set()
+    for i, o in enumerate(obs):
+        if not isinstance(o, dict):
+            raise MalformedVerificationEvent(
+                f"data.observations[{i}] must be a JSON object"
+            )
+        ac_ref = o.get("ac_ref")
+        if (
+            not isinstance(ac_ref, int)
+            or isinstance(ac_ref, bool)
+            or ac_ref <= 0
+        ):
+            raise MalformedVerificationEvent(
+                f"data.observations[{i}].ac_ref must be a positive integer"
+            )
+        pasted = o.get("pasted_output")
+        if not isinstance(pasted, str) or not pasted.strip():
+            raise MalformedVerificationEvent(
+                f"data.observations[{i}].pasted_output must be a non-empty string"
+            )
+        if ac_ref not in ac_refs:
+            raise MalformedVerificationEvent(
+                f"data.observations[{i}].ac_ref={ac_ref} not present in data.ac_refs"
+            )
+        observed_refs.add(ac_ref)
+    if observed_refs != set(ac_refs):
+        missing = sorted(set(ac_refs) - observed_refs)
+        raise MalformedVerificationEvent(
+            f"data.observations does not cover ac_refs (missing: {missing})"
+        )
+
+
+def _load_verification_events(story_key: str) -> dict:
+    """Read the run log and return verification-event diagnostics.
+
+    Returns a dict with:
+      - `valid_events`: list of well-formed verification events.
+      - `malformed`: list of (event_dict, error_message) for malformed events.
+    Non-verification events are ignored. Missing log → empty diagnostics.
+    """
+    log = run_log(story_key)
+    out: dict = {"valid_events": [], "malformed": []}
+    if not log.exists():
+        return out
+    for line in log.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        etype = event.get("event") or event.get("type")
+        if etype not in _VERIFICATION_EVENT_TYPES:
+            continue
+        try:
+            _validate_verification_event(event)
+        except MalformedVerificationEvent as exc:
+            out["malformed"].append((event, str(exc)))
+            continue
+        out["valid_events"].append(event)
+    return out
+
+
+def _resolve_spec_path(story_key: str, override: str | None) -> Path:
+    if override:
+        return Path(override)
+    # Resolved-payload-first (matches the orchestrator's persisted JSON).
+    resolve_json = Path(f"/tmp/ship-{story_key}.resolve.json")
+    if resolve_json.exists():
+        try:
+            info = json.loads(resolve_json.read_text())
+        except json.JSONDecodeError:
+            info = {}
+        spec_rel = info.get("spec_path")
+        if spec_rel:
+            return REPO / spec_rel
+    # Fallback to convention.
+    return REPO / f"_bmad-output/implementation-artifacts/{story_key}.md"
+
+
+def cmd_pre_pr_gate(args) -> None:
+    spec_path = _resolve_spec_path(args.story_key, args.spec_path)
+    if not spec_path.exists():
+        die(f"story spec not found: {spec_path}")
+    spec_text = spec_path.read_text()
+    user_surface = _parse_user_surface_acs(spec_text)
+
+    if not user_surface:
+        print(
+            json.dumps(
+                {
+                    "gate": "pre-pr",
+                    "status": "skipped",
+                    "reason": "no user-surface ACs",
+                }
+            )
+        )
+        return
+
+    diag = _load_verification_events(args.story_key)
+    # Coverage union from VALID events only.
+    automated_cov: set[int] = set()
+    operator_cov: set[int] = set()
+    for ev in diag["valid_events"]:
+        etype = ev.get("event") or ev.get("type")
+        refs = set(ev["data"]["ac_refs"])
+        if etype == "automated_e2e_verified":
+            automated_cov |= refs
+        elif etype == "user_surface_verified":
+            operator_cov |= refs
+
+    union_cov = automated_cov | operator_cov
+    missing = sorted(user_surface - union_cov)
+
+    # If malformed events would otherwise have made the gate pass, fail with
+    # the typed error visible on stderr.
+    if diag["malformed"]:
+        # Coverage including malformed events — to detect "would have passed".
+        hypothetical: set[int] = set(union_cov)
+        for ev, _err in diag["malformed"]:
+            data = ev.get("data") or {}
+            refs = data.get("ac_refs") if isinstance(data, dict) else None
+            if isinstance(refs, list):
+                for n in refs:
+                    if isinstance(n, int) and not isinstance(n, bool):
+                        hypothetical.add(n)
+        would_have_passed = user_surface.issubset(hypothetical) and not user_surface.issubset(union_cov)
+        if would_have_passed or missing:
+            for _ev, err in diag["malformed"]:
+                sys.stderr.write(f"MalformedVerificationEvent: {err}\n")
+            if missing:
+                sys.stderr.write(
+                    "Missing user-surface verification for "
+                    + ", ".join(f"AC{n}" for n in missing)
+                    + ". Provide either an automated_e2e_verified event covering "
+                    + "these ACs, or a user_surface_verified event with pasted "
+                    + "Claude Code output for each.\n"
+                )
+            sys.exit(EXIT_USER_SURFACE_UNVERIFIED)
+
+    if missing:
+        sys.stderr.write(
+            "Missing user-surface verification for "
+            + ", ".join(f"AC{n}" for n in missing)
+            + ". Provide either an automated_e2e_verified event covering "
+            + "these ACs, or a user_surface_verified event with pasted "
+            + "Claude Code output for each.\n"
+        )
+        sys.exit(EXIT_USER_SURFACE_UNVERIFIED)
+
+    # Determine route label for the orchestrator.
+    if automated_cov >= user_surface:
+        route = "automated"
+    elif operator_cov >= user_surface:
+        route = "operator"
+    else:
+        route = "mixed"
+    print(
+        json.dumps(
+            {
+                "gate": "pre-pr",
+                "status": "passed",
+                "route": route,
+                "ac_refs": sorted(user_surface),
+            }
+        )
+    )
+
+
+def cmd_record_verification(args) -> None:
+    """Schema-validated wrapper around `record` for verification events."""
+    if args.type not in _VERIFICATION_EVENT_TYPES:
+        die(
+            f"--type must be one of {sorted(_VERIFICATION_EVENT_TYPES)}",
+            code=2,
+        )
+    try:
+        data = json.loads(args.data)
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(
+            f"MalformedVerificationEvent: --data must be valid JSON ({exc})\n"
+        )
+        sys.exit(2)
+    candidate = {"event": args.type, "data": data}
+    try:
+        _validate_verification_event(candidate)
+    except MalformedVerificationEvent as exc:
+        sys.stderr.write(f"MalformedVerificationEvent: {exc}\n")
+        sys.exit(2)
+
+    payload = {
+        "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "event": args.type,
+        "data": data,
+    }
+    with run_log(args.story_key).open("a") as f:
+        f.write(json.dumps(payload) + "\n")
+    print(json.dumps({"recorded": args.type, "ac_refs": data["ac_refs"]}))
+
+
 # ---------------------------------------------------------------- entry
 
 
@@ -664,6 +955,25 @@ def main() -> None:
     ri = sub.add_parser("reviewer-issues")
     ri.add_argument("story_key")
     ri.set_defaults(func=cmd_reviewer_issues)
+
+    pg = sub.add_parser("pre-pr-gate")
+    pg.add_argument("story_key")
+    pg.add_argument(
+        "--spec-path",
+        default=None,
+        help="override spec path (test hook); defaults to the resolve.json path",
+    )
+    pg.set_defaults(func=cmd_pre_pr_gate)
+
+    rv = sub.add_parser("record-verification")
+    rv.add_argument("story_key")
+    rv.add_argument(
+        "--type",
+        required=True,
+        choices=sorted(_VERIFICATION_EVENT_TYPES),
+    )
+    rv.add_argument("--data", required=True, help="JSON-encoded event data")
+    rv.set_defaults(func=cmd_record_verification)
 
     args = p.parse_args()
     args.func(args)

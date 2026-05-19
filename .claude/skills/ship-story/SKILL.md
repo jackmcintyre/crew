@@ -160,6 +160,37 @@ $SH record <story_key> ac_verified
 
 After recording, verify the worktree is clean (`git -C <worktree_path> status --porcelain` empty). If any QA-generated files are still uncommitted, halt with `AC_VERIFICATION_FAILED` and surface the unstaged paths — never paper over by committing them yourself.
 
+### Step 8.5 — Pre-PR user-surface smoke gate
+
+Document-driven verification has a known blind spot: every gate in this skill reasons from artefacts (epic, spec, diff, AC table) — none of them is the end user. Story 1.8 closes that loop by tagging ACs whose verification requires real-Claude-Code observation as `(user-surface)` and requiring end-to-end evidence before any PR opens.
+
+```bash
+$SH pre-pr-gate <story_key>
+```
+
+The gate parses the story spec, extracts the set of `(user-surface)`-tagged ACs, and:
+
+- **No `user-surface` ACs** → exits 0 with `{"status":"skipped"}`. Proceed to Step 9 unchanged.
+- **All `user-surface` ACs covered** by a valid `automated_e2e_verified` or `user_surface_verified` event in the run log → exits 0 with `{"status":"passed","route":"automated|operator|mixed"}`. Record and proceed:
+  ```bash
+  $SH record <story_key> pre_pr_gate_passed --data '<the gate JSON>'
+  ```
+- **Otherwise** → exits `42` (`USER_SURFACE_UNVERIFIED`) and prints to stderr which ACs are missing evidence. Do NOT push, do NOT open a PR.
+
+**On exit 42 — the two evidence routes.** Decide based on which user surface the AC touches:
+
+1. **Automated route.** If the surface has a programmatic harness (a CLI we can shell out to, an HTTP endpoint, a file we can read), instruct a dev/QA subagent to write a test that drives that surface end-to-end, run it, and record:
+   ```bash
+   $SH record-verification <story_key> --type automated_e2e_verified --data '{"ac_refs":[<n>,...],"test_path":"<path>","test_command":"<cmd>"}'
+   ```
+2. **Operator-smoke route.** If the surface is a slash command, an install path, or any Claude Code TUI behaviour that has no programmatic driver, prompt the operator (Jack) to run the surface in a real Claude Code session and paste verbatim output back to you. Then record:
+   ```bash
+   $SH record-verification <story_key> --type user_surface_verified --data '{"ac_refs":[<n>,...],"operator":"jack","observations":[{"ac_ref":<n>,"pasted_output":"<verbatim>"},...]}'
+   ```
+   `record-verification` schema-validates the payload at write time; on schema failure it exits 2 and refuses to append. After a successful write, re-run `$SH pre-pr-gate <story_key>` — the loop terminates because the operator either provides evidence or aborts the story.
+
+**Dog-fooding clause for Story 1.8 itself.** Story 1.8 introduces this gate AND has one `user-surface` AC (AC1 — it touches `bmad-create-story`). The orchestrator (not the dev agent) is responsible for: invoking `bmad-create-story` in a real Claude Code session against a throwaway story idea after dev sign-off, confirming the skill prompts for `user-surface` tagging per AC, capturing the verbatim output, and writing it via `record-verification` against story key `1-8-user-surface-ac-type-and-smoke-gate-in-ship-story`. Story 1.10 is the first non-self-referential production user.
+
 ### Step 9 — Open the PR
 
 Build the body deterministically:
