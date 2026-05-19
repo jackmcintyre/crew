@@ -289,3 +289,51 @@ export class RolePermissionsMalformedError extends DomainError {
     this.zodMessage = opts.zodMessage;
   }
 }
+
+/**
+ * A caller invoked `logTelemetryEvent` with an event whose payload
+ * failed its `type`-specific Zod schema. The invalid event was NOT
+ * written to the JSONL file; a `telemetry.invalid` failure event was
+ * recorded in its place so the failure is never silent (NFR6 / NFR21).
+ */
+export class TelemetryEventInvalidError extends DomainError {
+  readonly attemptedType: string;
+  readonly zodPath: string;
+  readonly zodMessage: string;
+
+  constructor(opts: { attemptedType: string; zodPath: string; zodMessage: string }) {
+    super(
+      `Telemetry event of type '${opts.attemptedType}' failed schema validation ` +
+        `at '${opts.zodPath}': ${opts.zodMessage}. ` +
+        `The invalid event was NOT written; a 'telemetry.invalid' failure event ` +
+        `was recorded in its place. (NFR21)`,
+    );
+    this.attemptedType = opts.attemptedType;
+    this.zodPath = opts.zodPath;
+    this.zodMessage = opts.zodMessage;
+  }
+}
+
+/**
+ * `gitCommit` refused a call because either the commit message did
+ * not match the required `<tool-name>: <ref-or-proposal-id>` shape,
+ * or the `paths` set was empty. Thrown BEFORE any subprocess spawn
+ * (Story 1.5 AC4).
+ */
+export class GitCommitMessageMalformedError extends DomainError {
+  readonly invalidMessage: string;
+  readonly paths: readonly string[];
+  readonly reason: string;
+
+  constructor(opts: { message: string; paths: readonly string[]; reason: string }) {
+    super(
+      `git commit refused: ${opts.reason}. message='${opts.message}', ` +
+        `paths=[${opts.paths.join(", ")}]. ` +
+        `Required shape: '<tool-name>: <ref-or-proposal-id>' (lowercase tool name, ` +
+        `colon, space, non-empty body). (Story 1.5 AC4)`,
+    );
+    this.invalidMessage = opts.message;
+    this.paths = opts.paths;
+    this.reason = opts.reason;
+  }
+}

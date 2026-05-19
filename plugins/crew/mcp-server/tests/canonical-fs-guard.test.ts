@@ -11,7 +11,7 @@ const SRC_DIR = path.resolve(HERE, "..", "src");
 
 const FS_WRITE_WHITELIST = new Set<string>([
   path.join(SRC_DIR, "lib", "managed-fs.ts"),
-  // Future: lib/logger.ts joins this whitelist when Story 1.5 lands.
+  path.join(SRC_DIR, "lib", "logger.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [
@@ -215,6 +215,33 @@ describe("static direct-gh-spawn guard (AC5b static)", () => {
       for (const re of patterns) {
         if (re.test(body)) {
           offences.push(`${file}: direct gh spawn matched ${re}`);
+        }
+      }
+    }
+
+    expect(offences, offences.join("\n")).toEqual([]);
+  });
+});
+
+describe("static direct-git-spawn guard (Story 1.5 AC6f)", () => {
+  const GIT_WRAPPER = path.join(SRC_DIR, "lib", "git.ts");
+  const allSources = walkTs(SRC_DIR);
+
+  it("no file under mcp-server/src/** (other than lib/git.ts) spawns `git` directly", () => {
+    const patterns: RegExp[] = [
+      /execa\s*\(\s*["']git["']/,
+      /spawn\s*\(\s*["']git["']/,
+      /spawnSync\s*\(\s*["']git["']/,
+      /exec\s*\(\s*["']git\s/,
+    ];
+
+    const offences: string[] = [];
+    for (const file of allSources) {
+      if (file === GIT_WRAPPER) continue;
+      const body = readFileSync(file, "utf8");
+      for (const re of patterns) {
+        if (re.test(body)) {
+          offences.push(`${file}: direct git spawn matched ${re}`);
         }
       }
     }
