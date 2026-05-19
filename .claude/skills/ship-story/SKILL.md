@@ -162,15 +162,16 @@ Build the body deterministically:
 $SH pr-body /tmp/ship-<story_key>.resolve.json /tmp/ship-<story_key>.acs.json <passes> > /tmp/ship-<story_key>.body.md
 ```
 
-From inside the worktree:
+Run from the main repo cwd — do NOT `cd` into the worktree. Bash-tool cwd persists across calls, and `$SH` resolves `REPO` from its script path: a stray `cd <worktree_path>` will redirect later `record` events into `<worktree>/.claude/skills/ship-story/.runs/`, breaking Step 12's `pending-cleanup`.
 
 ```bash
-cd <worktree_path>
-git push -u origin "story/<story_key>"
-gh pr create \
+git -C <worktree_path> push -u origin "story/<story_key>"
+(cd <worktree_path> && gh pr create \
   --title "feat(<epic_num>): <title>" \
-  --body-file /tmp/ship-<story_key>.body.md
+  --body-file /tmp/ship-<story_key>.body.md)
 ```
+
+(`gh pr create` needs to be invoked from within a repo checkout, hence the subshell; `git push` accepts `-C`. Neither leaks cwd back to the parent.)
 
 Capture the PR URL **and PR number** (extract from the URL — Step 10 needs `<pr_number>` for `gh pr checks`). Record:
 
