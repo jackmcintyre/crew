@@ -374,7 +374,7 @@ def cmd_state(args) -> None:
         return
     events = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
     if args.get:
-        match = [e for e in events if e["event"] == args.get]
+        match = [e for e in events if e.get("event") == args.get]
         print(json.dumps(match[-1] if match else None))
     else:
         print(json.dumps({"events": events, "last": events[-1] if events else None}))
@@ -633,9 +633,9 @@ def cmd_pending_cleanup(args) -> None:
         events = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
         if not events:
             continue
-        names = [e["event"] for e in events]
+        names = [e["event"] for e in events if "event" in e]
         if "pr_opened" in names and "cleaned" not in names:
-            pr_event = next(e for e in reversed(events) if e["event"] == "pr_opened")
+            pr_event = next(e for e in reversed(events) if e.get("event") == "pr_opened")
             pending.append({
                 "story_key": log.stem,
                 "pr_url": (pr_event.get("data") or {}).get("url"),
