@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MarketplaceManifestSchema } from "../src/schemas/marketplace-manifest.js";
+import { buildOrphanSkillMessage } from "../src/lib/orphan-skill-message.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(HERE, "../../../..");
@@ -81,15 +82,24 @@ describe("install-contract", () => {
     const expected = globbed.filter((p) => !optOut.has(p));
     const orphans = expected.filter((p) => !registered.has(p));
     if (orphans.length > 0) {
-      const bullets = orphans.map((o) => `  - ${o}`).join("\n");
-      const message =
-        `Orphaned skill file(s) detected under plugins/crew/skills/:\n` +
-        `${bullets}\n` +
-        `Register each file in plugins/crew/.claude-plugin/plugin.json's "skills" array,\n` +
-        `or add it to plugins/crew/.claude-plugin/skills-opt-out.txt (one path per line).`;
-      throw new Error(message);
+      throw new Error(buildOrphanSkillMessage(orphans));
     }
     expect(orphans).toEqual([]);
+  });
+
+  it("AC3 — orphan-guard failure message matches spec wording verbatim for synthetic orphans", () => {
+    // Synthetic orphans — exercises the failure-message wording even though
+    // no real orphans exist today. Locks the verbatim text from Story 1.7a's
+    // spec (AC3 failure-message format) so future drift fails this test.
+    const synthetic = ["skills/orphan-one.md", "skills/orphan-two.md"];
+    const message = buildOrphanSkillMessage(synthetic);
+    const expected =
+      `Orphaned skill file(s) detected under plugins/crew/skills/:\n` +
+      `  - skills/orphan-one.md\n` +
+      `  - skills/orphan-two.md\n` +
+      `Register each file in plugins/crew/.claude-plugin/plugin.json's "skills" array,\n` +
+      `or add it to plugins/crew/.claude-plugin/skills-opt-out.txt (one path per line).`;
+    expect(message).toBe(expected);
   });
 
   it("AC4c — README-install.md contains '/plugin marketplace add .' and '/plugin install crew@crew' and does NOT contain '/plugin install plugins/crew'", () => {
