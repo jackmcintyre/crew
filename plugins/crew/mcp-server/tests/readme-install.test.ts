@@ -185,6 +185,72 @@ describe("README-install.md user-surface contract (Story 1.10)", () => {
     });
   });
 
+  describe("AC1 — Expected-confirmation blocks reference real UI surfaces, not fictional stdout", () => {
+    // For the slash-command steps (3a, 3b, 4, 6), the README must describe
+    // a TUI panel / toast text / named tab rather than invent stdout that
+    // Claude Code does not actually emit. We check that the canonical
+    // user-surface phrases for each step appear in the README body.
+    const REQUIRED_UI_SUBSTRINGS: ReadonlyArray<{
+      ac: string;
+      needle: string;
+    }> = [
+      // Step 3a — Marketplaces TUI panel is the surface, not stdout
+      { ac: "step 3a opens the Marketplaces TUI panel", needle: "Marketplaces" },
+      {
+        ac: "step 3a explicitly disclaims a stdout confirmation line",
+        needle: "no stdout confirmation line",
+      },
+      // Step 3b — install TUI, lands on plugin tab as installed
+      {
+        ac: "step 3b describes the install TUI flow surface",
+        needle: "install TUI flow",
+      },
+      {
+        ac: "step 3b describes the installed-tab state, not a stdout toast",
+        needle: "installed",
+      },
+      // Step 4 — restart, look in the slash-command picker
+      {
+        ac: "step 4 directs the user to the slash-command picker / tab-complete",
+        needle: "slash-command picker",
+      },
+    ];
+
+    for (const { ac, needle } of REQUIRED_UI_SUBSTRINGS) {
+      it(`README contains the user-surface phrase for: ${ac}`, () => {
+        expect(
+          raw.includes(needle),
+          `Expected README to contain "${needle}" — this anchors the user-surface description for ${ac}.`,
+        ).toBe(true);
+      });
+    }
+  });
+
+  describe("AC2 — README content covers PR #61 debug-session findings", () => {
+    // Step 3a — TUI flow: open marketplaces list, see entries, add `./`, confirm
+    it("step 3 covers the TUI flow: Marketplaces panel + ./ + crew entry + confirm", () => {
+      expect(raw).toMatch(/Marketplaces/);
+      expect(raw).toMatch(/\/plugin marketplace add \.\//);
+      expect(raw).toMatch(/crew/);
+      expect(raw.toLowerCase()).toMatch(/confirm/);
+    });
+
+    // Step 3b — install command + temp_local_* cache caveat on validation failure
+    it("step 3b covers /plugin install crew@crew and the temp_local_* cache caveat", () => {
+      expect(raw).toMatch(/\/plugin install crew@crew/);
+      expect(raw).toMatch(/temp_local_/);
+      expect(raw.toLowerCase()).toMatch(/validat/);
+    });
+
+    // Step 4 — MCP servers only start at launch, so restart is non-optional
+    it("step 4 explains MCP servers only spawn at launch — restart is non-optional", () => {
+      expect(raw.toLowerCase()).toMatch(/restart/);
+      expect(raw).toMatch(/non-optional/);
+      expect(raw).toMatch(/MCP/);
+      expect(raw.toLowerCase()).toMatch(/launch/);
+    });
+  });
+
   describe("AC4 — internal links resolve", () => {
     it("every relative link (file or in-doc anchor) resolves on disk", () => {
       const broken: string[] = [];
