@@ -62,6 +62,17 @@ $SH record <story_key> worktree_ready --data '{"path":"..."}'
 Spawn ONE subagent. Prompt:
 
 > Run the `bmad-create-story` skill (action: `create`) for story key `<story_key>`. The epic source is `<epic_file>`. Output the spec to `<spec_path>`. Do NOT implement code — spec only. Do NOT modify `sprint-status.yaml` or any other status/state file — the orchestrator owns status transitions. Do NOT pause for clarifying questions; make reasonable defaults and proceed.
+>
+> **User-surface AC tagging (Story 1.8 convention).** Consult `plugins/crew/docs/user-surface-acs.md` for the canonical rules; the summary below is the contract. When drafting each AC, explicitly judge whether it names a user-invocable surface and emit the tag inline:
+>
+> - Tag an AC `**AC<n> (user-surface):**` if and only if it references at least one of:
+>   - (i) a slash command literal (e.g. `/crew:status`, `/ship-story`);
+>   - (ii) a CLI command the operator types verbatim (e.g. `pnpm install`, `git clone`);
+>   - (iii) a file path the README/install docs instruct the user to copy or open by name;
+>   - (iv) any Claude Code UI element (TUI panel, toast, tab-complete, slash-command picker) the user is expected to observe.
+> - Otherwise tag it `**AC<n>:**` (no parenthetical).
+> - Do NOT ask the user — make the judgement yourself per the standing "no clarifying questions" rule. Where the judgement is non-obvious, add a one-line HTML comment under the AC explaining your reasoning, e.g. `<!-- user-surface: AC2 names the /crew:status slash command, rubric (i). -->`.
+> - The numeric prefix (`AC1`, `AC2`, …) is canonical; the gate's regex is `^\*\*AC(\d+)\s*\(user-surface\)\s*:\*\*`. ACs naming only internal functions, schemas, MCP tools, or implementation files are NOT `user-surface`.
 
 Verify `<spec_path>` exists. Then:
 
@@ -79,6 +90,8 @@ Cheap insurance — a malformed spec wastes a full dev+review cycle. Spawn ONE s
 > Run the `bmad-create-story` skill with action `validate` against `<spec_path>`. Return the validation report verbatim and a single-word verdict: `pass` or `fail`. Do NOT modify `sprint-status.yaml`. Do NOT pause for clarifying questions.
 >
 > **In addition to the skill's own checks, verify that every example in the spec actually satisfies the rules it illustrates.** Examples: if the spec defines a commit-message regex AND gives a sample commit message, the sample must match the regex. If the spec defines a schema AND gives a sample event, the sample must validate. Flag any example-vs-rule contradiction as `fail` — these waste a full dev pass when the dev hits the contradiction at implementation time.
+>
+> **Also verify user-surface AC tagging.** Per `plugins/crew/docs/user-surface-acs.md`, every AC that names a slash command (e.g. `/crew:status`), a CLI invocation the operator types verbatim (e.g. `pnpm install`), a file the user is asked to copy or open by name (e.g. README install instructions), or any Claude Code UI element the user is expected to observe MUST carry the `(user-surface)` parenthetical immediately after the AC number (e.g. `**AC1 (user-surface):**`). Conversely, ACs that name only internal functions, schemas, MCP tools, or implementation files MUST NOT carry the tag. Flag any AC that appears mis-tagged as `fail` and name the AC index; the pre-PR gate uses these tags to decide which ACs need real-Claude-Code evidence before a PR opens.
 
 If verdict is `fail` → halt with `SPEC_VALIDATION_FAILED`, surface the report, and record:
 
@@ -159,6 +172,37 @@ $SH record <story_key> ac_verified
 ```
 
 After recording, verify the worktree is clean (`git -C <worktree_path> status --porcelain` empty). If any QA-generated files are still uncommitted, halt with `AC_VERIFICATION_FAILED` and surface the unstaged paths — never paper over by committing them yourself.
+
+### Step 8.5 — Pre-PR user-surface smoke gate
+
+Document-driven verification has a known blind spot: every gate in this skill reasons from artefacts (epic, spec, diff, AC table) — none of them is the end user. Story 1.8 closes that loop by tagging ACs whose verification requires real-Claude-Code observation as `(user-surface)` and requiring end-to-end evidence before any PR opens.
+
+```bash
+$SH pre-pr-gate <story_key>
+```
+
+The gate resolves the spec path in order: `--spec-path <p>` flag if provided (test hook), else `spec_path` from `/tmp/ship-<story_key>.resolve.json` (the orchestrator's persisted payload from Step 2), else the convention fallback `_bmad-output/implementation-artifacts/<story_key>.md`. The gate parses the story spec, extracts the set of `(user-surface)`-tagged ACs, and:
+
+- **No `user-surface` ACs** → exits 0 with `{"status":"skipped"}`. Proceed to Step 9 unchanged.
+- **All `user-surface` ACs covered** by a valid `automated_e2e_verified` or `user_surface_verified` event in the run log → exits 0 with `{"status":"passed","route":"automated|operator|mixed"}`. Record and proceed:
+  ```bash
+  $SH record <story_key> pre_pr_gate_passed --data '<the gate JSON>'
+  ```
+- **Otherwise** → exits `42` (`USER_SURFACE_UNVERIFIED`) and prints to stderr which ACs are missing evidence. Do NOT push, do NOT open a PR.
+
+**On exit 42 — the two evidence routes.** Decide based on which user surface the AC touches:
+
+1. **Automated route.** If the surface has a programmatic harness (a CLI we can shell out to, an HTTP endpoint, a file we can read), instruct a dev/QA subagent to write a test that drives that surface end-to-end, run it, and record:
+   ```bash
+   $SH record-verification <story_key> --type automated_e2e_verified --data '{"ac_refs":[<n>,...],"test_path":"<path>","test_command":"<cmd>"}'
+   ```
+2. **Operator-smoke route.** If the surface is a slash command, an install path, or any Claude Code TUI behaviour that has no programmatic driver, prompt the operator (Jack) to run the surface in a real Claude Code session and paste verbatim output back to you. Then record:
+   ```bash
+   $SH record-verification <story_key> --type user_surface_verified --data '{"ac_refs":[<n>,...],"operator":"jack","observations":[{"ac_ref":<n>,"pasted_output":"<verbatim>"},...]}'
+   ```
+   `record-verification` schema-validates the payload at write time; on schema failure it exits 2 and refuses to append. After a successful write, re-run `$SH pre-pr-gate <story_key>` — the loop terminates because the operator either provides evidence or aborts the story.
+
+**Dog-fooding clause for Story 1.8 itself.** Story 1.8 introduces this gate AND has one `user-surface` AC (AC1 — it touches `bmad-create-story`). The orchestrator (not the dev agent) is responsible for: invoking `bmad-create-story` in a real Claude Code session against a throwaway story idea after dev sign-off, confirming the skill prompts for `user-surface` tagging per AC, capturing the verbatim output, and writing it via `record-verification` against story key `1-8-user-surface-ac-type-and-smoke-gate-in-ship-story`. Story 1.10 is the first non-self-referential production user.
 
 ### Step 9 — Open the PR
 
