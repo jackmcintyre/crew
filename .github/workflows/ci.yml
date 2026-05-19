@@ -3,11 +3,17 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - "plugins/ai-engineering-team/**"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "plugins/ai-engineering-team/**"
+      - ".github/workflows/ci.yml"
 
 defaults:
   run:
-    working-directory: plugins/sprint-orchestrator
+    working-directory: plugins/ai-engineering-team
 
 jobs:
   build:
@@ -16,12 +22,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
-          cache-dependency-path: plugins/sprint-orchestrator/pnpm-lock.yaml
+          cache-dependency-path: plugins/ai-engineering-team/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      # Build first: packages/hooks imports from packages/mcp-server/dist/.
-      - run: pnpm verify
+      - run: pnpm build
+      - run: pnpm test
