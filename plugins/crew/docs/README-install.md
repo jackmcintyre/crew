@@ -1,6 +1,8 @@
 # Install crew
 
-Six checkpoints from clone to seeing the plugin recognise your repo. Each step has one runnable command and one expected confirmation line. If a checkpoint fails, the failure is local to that step — don't proceed.
+Six checkpoints from clone to seeing the plugin recognise your repo. Each step has one runnable command and one expected confirmation. If a checkpoint fails, the failure is local to that step — don't proceed.
+
+> Heads-up: steps 3a, 3b, and 6 are **slash commands you type inside a running Claude Code session**, not shell commands. Steps 3a and 3b in particular open Claude Code's interactive **Marketplaces** TUI panel — there is no stdout line to grep for; you confirm inside the panel.
 
 1. **Install Claude Code.**
 
@@ -32,19 +34,24 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
 
 3. **Load the plugin into Claude Code.**
 
-   Run two commands from the repo root, inside Claude Code:
+   Run two slash commands inside a running Claude Code session, from the repo root.
 
    3a. Register the repo as a plugin marketplace:
 
    ```text
-   /plugin marketplace add .
+   /plugin marketplace add ./
    ```
 
-   Expected confirmation:
+   Expected confirmation: Claude Code opens its **Marketplaces** TUI panel. You should see something shaped like the block below — the panel title, your existing marketplaces (if any), and a new `crew` entry sourced from `./`. Confirm inside the panel (the panel's own prompt tells you which key); on confirmation you land on the **`crew`** tab listing the plugins published by that marketplace.
 
    ```text
-   Marketplace added: crew
+   ┌─ Marketplaces ─────────────────────────────────┐
+   │   <any pre-existing marketplaces…>             │
+   │ > crew                              source: ./ │
+   └────────────────────────────────────────────────┘
    ```
+
+   There is **no stdout confirmation line** — the panel is the surface. If the panel doesn't open, the command literal didn't register; re-check that you typed it inside Claude Code (not a shell) and that the `./` is present.
 
    3b. Install the `crew` plugin from that marketplace:
 
@@ -52,13 +59,15 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
    /plugin install crew@crew
    ```
 
-   Expected confirmation:
+   Expected confirmation: Claude Code opens its install TUI flow for `crew@crew`, validates the plugin locally, and on success lands you on the plugin's tab inside the Marketplaces panel showing it as **installed**. Again, no `Plugin installed: …` stdout line — the panel state is the surface.
+
+   If validation fails (e.g. the plugin's `plugin.json` is malformed, the committed `dist/` is missing, or any other local-shape regression), Claude Code surfaces a cache path in the error output that looks like:
 
    ```text
-   Plugin installed: crew@0.1.0
+   ~/.claude/plugins/cache/temp_local_<hash>
    ```
 
-   (The exact version comes from `plugins/crew/.claude-plugin/plugin.json`; `<semver>` matches `^\d+\.\d+\.\d+(?:-[\w.]+)?$`.)
+   That directory is where Claude Code staged the plugin for validation. The failure is **local** — there is no remote registry call. If you hit it, `ls` the `temp_local_*` path to see what was staged, fix the underlying file in your checkout, and re-run `/plugin install crew@crew`.
 
 4. **Restart Claude Code.**
 
@@ -66,13 +75,9 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
    Quit and reopen Claude Code (no shell command).
    ```
 
-   Expected confirmation:
+   The restart is **non-optional**. `crew` ships an MCP server, and Claude Code only spawns MCP servers **at launch** — `/plugin install` registers the plugin but does NOT start the server mid-session. If you skip the restart, `/crew:status` will either be missing from tab-complete or fail with a `Tool not found` shape, and there is no other signal that the restart is what's missing.
 
-   ```text
-   /crew:status
-   ```
-
-   (After reopen, the `/crew:` slash-command namespace appears in tab-complete with at least `/crew:status` listed.)
+   Expected confirmation: after you reopen Claude Code, type `/` and start typing `crew`. The `/crew:` namespace appears in the slash-command picker / tab-complete, with at least `/crew:status` listed. You do **not** need to invoke anything yet.
 
 5. **Copy the standards template into your target repo.**
 
