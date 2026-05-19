@@ -96,6 +96,67 @@ describe("validateActiveAdapter", () => {
       expect(e.message).toContain("stubA");
       expect(e.message).toContain("false");
       expect(e.message).toContain("mcp-server/src/schemas/workspace-config.ts");
+      // AC3: message also points the user at the canonical example
+      expect(e.message).toContain(
+        "plugins/ai-engineering-team/example/.claude-dev-loop/config.yaml",
+      );
+      expect(e.schemaModule).toBe("mcp-server/src/schemas/workspace-config.ts");
     }
+  });
+
+  it("AC1: configured adapter's detect() is called before any other work (no cross-check when it matches)", async () => {
+    // AC1 semantic: helper gates skill work on detect(); when configured adapter
+    // matches, no other adapter's detect() is consulted (single call, gate-only).
+    let configuredCalls = 0;
+    let otherCalls = 0;
+    const stubA: PlanningAdapter = {
+      name: "stubA",
+      async detect(_t: string) {
+        configuredCalls++;
+        return true;
+      },
+      async listSourceStories() {
+        return [];
+      },
+      async readSourceStory() {
+        throw new NotImplementedError("stub");
+      },
+      resolveSourcePath() {
+        throw new NotImplementedError("stub");
+      },
+      defaultConfig() {
+        return {};
+      },
+      adapterConfigSchema: z.record(z.string(), z.unknown()),
+    };
+    const stubOther: PlanningAdapter = {
+      name: "stubOther",
+      async detect(_t: string) {
+        otherCalls++;
+        return true;
+      },
+      async listSourceStories() {
+        return [];
+      },
+      async readSourceStory() {
+        throw new NotImplementedError("stub");
+      },
+      resolveSourcePath() {
+        throw new NotImplementedError("stub");
+      },
+      defaultConfig() {
+        return {};
+      },
+      adapterConfigSchema: z.record(z.string(), z.unknown()),
+    };
+    const workspace = makeSyntheticWorkspace(stubA);
+
+    const result = await validateActiveAdapter(workspace, {
+      adapters: [stubA, stubOther],
+    });
+
+    expect(result).toBe(workspace);
+    expect(configuredCalls).toBe(1);
+    expect(otherCalls).toBe(0);
   });
 });
