@@ -11,6 +11,8 @@ Drive a single story from `backlog` → open PR using sequential BMad subagents 
 - `/ship-story` — picks the next eligible `backlog` story
 - `/ship-story 1-1` — works that story (prefix-matched against story keys)
 
+**Post-merge cleanup is conversational, not a slash command.** When Jack says any of "merged", "I merged it", "PR merged", "shipped", "it's in", etc., treat it as the cleanup trigger — see [Step 12](#step-12--post-merge-cleanup-conversational-trigger) below.
+
 ## Architecture
 
 You are the orchestrator. You do NOT write story specs, code, tests, or reviews — you spawn subagents for each. You call `scripts/ship.py <subcommand>` for every deterministic operation. The script is the source of truth for: which story is next, what its ACs are, what the worktree path is, when an AC table counts as green, what the PR body looks like, what status transitions are legal.
@@ -208,6 +210,41 @@ Tell the user, in 2-3 sentences:
 - which story shipped + PR URL
 - review passes consumed (`N of 3`) and CI passes consumed (`M of 3`)
 - where the run log lives (for replay/debug)
+- one-line reminder: "Tell me when you've merged and I'll clean up."
+
+### Step 12 — Post-merge cleanup (conversational trigger)
+
+This step is **not** auto-run at the end of Step 11 — merge timing is unbounded (could be minutes, could be days). Instead, it fires when Jack signals the merge in conversation.
+
+**Trigger phrases** (case-insensitive, fuzzy — these are examples, not a closed list): "merged", "I merged", "I've merged", "PR merged", "it's merged", "shipped", "it's in", "landed". Use judgment; if ambiguous, ask "which story?" rather than guess.
+
+**Procedure:**
+
+1. **Identify the story.** Run:
+   ```bash
+   $SH pending-cleanup
+   ```
+   - Zero entries → reply "nothing pending to clean up" and stop.
+   - One entry → that's the target. Confirm to Jack in one line before proceeding ("Cleaning up `<story_key>` (PR #<n>)").
+   - Multiple entries → list them and ask which (or "all").
+
+2. **Run cleanup:**
+   ```bash
+   $SH cleanup <story_key>
+   ```
+   This atomically does: verify PR is merged via `gh pr view`, status → `done`, fast-forward local `main`, `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, tidy `/tmp/ship-<story_key>.*`, append `cleaned` event to the run log.
+
+3. **Report.** One line per story cleaned, plus any of the halt codes below.
+
+**Halt codes (script exit codes):**
+
+| Code | Exit | Meaning | Suggested next step |
+|------|------|---------|---------------------|
+| `NOT_MERGED` | 10 | `gh pr view` says PR is open or closed-without-merge | Tell Jack — likely a false trigger |
+| `MAIN_NOT_FAST_FORWARD` | 11 | Local `main` has diverged from `origin/main` | Surface to Jack — needs a manual rebase/merge call |
+| `WORKTREE_DIRTY` | 12 | Worktree has uncommitted changes | Surface paths; do NOT silently `--force` |
+
+**Do NOT** trigger cleanup speculatively (e.g. on "I'm happy with the PR" — that isn't a merge signal). When in doubt, ask.
 
 ## Halt taxonomy
 

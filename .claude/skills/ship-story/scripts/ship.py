@@ -14,6 +14,9 @@ Subcommands:
   pr-body <story_key> <results.json> <review_passes>   emit markdown PR body
   record <story_key> <event>      append JSONL event to run log (resumability)
   state <story_key> [--get STEP]  read run state for resume
+  cleanup <story_key>             post-merge: status→done, remove worktree,
+                                  delete branch, sync main, tidy /tmp
+  pending-cleanup                 list stories with pr_opened but no cleaned
 """
 from __future__ import annotations
 
@@ -338,6 +341,163 @@ def cmd_state(args) -> None:
         print(json.dumps({"events": events, "last": events[-1] if events else None}))
 
 
+# ---------------------------------------------------------------- cleanup
+
+
+# Halt codes (mirrored in SKILL.md):
+#   10 NOT_MERGED
+#   11 MAIN_NOT_FAST_FORWARD
+#   12 WORKTREE_DIRTY
+
+
+def _find_pr_number(story_key: str) -> int:
+    """Try the run log first (data.number), then data.url, then gh pr list."""
+    log = run_log(story_key)
+    if log.exists():
+        for line in reversed(log.read_text().splitlines()):
+            if not line.strip():
+                continue
+            e = json.loads(line)
+            if e.get("event") != "pr_opened":
+                continue
+            d = e.get("data") or {}
+            if isinstance(d.get("number"), int):
+                return d["number"]
+            url = d.get("url", "")
+            m = re.search(r"/pull/(\d+)", url)
+            if m:
+                return int(m.group(1))
+            break
+    rc = subprocess.run(
+        ["gh", "pr", "list", "--head", f"story/{story_key}",
+         "--state", "all", "--json", "number", "--limit", "1"],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    if rc.returncode == 0:
+        arr = json.loads(rc.stdout or "[]")
+        if arr:
+            return int(arr[0]["number"])
+    die(f"could not locate PR number for story/{story_key}")
+
+
+def cmd_cleanup(args) -> None:
+    key = args.story_key
+    pr_number = _find_pr_number(key)
+
+    rc = subprocess.run(
+        ["gh", "pr", "view", str(pr_number), "--json", "state,mergedAt,headRefName"],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    if rc.returncode != 0:
+        die(f"gh pr view #{pr_number} failed: {rc.stderr.strip()}")
+    info = json.loads(rc.stdout)
+    if info.get("state") != "MERGED":
+        die(
+            f"PR #{pr_number} is not merged (state: {info.get('state')}). "
+            f"Cleanup refuses to run on unmerged PRs.",
+            code=10,
+        )
+
+    worktree = REPO / ".worktrees" / key
+    branch = f"story/{key}"
+    summary: dict = {"pr": pr_number, "mergedAt": info.get("mergedAt")}
+
+    # 1. status → done
+    data = load_status()
+    dev = data.get("dev_status") or {}
+    if key in dev and dev[key] != "done":
+        dev[key] = "done"
+        save_status(data)
+        summary["status"] = "done"
+    else:
+        summary["status"] = dev.get(key, "absent")
+
+    # 2. sync local main (only if currently on main; otherwise just fetch)
+    subprocess.check_call(
+        ["git", "fetch", "origin", "main"], cwd=REPO,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    cur = subprocess.check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=REPO, text=True,
+    ).strip()
+    if cur == "main":
+        rc = subprocess.run(
+            ["git", "merge", "--ff-only", "origin/main"],
+            cwd=REPO, capture_output=True, text=True,
+        )
+        if rc.returncode != 0:
+            die(
+                "local main is not fast-forwardable from origin/main "
+                f"(diverged?): {rc.stderr.strip()}",
+                code=11,
+            )
+        summary["main_synced"] = True
+    else:
+        summary["main_synced"] = f"skipped (HEAD={cur})"
+
+    # 3. remove worktree (fails closed if dirty)
+    if worktree.exists():
+        rc = subprocess.run(
+            ["git", "worktree", "remove", str(worktree)],
+            cwd=REPO, capture_output=True, text=True,
+        )
+        if rc.returncode != 0:
+            die(
+                f"worktree at {worktree} is dirty or in use; resolve manually "
+                f"or re-run with --force: {rc.stderr.strip()}",
+                code=12,
+            )
+        summary["worktree_removed"] = str(worktree)
+    else:
+        summary["worktree_removed"] = "absent"
+
+    # 4. delete local branch (best-effort — fine if already gone)
+    rc = subprocess.run(
+        ["git", "branch", "-D", branch],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    summary["branch_deleted"] = branch if rc.returncode == 0 else f"absent ({branch})"
+
+    # 5. tidy /tmp artefacts
+    removed = []
+    for suffix in (".resolve.json", ".acs.json", ".body.md"):
+        f = Path(f"/tmp/ship-{key}{suffix}")
+        if f.exists():
+            f.unlink()
+            removed.append(f.name)
+    summary["tmp_removed"] = removed
+
+    # 6. record event (run log persists — audit trail outlives the worktree)
+    log = run_log(key)
+    event = {
+        "event": "cleaned",
+        "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "data": {"pr": pr_number, "mergedAt": info.get("mergedAt")},
+    }
+    with log.open("a") as f:
+        f.write(json.dumps(event) + "\n")
+
+    print(json.dumps(summary, indent=2))
+
+
+def cmd_pending_cleanup(args) -> None:
+    """Stories whose last recorded run event is `pr_opened` (shipped, not yet cleaned)."""
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    pending = []
+    for log in sorted(RUNS_DIR.glob("*.jsonl")):
+        events = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
+        if not events:
+            continue
+        names = [e["event"] for e in events]
+        if "pr_opened" in names and "cleaned" not in names:
+            pr_event = next(e for e in reversed(events) if e["event"] == "pr_opened")
+            pending.append({
+                "story_key": log.stem,
+                "pr_url": (pr_event.get("data") or {}).get("url"),
+            })
+    print(json.dumps({"pending": pending}, indent=2))
+
+
 # ---------------------------------------------------------------- entry
 
 
@@ -380,6 +540,12 @@ def main() -> None:
     st.add_argument("story_key")
     st.add_argument("--get", default=None, help="return latest event of this name")
     st.set_defaults(func=cmd_state)
+
+    cl = sub.add_parser("cleanup")
+    cl.add_argument("story_key")
+    cl.set_defaults(func=cmd_cleanup)
+
+    sub.add_parser("pending-cleanup").set_defaults(func=cmd_pending_cleanup)
 
     args = p.parse_args()
     args.func(args)
