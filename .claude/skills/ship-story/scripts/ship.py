@@ -404,7 +404,7 @@ def cmd_cleanup(args) -> None:
 
     # 1. status → done
     data = load_status()
-    dev = data.get("dev_status") or {}
+    dev = data.get("development_status") or {}
     if key in dev and dev[key] != "done":
         dev[key] = "done"
         save_status(data)
@@ -456,9 +456,21 @@ def cmd_cleanup(args) -> None:
         ["git", "branch", "-D", branch],
         cwd=REPO, capture_output=True, text=True,
     )
-    summary["branch_deleted"] = branch if rc.returncode == 0 else f"absent ({branch})"
+    summary["branch_deleted_local"] = branch if rc.returncode == 0 else f"absent ({branch})"
 
-    # 5. tidy /tmp artefacts
+    # 5. delete remote branch (best-effort — fine if GitHub already cleaned it up)
+    rc = subprocess.run(
+        ["git", "push", "origin", "--delete", branch],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    if rc.returncode == 0:
+        summary["branch_deleted_remote"] = branch
+    elif "remote ref does not exist" in (rc.stderr or "").lower():
+        summary["branch_deleted_remote"] = f"absent ({branch})"
+    else:
+        summary["branch_deleted_remote"] = f"failed: {rc.stderr.strip()}"
+
+    # 6. tidy /tmp artefacts
     removed = []
     for suffix in (".resolve.json", ".acs.json", ".body.md"):
         f = Path(f"/tmp/ship-{key}{suffix}")
@@ -467,7 +479,7 @@ def cmd_cleanup(args) -> None:
             removed.append(f.name)
     summary["tmp_removed"] = removed
 
-    # 6. record event (run log persists — audit trail outlives the worktree)
+    # 7. record event (run log persists — audit trail outlives the worktree)
     log = run_log(key)
     event = {
         "event": "cleaned",
@@ -478,6 +490,61 @@ def cmd_cleanup(args) -> None:
         f.write(json.dumps(event) + "\n")
 
     print(json.dumps(summary, indent=2))
+
+
+def cmd_reconcile(args) -> None:
+    """Scan sprint-status for stories in `review`; for each whose PR is merged,
+    invoke cleanup. Handles drift from stories merged before ship-story existed
+    (no run log) and from manual merges that skipped the cleanup step.
+    """
+    data = load_status()
+    dev = data.get("development_status") or {}
+    review_keys = [
+        k for k, v in dev.items()
+        if v == "review"
+        and not k.startswith("epic-")
+        and "retrospective" not in k
+    ]
+
+    if not review_keys:
+        print(json.dumps({"reconciled": [], "skipped": [], "note": "no stories in review"}))
+        return
+
+    reconciled: list[dict] = []
+    skipped: list[dict] = []
+    for key in review_keys:
+        # Look up PR via gh fallback path (works even with no run log)
+        rc = subprocess.run(
+            ["gh", "pr", "list", "--head", f"story/{key}",
+             "--state", "all", "--json", "number,state,mergedAt", "--limit", "1"],
+            cwd=REPO, capture_output=True, text=True,
+        )
+        if rc.returncode != 0:
+            skipped.append({"key": key, "reason": f"gh failed: {rc.stderr.strip()}"})
+            continue
+        arr = json.loads(rc.stdout or "[]")
+        if not arr:
+            skipped.append({"key": key, "reason": "no PR found for branch"})
+            continue
+        if arr[0].get("state") != "MERGED":
+            skipped.append({"key": key, "reason": f"PR #{arr[0]['number']} state={arr[0].get('state')}"})
+            continue
+
+        # Invoke our own cleanup as a subprocess so behaviour is identical
+        rc = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "cleanup", key],
+            cwd=REPO, capture_output=True, text=True,
+        )
+        if rc.returncode != 0:
+            skipped.append({"key": key, "reason": f"cleanup failed: {rc.stderr.strip()}"})
+            continue
+        try:
+            summary = json.loads(rc.stdout)
+        except json.JSONDecodeError:
+            summary = {"raw": rc.stdout.strip()}
+        reconciled.append({"key": key, "summary": summary})
+
+    print(json.dumps({"reconciled": reconciled, "skipped": skipped}, indent=2))
 
 
 def cmd_pending_cleanup(args) -> None:
@@ -546,6 +613,7 @@ def main() -> None:
     cl.set_defaults(func=cmd_cleanup)
 
     sub.add_parser("pending-cleanup").set_defaults(func=cmd_pending_cleanup)
+    sub.add_parser("reconcile").set_defaults(func=cmd_reconcile)
 
     args = p.parse_args()
     args.func(args)

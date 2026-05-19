@@ -11,7 +11,7 @@ Drive a single story from `backlog` → open PR using sequential BMad subagents 
 - `/ship-story` — picks the next eligible `backlog` story
 - `/ship-story 1-1` — works that story (prefix-matched against story keys)
 
-**Post-merge cleanup is conversational, not a slash command.** When Jack says any of "merged", "I merged it", "PR merged", "shipped", "it's in", etc., treat it as the cleanup trigger — see [Step 12](#step-12--post-merge-cleanup-conversational-trigger) below.
+**Post-merge cleanup is conversational, not a slash command.** When Jack says any of "merged", "I merged it", "PR merged", "shipped", "it's in", etc., treat it as the single-story cleanup trigger. When he says "reconcile" or "fix the sprint status", run the batch sweeper. Both are in [Step 12](#step-12--post-merge-cleanup-conversational-trigger) below.
 
 ## Architecture
 
@@ -215,17 +215,19 @@ Tell the user, in 2-3 sentences:
 
 ### Step 12 — Post-merge cleanup (conversational trigger)
 
-This step is **not** auto-run at the end of Step 11 — merge timing is unbounded (could be minutes, could be days). Instead, it fires when Jack signals the merge in conversation.
+This step is **not** auto-run at the end of Step 11 — merge timing is unbounded (could be minutes, could be days). Instead, it fires when Jack signals the merge in conversation. Two flavours: **single-story cleanup** (the normal path) and **batch reconcile** (drift sweeper).
 
-**Trigger phrases** (case-insensitive, fuzzy — these are examples, not a closed list): "merged", "I merged", "I've merged", "PR merged", "it's merged", "shipped", "it's in", "landed". Use judgment; if ambiguous, ask "which story?" rather than guess.
+**Trigger phrases for single-story cleanup** (case-insensitive, fuzzy): "merged", "I merged", "I've merged", "PR merged", "it's merged", "shipped", "it's in", "landed". Use judgment; if ambiguous, ask "which story?" rather than guess.
 
-**Procedure:**
+**Trigger phrases for batch reconcile**: "reconcile", "sync status", "statuses are off", "fix the sprint status", "clean up all the merged ones".
+
+**Single-story procedure:**
 
 1. **Identify the story.** Run:
    ```bash
    $SH pending-cleanup
    ```
-   - Zero entries → reply "nothing pending to clean up" and stop.
+   - Zero entries → may be drift from a manual merge or pre-skill history. Offer to run `reconcile` (below) instead of guessing.
    - One entry → that's the target. Confirm to Jack in one line before proceeding ("Cleaning up `<story_key>` (PR #<n>)").
    - Multiple entries → list them and ask which (or "all").
 
@@ -233,11 +235,23 @@ This step is **not** auto-run at the end of Step 11 — merge timing is unbounde
    ```bash
    $SH cleanup <story_key>
    ```
-   This atomically does: verify PR is merged via `gh pr view`, status → `done`, fast-forward local `main`, `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, tidy `/tmp/ship-<story_key>.*`, append `cleaned` event to the run log.
+   This atomically does: verify PR is merged via `gh pr view`, status → `done`, fast-forward local `main`, `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, `git push origin --delete story/<story_key>` (best-effort — silent if GitHub already auto-deleted), tidy `/tmp/ship-<story_key>.*`, append `cleaned` event to the run log.
 
 3. **Report.** One line per story cleaned, plus any of the halt codes below.
 
-**Halt codes (script exit codes):**
+**Batch reconcile procedure:**
+
+Use when sprint-status has drifted — e.g. stories show `review` but their PRs are actually merged, or stories were merged before ship-story existed (no run log).
+
+```bash
+$SH reconcile
+```
+
+This scans `sprint-status.yaml` for every story in `review`, looks up its PR via `gh pr list --head story/<key>`, and runs the full `cleanup` flow on each merged one. Stories with no PR, with an open PR, or with a closed-not-merged PR are reported in `skipped` with a reason — none of them are touched.
+
+Report the JSON summary: number reconciled, any skipped with reasons. Do NOT re-run reconcile in a loop if some skipped — surface those to Jack and let him decide.
+
+**Halt codes (script exit codes for `cleanup`):**
 
 | Code | Exit | Meaning | Suggested next step |
 |------|------|---------|---------------------|
@@ -245,7 +259,9 @@ This step is **not** auto-run at the end of Step 11 — merge timing is unbounde
 | `MAIN_NOT_FAST_FORWARD` | 11 | Local `main` has diverged from `origin/main` | Surface to Jack — needs a manual rebase/merge call |
 | `WORKTREE_DIRTY` | 12 | Worktree has uncommitted changes | Surface paths; do NOT silently `--force` |
 
-**Do NOT** trigger cleanup speculatively (e.g. on "I'm happy with the PR" — that isn't a merge signal). When in doubt, ask.
+`reconcile` collects these per-story under `skipped` rather than halting the whole sweep.
+
+**Do NOT** trigger cleanup or reconcile speculatively (e.g. on "I'm happy with the PR" — that isn't a merge signal). When in doubt, ask.
 
 ## Halt taxonomy
 
