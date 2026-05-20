@@ -265,6 +265,53 @@ export class GitCommitMessageMalformedError extends DomainError {
     }
 }
 /**
+ * BMad story file failed parser-side validation: the H1 disagrees with
+ * the filename's epic/story numbers, the `Status:` line carries an
+ * unknown vocabulary value, or an AC block could not be parsed. Thrown
+ * by `parseBmadStory` (Story 3.3).
+ */
+export class MalformedBmadStoryError extends DomainError {
+    path;
+    reason;
+    details;
+    constructor(opts) {
+        super(`BMad story at '${opts.path}' is malformed: ${opts.reason}. ` +
+            `See plugins/crew/docs/spikes/bmad-format.md for the expected shape. (Story 3.3)`);
+        this.path = opts.path;
+        this.reason = opts.reason;
+        this.details = opts.details ?? {};
+    }
+}
+/**
+ * `BmadAdapter.readSourceStory(ref)` or `resolveSourcePath(ref)` was
+ * given a ref that does not resolve to any file under `stories_root`.
+ */
+export class UnknownBmadRefError extends DomainError {
+    ref;
+    storiesRoot;
+    constructor(opts) {
+        super(`BMad ref '${opts.ref}' did not resolve to any story file under ` +
+            `'${opts.storiesRoot}'. (Story 3.3)`);
+        this.ref = opts.ref;
+        this.storiesRoot = opts.storiesRoot;
+    }
+}
+/**
+ * Two or more files under `stories_root` share the same
+ * `<epic>-<story>-` prefix, so a ref cannot be resolved unambiguously.
+ */
+export class AmbiguousBmadRefError extends DomainError {
+    ref;
+    matches;
+    constructor(opts) {
+        super(`BMad ref '${opts.ref}' is ambiguous: multiple files match — ` +
+            `[${opts.matches.join(", ")}]. Rename one file so each ` +
+            `<epic>-<story>- prefix is unique. (Story 3.3)`);
+        this.ref = opts.ref;
+        this.matches = opts.matches;
+    }
+}
+/**
  * `moveBetweenStates` refused a move because the underlying `fs.rename`
  * returned `EXDEV` — the source and destination resolve to different
  * filesystems. v1 explicitly does NOT fall back to copy+delete because

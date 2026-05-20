@@ -1,0 +1,3 @@
+adapter: bmad
+adapter_config:
+  stories_root: _bmad-output/planning-artifacts/stories

@@ -277,7 +277,7 @@ describe("getStatus", () => {
           },
           CallToolResultSchema,
         ),
-      ).rejects.toThrow(/bmad adapter: detect|NoAdapterMatched/);
+      ).rejects.toThrow(/bmad adapter: detect|No registered adapter recognises/);
     } finally {
       await client.close();
       await server.close();
