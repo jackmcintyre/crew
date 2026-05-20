@@ -27,8 +27,11 @@ import {
   PersonaAlreadyExistsError,
   PersonaFileMalformedError,
 } from "../src/errors.js";
-import { parseCatalogueRole } from "../src/lib/markdown-frontmatter.js";
-import { parsePersonaFile } from "../src/lib/persona-file.js";
+import {
+  parseCatalogueRole,
+  splitFrontmatter,
+} from "../src/lib/markdown-frontmatter.js";
+import { parsePersonaFile, renderPersonaFile } from "../src/lib/persona-file.js";
 import { getPluginRoot } from "../src/lib/plugin-root.js";
 import { REQUIRED_PERSONA_SECTIONS } from "../src/schemas/persona.js";
 import { instantiatePersona } from "../src/tools/instantiate-persona.js";
@@ -497,4 +500,59 @@ describe("Story 2.3 — persona machinery (AC1–AC5)", () => {
       }
     });
   });
+
+  describe("renderPersonaFile H1 parity with catalogue source", () => {
+    // Guards against silent drift: today all ten shipped catalogue H1s
+    // happen to match the title-cased role id, but renderPersonaFile
+    // reconstructs the H1 from the role id rather than copying the
+    // catalogue's actual H1. This test asserts byte-equality between
+    // the catalogue's `# <H1>` line and the rendered persona's, so a
+    // future role whose H1 uses an acronym or non-title-case stylisation
+    // will fail loudly here instead of silently diverging at runtime.
+    it("rendered persona H1 byte-equals catalogue H1 for every shipped role", async () => {
+      const catalogueDir = path.join(getPluginRoot(), "catalogue");
+      for (const role of CATALOGUE_ROLES) {
+        const cataloguePath = path.join(catalogueDir, `${role}.md`);
+        const raw = await fs.readFile(cataloguePath, "utf8");
+
+        // Extract the catalogue's literal H1 line.
+        const { body: catalogueBody } = splitFrontmatter(raw, cataloguePath);
+        const catalogueH1 = extractH1(catalogueBody);
+        expect(
+          catalogueH1,
+          `catalogue ${role}.md is missing an H1`,
+        ).not.toBeNull();
+
+        // Render a persona from the parsed catalogue.
+        const catalogue = await readCatalogue({
+          pluginRoot: getPluginRoot(),
+          role,
+        });
+        const rendered = renderPersonaFile({
+          catalogue,
+          hiredAt: FIXED_HIRED_AT,
+          catalogueVersion: FIXED_VERSION,
+        });
+        const { body: renderedBody } = splitFrontmatter(rendered, "<rendered>");
+        const renderedH1 = extractH1(renderedBody);
+
+        expect(renderedH1, `rendered persona for ${role} is missing an H1`)
+          .not.toBeNull();
+        expect(
+          renderedH1,
+          `rendered H1 for ${role} must byte-equal catalogue H1`,
+        ).toBe(catalogueH1);
+      }
+    });
+  });
 });
+
+function extractH1(body: string): string | null {
+  for (const line of body.split("\n")) {
+    const match = /^#\s+(.+?)\s*$/.exec(line);
+    if (match && !line.startsWith("##")) {
+      return match[1]!;
+    }
+  }
+  return null;
+}
