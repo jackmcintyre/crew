@@ -50,6 +50,28 @@ $SH preflight
 
 Halts if working tree is dirty, gh is unauthed, or required paths are missing. Non-zero exit → halt the skill and surface stderr.
 
+**Watch-build check.** After preflight, check whether the TypeScript watch compiler is running:
+
+```bash
+pgrep -f "tsc.*--watch" > /dev/null 2>&1
+```
+
+If the process is not found (exit non-zero), do **not** halt — but pause and tell the user:
+
+> `pnpm build:watch` is not running. The dev loop needs it to recompile TypeScript changes before each `/reload-plugins`.
+>
+> Start it in a separate terminal:
+> ```sh
+> pnpm --dir plugins/crew/mcp-server build:watch
+> ```
+> Or from inside the mcp-server directory:
+> ```sh
+> cd plugins/crew/mcp-server && pnpm build:watch
+> ```
+> Reply **go** when it's running (or **skip** to proceed without it — fine if you're only editing SKILL.md files).
+
+Wait for the user's reply before continuing to Step 2.
+
 ### Step 2 — Resolve story
 
 ```bash
