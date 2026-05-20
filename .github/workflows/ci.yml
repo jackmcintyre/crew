@@ -11,6 +11,9 @@ on:
       - "plugins/crew/**"
       - ".github/workflows/ci.yml"
 
+permissions:
+  contents: write
+
 defaults:
   run:
     working-directory: plugins/crew
@@ -20,6 +23,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Check out the real PR branch (not the synthetic merge commit) so
+          # the auto-commit step can push back to it. For push events
+          # github.head_ref is empty and falls back to github.ref (main).
+          ref: ${{ github.head_ref || github.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -30,6 +38,17 @@ jobs:
           cache-dependency-path: plugins/crew/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - name: Verify committed dist/ matches fresh build
+      - name: Auto-commit rebuilt dist if dirty (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! git diff --quiet mcp-server/dist; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add mcp-server/dist
+            git commit -m "chore(ci): rebuild dist [skip ci]"
+            git push origin HEAD:${{ github.head_ref }}
+          fi
+      - name: Verify committed dist/ matches fresh build (main only)
+        if: github.event_name == 'push'
         run: git diff --exit-code mcp-server/dist
       - run: pnpm test
