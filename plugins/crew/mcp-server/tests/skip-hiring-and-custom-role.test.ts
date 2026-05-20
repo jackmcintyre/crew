@@ -353,15 +353,12 @@ async function runCustomRoleAddFlow(opts: {
   return { confirmations, instantiateCalls };
 }
 
-// For the custom-role instantiate path to actually copy the operator's
-// authored Prompt, `instantiatePersona` would need to read from
-// team/custom/<role>.md instead of the shipped catalogue. Story 2.5
-// scope explicitly does NOT modify instantiate-persona.ts — so we
-// achieve the same effect inside the harness by stubbing readCatalogue
-// (the only IO instantiatePersona does for the source) to redirect the
-// data-scientist role to the operator-authored file. This mirrors the
-// design rationale § "Why a new MCP tool (readCustomRole)…" in the
-// story: the read path is split; the schema is shared.
+// Story 2.5 fix (operator-smoke defect): `instantiatePersona` now
+// implements custom-first / catalogue-fallback precedence directly —
+// it consults `<targetRepoRoot>/team/custom/<role>.md` before the
+// shipped catalogue. The AC3 case below therefore drives the REAL
+// tool end-to-end (no stub) and asserts the persona file is written
+// from the operator-authored source.
 
 // ===========================================================================
 // AC1 / AC4(a) — skip-hiring fast path
@@ -515,17 +512,10 @@ describe("Story 2.5 AC3 / AC4(c) — custom-role acceptance", () => {
       VALID_CUSTOM_ROLE_BODY,
     );
 
-    // Stub readCatalogue ONLY for the operator's custom role id so the
-    // add-flow's catalogue-first branch falls through to readCustomRole.
-    // Other roles must continue to hit the real catalogue (the spy on
-    // instantiatePersona must still receive the call). We intercept
-    // readCatalogue at the module level of read-custom-role consumers,
-    // but the harness's runCustomRoleAddFlow imports readCatalogue
-    // directly — we cannot spy easily. Instead, the real readCatalogue
-    // for `data-scientist` will already throw CatalogueRoleNotFoundError
-    // (there is no shipped catalogue file for it), so the fallback path
-    // is exercised naturally.
-
+    // No stubbing: post-fix, `instantiatePersona` reads from
+    // team/custom/<role>.md first and only falls back to the shipped
+    // catalogue. The real catalogue has no `data-scientist.md`, so the
+    // tool naturally consults the operator-authored file.
     const readCustomSpy = vi.spyOn(
       readCustomRoleModule,
       "readCustomRole",
@@ -534,41 +524,6 @@ describe("Story 2.5 AC3 / AC4(c) — custom-role acceptance", () => {
       instantiatePersonaModule,
       "instantiatePersona",
     );
-    // Make instantiatePersona consult the custom-role file's Prompt body
-    // for the data-scientist role: stub it to re-render from the custom
-    // CatalogueRole instead of the shipped catalogue.
-    instantiateSpy.mockImplementation(async (callOpts) => {
-      if (callOpts.role === "data-scientist") {
-        const { renderPersonaFile } = await import(
-          "../src/lib/persona-file.js"
-        );
-        const customRole = await readCustomRoleModule.readCustomRole({
-          targetRepoRoot: callOpts.targetRepoRoot,
-          role: callOpts.role,
-        });
-        const personaPath = path.join(
-          callOpts.targetRepoRoot,
-          "team",
-          callOpts.role,
-          "PERSONA.md",
-        );
-        if (existsSync(personaPath)) {
-          throw new PersonaAlreadyExistsError({
-            role: callOpts.role,
-            personaPath,
-          });
-        }
-        const contents = renderPersonaFile({
-          catalogue: customRole,
-          hiredAt: FIXED_HIRED_AT,
-          catalogueVersion: FIXED_VERSION,
-        });
-        await fs.mkdir(path.dirname(personaPath), { recursive: true });
-        await fs.writeFile(personaPath, contents, "utf8");
-        return { path: personaPath };
-      }
-      throw new Error("unexpected role in instantiate stub: " + callOpts.role);
-    });
 
     const result = await runCustomRoleAddFlow({
       targetRepoRoot: tmp,
