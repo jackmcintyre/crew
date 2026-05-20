@@ -48,6 +48,7 @@ const README_DIR = dirname(README_PATH);
 const ALLOWLIST: ReadonlySet<string> = new Set([
   "/plugin marketplace add ./",
   "/plugin install crew@crew",
+  "/reload-plugins",
   "/crew:status",
 ]);
 
@@ -185,34 +186,46 @@ describe("README-install.md user-surface contract (Story 1.10)", () => {
     });
   });
 
-  describe("AC1 — Expected-confirmation blocks reference real UI surfaces, not fictional stdout", () => {
+  describe("AC1 — Expected-confirmation blocks reference real UI surfaces (observed Claude Code 2.1.145)", () => {
     // For the slash-command steps (3a, 3b, 4, 6), the README must describe
-    // a TUI panel / toast text / named tab rather than invent stdout that
-    // Claude Code does not actually emit. We check that the canonical
-    // user-surface phrases for each step appear in the README body.
+    // the actual single-line toast text Claude Code 2.1.145 emits, rather
+    // than the earlier (incorrect) "TUI panel" framing. We check that the
+    // verbatim toast / error substrings appear in the README body.
     const REQUIRED_UI_SUBSTRINGS: ReadonlyArray<{
       ac: string;
       needle: string;
     }> = [
-      // Step 3a — Marketplaces TUI panel is the surface, not stdout
-      { ac: "step 3a opens the Marketplaces TUI panel", needle: "Marketplaces" },
+      // Step 3a — single-line toast
       {
-        ac: "step 3a explicitly disclaims a stdout confirmation line",
-        needle: "no stdout confirmation line",
+        ac: "step 3a shows the verbatim marketplace-added toast",
+        needle: "Successfully added marketplace",
       },
-      // Step 3b — install TUI, lands on plugin tab as installed
+      // Step 3b — single-line install toast pointing at /reload-plugins
       {
-        ac: "step 3b describes the install TUI flow surface",
-        needle: "install TUI flow",
+        ac: "step 3b shows the verbatim installed toast",
+        needle: "✓ Installed crew",
       },
       {
-        ac: "step 3b describes the installed-tab state, not a stdout toast",
-        needle: "installed",
+        ac: "step 3b surfaces the next-step pointer to /reload-plugins",
+        needle: "Run /reload-plugins to apply",
       },
-      // Step 4 — restart, look in the slash-command picker
+      // Step 4 — /reload-plugins is the apply step (no restart needed)
       {
-        ac: "step 4 directs the user to the slash-command picker / tab-complete",
-        needle: "slash-command picker",
+        ac: "step 4 shows the verbatim reload toast prefix",
+        needle: "Reloaded:",
+      },
+      {
+        ac: "step 4 explicitly states no Claude Code restart is required",
+        needle: "no Claude Code restart is required",
+      },
+      // Step 6 — known-limitation error (Story 3.3 parks the adapter detect)
+      {
+        ac: "step 6 documents the verbatim parked-adapter error toast",
+        needle: "bmad adapter: detect lands in Story 3.3",
+      },
+      {
+        ac: "step 6 points at Story 3.3 as the lift",
+        needle: "Story 3.3",
       },
     ];
 
@@ -226,28 +239,33 @@ describe("README-install.md user-surface contract (Story 1.10)", () => {
     }
   });
 
-  describe("AC2 — README content covers PR #61 debug-session findings", () => {
-    // Step 3a — TUI flow: open marketplaces list, see entries, add `./`, confirm
-    it("step 3 covers the TUI flow: Marketplaces panel + ./ + crew entry + confirm", () => {
-      expect(raw).toMatch(/Marketplaces/);
+  describe("AC2 — README content matches observed Claude Code 2.1.145 reality", () => {
+    // Step 3a — single-line toast after `/plugin marketplace add ./`
+    it("step 3a covers the marketplace-added toast after /plugin marketplace add ./", () => {
       expect(raw).toMatch(/\/plugin marketplace add \.\//);
-      expect(raw).toMatch(/crew/);
-      expect(raw.toLowerCase()).toMatch(/confirm/);
+      expect(raw).toMatch(/Successfully added marketplace: crew/);
     });
 
-    // Step 3b — install command + temp_local_* cache caveat on validation failure
-    it("step 3b covers /plugin install crew@crew and the temp_local_* cache caveat", () => {
+    // Step 3b — single-line install toast pointing at /reload-plugins
+    it("step 3b covers /plugin install crew@crew and the /reload-plugins pointer", () => {
       expect(raw).toMatch(/\/plugin install crew@crew/);
-      expect(raw).toMatch(/temp_local_/);
-      expect(raw.toLowerCase()).toMatch(/validat/);
+      expect(raw).toMatch(/✓ Installed crew/);
+      expect(raw).toMatch(/Run \/reload-plugins to apply/);
     });
 
-    // Step 4 — MCP servers only start at launch, so restart is non-optional
-    it("step 4 explains MCP servers only spawn at launch — restart is non-optional", () => {
-      expect(raw.toLowerCase()).toMatch(/restart/);
-      expect(raw).toMatch(/non-optional/);
-      expect(raw).toMatch(/MCP/);
-      expect(raw.toLowerCase()).toMatch(/launch/);
+    // Step 4 — /reload-plugins is the apply step, no restart needed
+    it("step 4 covers /reload-plugins as the apply step with no restart required", () => {
+      expect(raw).toMatch(/\/reload-plugins/);
+      expect(raw).toMatch(/Reloaded:/);
+      expect(raw).toMatch(/plugin MCP servers/);
+      expect(raw).toMatch(/no Claude Code restart is required/);
+    });
+
+    // Step 6 — known-limitation error (Story 3.3 parked the adapter detect)
+    it("step 6 documents the parked-adapter known limitation and points at Story 3.3", () => {
+      expect(raw).toMatch(/\/crew:status/);
+      expect(raw).toMatch(/bmad adapter: detect lands in Story 3\.3/);
+      expect(raw).toMatch(/Story 3\.3/);
     });
   });
 

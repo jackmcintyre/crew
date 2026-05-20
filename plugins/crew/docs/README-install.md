@@ -2,7 +2,7 @@
 
 Six checkpoints from clone to seeing the plugin recognise your repo. Each step has one runnable command and one expected confirmation. If a checkpoint fails, the failure is local to that step — don't proceed.
 
-> Heads-up: steps 3a, 3b, and 6 are **slash commands you type inside a running Claude Code session**, not shell commands. Steps 3a and 3b in particular open Claude Code's interactive **Marketplaces** TUI panel — there is no stdout line to grep for; you confirm inside the panel.
+> Heads-up: steps 3a, 3b, 4, and 6 are **slash commands you type inside a running Claude Code session**, not shell commands. Each one prints a single-line toast back into the transcript — there's no separate TUI panel to confirm in.
 
 1. **Install Claude Code.**
 
@@ -42,16 +42,13 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
    /plugin marketplace add ./
    ```
 
-   Expected confirmation: Claude Code opens its **Marketplaces** TUI panel. You should see something shaped like the block below — the panel title, your existing marketplaces (if any), and a new `crew` entry sourced from `./`. Confirm inside the panel (the panel's own prompt tells you which key); on confirmation you land on the **`crew`** tab listing the plugins published by that marketplace.
+   Expected confirmation — a single-line toast in the transcript:
 
    ```text
-   ┌─ Marketplaces ─────────────────────────────────┐
-   │   <any pre-existing marketplaces…>             │
-   │ > crew                              source: ./ │
-   └────────────────────────────────────────────────┘
+   Successfully added marketplace: crew
    ```
 
-   There is **no stdout confirmation line** — the panel is the surface. If the panel doesn't open, the command literal didn't register; re-check that you typed it inside Claude Code (not a shell) and that the `./` is present.
+   If you don't see that toast, the command literal didn't register; re-check that you typed it inside Claude Code (not a shell) and that the `./` is present.
 
    3b. Install the `crew` plugin from that marketplace:
 
@@ -59,25 +56,27 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
    /plugin install crew@crew
    ```
 
-   Expected confirmation: Claude Code opens its install TUI flow for `crew@crew`, validates the plugin locally, and on success lands you on the plugin's tab inside the Marketplaces panel showing it as **installed**. Again, no `Plugin installed: …` stdout line — the panel state is the surface.
-
-   If validation fails (e.g. the plugin's `plugin.json` is malformed, the committed `dist/` is missing, or any other local-shape regression), Claude Code surfaces a cache path in the error output that looks like:
+   Expected confirmation — a single-line toast in the transcript:
 
    ```text
-   ~/.claude/plugins/cache/temp_local_<hash>
+   ✓ Installed crew. Run /reload-plugins to apply.
    ```
 
-   That directory is where Claude Code staged the plugin for validation. The failure is **local** — there is no remote registry call. If you hit it, `ls` the `temp_local_*` path to see what was staged, fix the underlying file in your checkout, and re-run `/plugin install crew@crew`.
+   The toast tells you the next step explicitly: `/reload-plugins` (step 4 below) is what actually applies the install.
 
-4. **Restart Claude Code.**
+4. **Reload plugins.**
 
    ```text
-   Quit and reopen Claude Code (no shell command).
+   /reload-plugins
    ```
 
-   The restart is **non-optional**. `crew` ships an MCP server, and Claude Code only spawns MCP servers **at launch** — `/plugin install` registers the plugin but does NOT start the server mid-session. If you skip the restart, `/crew:status` will either be missing from tab-complete or fail with a `Tool not found` shape, and there is no other signal that the restart is what's missing.
+   Expected confirmation — a single-line toast in the transcript shaped like:
 
-   Expected confirmation: after you reopen Claude Code, type `/` and start typing `crew`. The `/crew:` namespace appears in the slash-command picker / tab-complete, with at least `/crew:status` listed. You do **not** need to invoke anything yet.
+   ```text
+   Reloaded: 5 plugins · 3 skills · 6 agents · 0 hooks · 3 plugin MCP servers · 1 plugin LSP server
+   ```
+
+   The exact counts vary by what else you have installed; what matters is the line starts with `Reloaded:` and the `plugin MCP servers` count is **non-zero** (that's the `crew` MCP server coming online). `/reload-plugins` reloads MCP servers in-process — **no Claude Code restart is required**.
 
 5. **Copy the standards template into your target repo.**
 
@@ -95,7 +94,7 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
 
    (`ls <target-repo>/docs/standards.md` returns the path — the file now exists.)
 
-6. **Run `/<plugin>:status` and see the expected line.**
+6. **Run `/<plugin>:status` and see the current adapter state.**
 
    ```text
    /crew:status
@@ -103,17 +102,15 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
 
    (Run inside Claude Code, with `<target-repo>` loaded as the workspace.)
 
-   Expected confirmation:
+   Expected confirmation **today** — a known-limitation error toast:
 
    ```text
-   crew v0.1.0
-   target repo: /Users/you/projects/your-repo
-   adapter: bmad (ok)
-   standards: ok — /Users/you/projects/your-repo/docs/standards.md
-   cycle: none
+   bmad adapter: detect lands in Story 3.3
    ```
 
-   (First line matches `^crew v\d+\.\d+\.\d+(?:-[\w.]+)?$`; the `standards:` line starts with `standards: ok`.)
+   This is the **current ground-truth output on a clean install**. The BMad adapter's detect path is parked — it ships in Story 3.3 ("BMad adapter detect path"). Until then, `/crew:status` correctly reports that no adapter has been confirmed for the repo. Seeing the line above means the plugin is installed, the MCP server is running, and the status tool is wired through end-to-end; only the adapter probe is still stubbed.
+
+   Once Story 3.3 lands, this step will instead return the full status block (`crew vX.Y.Z`, target repo, adapter, standards, cycle). This README will be updated in the same change.
 
 ## Build artefacts
 
