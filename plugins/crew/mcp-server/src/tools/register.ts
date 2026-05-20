@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DomainError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import type { AiEngineeringTeamServer } from "../server.js";
 import { getStatus, renderStatus } from "./get-status.js";
@@ -9,6 +10,7 @@ import { readCatalogue } from "./read-catalogue.js";
 import { readCustomRole } from "./read-custom-role.js";
 import { readPersona } from "./read-persona.js";
 import { readRepoSignals } from "./read-repo-signals.js";
+import { scanSources, renderScanResult } from "./scan-sources.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -229,6 +231,43 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       return {
         content: [{ type: "text" as const, text: renderTeamSnapshot(snapshot) }],
       };
+    },
+  });
+
+  // Story 3.2 — scan-sources: project source stories into to-do/ manifests.
+  //
+  // Convention note: the MCP tool name follows the camelCase convention
+  // (`scanSources`, matching `getStatus`, `readCatalogue`, etc.). The epic
+  // AC text uses the kebab-case identifier `scan-sources` informally — it is
+  // readable English in prose, not the wire-level tool name. The skill
+  // (`/crew:scan`) hides both forms from the operator.
+  //
+  // Permission note: `/crew:scan` invokes this tool without `_meta.role`
+  // (matching `/crew:status`'s pattern), so the role-gate at server.ts is
+  // bypassed and the tool runs at operator authority. When Story 3.4 lands
+  // the planner subagent, its permission spec at
+  // `plugins/crew/catalogue/permissions/planner.yaml` must list `scanSources`
+  // in `tools_allow`. That edit belongs to Story 3.4.
+  server.registerTool({
+    name: "scanSources",
+    description:
+      "Project the active adapter's source stories into execution manifests under <target-repo>/.crew/state/to-do/<ref>.yaml. Idempotent on re-scan; refreshes source_hash for manifests still in to-do/. Used by /<plugin>:scan (Story 3.2).",
+    inputSchema: {
+      type: "object",
+      properties: { targetRepoRoot: { type: "string" } },
+      required: ["targetRepoRoot"],
+    },
+    handler: async (args) => {
+      const parsed = z.object({ targetRepoRoot: z.string().min(1) }).parse(args);
+      try {
+        const result = await scanSources({ targetRepoRoot: parsed.targetRepoRoot });
+        return { content: [{ type: "text" as const, text: renderScanResult(result) }] };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return { content: [{ type: "text" as const, text: err.message }], isError: true };
+        }
+        throw err;
+      }
     },
   });
 }

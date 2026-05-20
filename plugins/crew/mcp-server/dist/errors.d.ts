@@ -337,6 +337,29 @@ export declare class CatalogueShapeError extends DomainError {
     });
 }
 /**
+ * An execution manifest at `<target-repo>/.crew/state/<state>/<ref>.yaml`
+ * failed schema validation: malformed YAML, missing required field, wrong
+ * type, or an unknown key (strict-mode rejection). Named so downstream
+ * tooling (Story 3.5, Story 4.x) can pattern-match the error class name
+ * without parsing the message string.
+ *
+ * Thrown by `parseExecutionManifest` in
+ * `schemas/execution-manifest.ts` — every reader MUST go through that
+ * helper so this error surfaces consistently. (Story 3.2 / FR13)
+ */
+export declare class MalformedExecutionManifestError extends DomainError {
+    readonly absPath: string;
+    readonly yamlPath: string;
+    readonly zodMessage: string;
+    readonly schemaModule: string;
+    constructor(opts: {
+        absPath: string;
+        yamlPath: string;
+        zodMessage: string;
+        schemaModule: string;
+    });
+}
+/**
  * `readCatalogue` / `instantiatePersona` was asked for a role that
  * does not exist in `plugins/crew/catalogue/`. Distinct from
  * `CatalogueShapeError` (file exists but malformed) — this error

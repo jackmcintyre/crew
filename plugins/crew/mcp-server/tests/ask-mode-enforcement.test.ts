@@ -418,7 +418,7 @@ describe("AC6(f) — ask-mode-enforcement.md shape", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC6(g) — tool registration unchanged at 8 tools
+// AC6(g) — tool registration at 9 tools (Story 3.2 added scanSources)
 // ---------------------------------------------------------------------------
 describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers no new tools)", () => {
   it("MCP server lists exactly 8 tools and no new tool was added by Story 2.8", async () => {
@@ -441,7 +441,7 @@ describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers
 
       const toolNames = result.tools.map((t) => t.name);
 
-      // The eight Story 2.6 tools (unchanged through Story 2.8)
+      // The eight Story 2.6 tools (unchanged through Story 2.8) plus scanSources from Story 3.2
       const expectedTools = [
         "getStatus",
         "readCatalogue",
@@ -451,13 +451,14 @@ describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers
         "readRepoSignals",
         "readCustomRole",
         "getTeamSnapshot",
+        "scanSources",
       ];
       for (const name of expectedTools) {
         expect(toolNames, `expected tool '${name}' to be registered`).toContain(name);
       }
 
-      // Count stays at 8 — no new MCP tool registered by this story
-      expect(result.tools.length, "expected exactly 8 tools").toBe(8);
+      // Story 3.2 added scanSources — count is now 9
+      expect(result.tools.length, "expected exactly 9 tools").toBe(9);
     } finally {
       await client.close();
       await server.close();

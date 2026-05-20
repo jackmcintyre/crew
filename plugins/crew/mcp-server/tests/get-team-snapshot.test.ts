@@ -637,8 +637,8 @@ describe("AC3(e) — tool registration (Task 7.9)", () => {
       expect(toolNames).toContain(name);
     }
 
-    // Eight total.
-    expect(result.tools.length).toBe(8);
+    // Nine total — Story 3.2 added scanSources.
+    expect(result.tools.length).toBe(9);
 
     await client.close();
     await server.close();

@@ -10,6 +10,11 @@ Six checkpoints from clone to "the plugin sees my repo": [`docs/README-install.m
 
 Full first-run walkthrough (running the bundled example sprint, scanning sources, opening your first PR) lands in Epic 7 Story 7.2.
 
+## Available skills
+
+- `/crew:scan` — project your planning tool's source stories into per-story execution manifests under `.crew/state/to-do/`. Idempotent on re-run.
+- `/crew:status` — print the current plugin version, target repo, adapter, and standards-doc state.
+
 ## Standards doc
 
 Every reviewer verdict reads `<target-repo>/docs/standards.md`. The install walkthrough's checkpoint 5 copies the shipped template (`plugins/crew/docs/standards-example.md`) into your target repo.
