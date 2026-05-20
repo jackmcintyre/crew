@@ -268,4 +268,28 @@ So that a polluted persona is recoverable without manual editing of files I don'
 
 **AC3 (integration):** vitest covers append → revert → next-read cycle.
 
+## Story 6.14: Hand-editable persona files (defaults, template, minimal-valid)
+
+As a plugin operator,
+I want persona files I can comfortably open and edit by hand — with sensible defaults filled in, a documented minimal-valid shape, and a template I can copy when authoring a custom role,
+So that tuning a persona doesn't require knowing the full schema or reverse-engineering an existing file.
+
+**Context:** Surfaced in the Epic 2 retro (PR #76). A fixture failed schema on a missing `model_tier` field — the symptom of a broader usability gap: persona files are technically YAML/Markdown but operators can't reasonably hand-edit them without a working example and known-good defaults. This story closes that gap before the persona-knowledge append flow (6.9) lands and we ask operators to read/diff persona files routinely.
+
+**Acceptance Criteria:**
+
+**Given** a persona file with optional fields omitted,
+**When** the persona loader reads it,
+**Then** missing fields (e.g. `model_tier`) resolve to documented defaults rather than failing schema validation. _(FR-tbd)_
+
+**Given** the persona schema,
+**When** an operator looks for a minimal-valid template,
+**Then** `plugins/crew/templates/persona.minimal.md` (or equivalent docs path) exists, is referenced from the docs index, and is itself a valid persona file. _(NFR-tbd)_
+
+**Given** the custom-role hire flow,
+**When** a new persona is instantiated without a catalogue entry,
+**Then** the generated file uses the template above as its starting shape (not a raw schema dump). _(FR-tbd)_
+
+**AC4 (integration):** vitest covers (a) load-with-defaults, (b) template validates against the schema, (c) custom-role instantiation produces a file matching the template's shape.
+
 ---
