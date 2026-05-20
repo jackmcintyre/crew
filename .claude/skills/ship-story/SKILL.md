@@ -82,6 +82,18 @@ Spawn ONE subagent with `model: opus`. Prompt:
 
 > Run the `bmad-create-story` skill (action: `create`) for story key `<story_key>`. The epic source is `<epic_file>`. Output the spec to `<spec_path>`. Do NOT implement code — spec only. Do NOT modify `sprint-status.yaml` or any other status/state file — the orchestrator owns status transitions. Do NOT pause for clarifying questions; make reasonable defaults and proceed.
 >
+> **Story shape tag (required).** Immediately after the story title (the first `#` heading), add a line:
+> ```
+> story_shape: user-surface
+> ```
+> or
+> ```
+> story_shape: substrate
+> ```
+> Use `user-surface` if the story's primary deliverable is a Claude Code slash command, CLI behaviour, or any other LLM-driven output the end user observes directly. Use `substrate` for internal wiring, data models, adapters, and plumbing that users don't interact with directly. This tag controls the review-pass budget (substrate=3, user-surface=5) — choose honestly.
+>
+> **Behavioural contract section (user-surface stories only).** If `story_shape: user-surface`, the spec MUST include a "Behavioural contract" section listing prompt-level invariants in absolute modals (MUST / MUST NOT / NEVER). Additionally, at least one AC must be a deterministic content-structure check — e.g. "the catalogue file at path X contains substring Y" — rather than purely behavioural assertions. This is required because LLM outputs are non-deterministic; a structural anchor makes the AC verifiable without human judgment. (Epic 2 retro, #76.)
+>
 > **User-surface AC tagging (Story 1.8 convention).** Consult `plugins/crew/docs/user-surface-acs.md` for the canonical rules; the summary below is the contract. When drafting each AC, explicitly judge whether it names a user-invocable surface and emit the tag inline:
 >
 > - Tag an AC `**AC<n> (user-surface):**` if and only if it references at least one of:
@@ -142,12 +154,28 @@ $SH record <story_key> implemented
 
 If the returned summary reports no commit (or `git -C <worktree_path> log --oneline origin/main..HEAD` is empty), do NOT proceed to Step 7 — re-spawn the dev subagent with "your previous run left no commits on the branch; commit your scaffold per the prompt above." Burning a review pass on an empty diff is the failure mode this guard exists for.
 
-### Step 7 — Review ↔ rework cycle (subagent: bmad-code-review, max 3 passes)
+### Step 7 — Review ↔ rework cycle (subagent: bmad-code-review, variable budget)
 
-Maintain a local counter `passes = 0`. Loop:
+Maintain a local counter `passes = 0`. Read the budget before the loop:
 
-1. `passes += 1`. Halt with `REVIEW_BLOCKED` if `passes > 3`.
-2. Spawn a fresh subagent with `model: opus`: "Run `bmad-code-review` against the diff on branch `story/<story_key>`. Return verdict (`approve` / `request-changes` / `block`) and an itemised issue list, where each item has `severity` (Critical/High/Medium/Low/Info), `location` (`file:line` if applicable), and `description`. Do NOT modify `sprint-status.yaml`. Do NOT pause for questions."
+```bash
+$SH review-budget <spec_path>
+# → {"story_shape": "substrate"|"user-surface", "budget": 3|5}
+```
+
+<!-- Variable budget rationale (Epic 2 retro #76, #80): user-surface stories require more review cycles because
+     LLM-driven outputs are non-deterministic and stub-vs-real gaps are harder to catch statically. -->
+
+Loop:
+
+1. `passes += 1`. Halt with `REVIEW_BLOCKED` if `passes > 3` (substrate) or `passes > 5` (user-surface).
+2. Spawn a fresh subagent with `model: opus`: "Run `bmad-code-review` against the diff on branch `story/<story_key>`. Return verdict (`approve` / `request-changes` / `block`) and an itemised issue list, where each item has `severity` (Critical/High/Medium/Low/Info), `location` (`file:line` if applicable), and `description`.\
+   \
+   **Severity guidance — stub-vs-real (from Epic 2 retro #80):** If a test stubs or mocks production code that the user-facing surface relies on (e.g. mocking the MCP handler the slash command invokes), the AC is not really verified — the stub proves the test harness, not the product. This is `High` severity, not `Info`. Flag it as `request-changes`.\
+   \
+   **Reviewer clause — lock-vs-contract (from Epic 2 retro #77):** If the story spec contains a 'MUST NOT modify file X' lock, confirm the user-surface contract still works under that lock — i.e. verify the lock didn't silently break the contract by checking that the feature the locked file supports still behaves correctly. Flag any breakage as `High`.\
+   \
+   Do NOT modify `sprint-status.yaml`. Do NOT pause for questions."
 3. Record the verdict AND the issue list — this is how Step 11 surfaces non-blocker issues that shipped:
    ```bash
    $SH record <story_key> review_pass --data '{"pass":N,"verdict":"...","issues":[{"severity":"Low","location":"foo.ts:12","description":"..."}, ...]}'
@@ -286,10 +314,12 @@ If the output is non-empty, include it in the summary under a **Reviewer notes (
 
 Then tell the user, in 2-3 sentences plus the optional notes block:
 - which story shipped + PR URL
-- review passes consumed (`N of 3`) and CI passes consumed (`M of 3`)
+- review passes consumed (`N of <budget>`, where `<budget>` comes from `$SH review-budget <spec_path>`) and CI passes consumed (`M of 3`)
 - where the run log lives (for replay/debug)
 - reviewer notes block (if any — see above)
 - one-line reminder: "Tell me when you've merged and I'll clean up."
+- **If `story_shape: user-surface`:** add a visible TODO block:
+  > **TODO (before closing this story):** Post a retro comment on PR #<n> noting any prompt-level surprises, stub-vs-real gaps caught in review, or behavioural contract violations observed during smoke testing. The story isn't considered fully closed until this comment exists. (#80 lesson: retro observations on user-surface stories were lost between merge and the next sprint.)
 
 ### Step 12 — Post-merge cleanup (conversational trigger)
 
@@ -352,7 +382,7 @@ The skill halts (no PR) on any of these. Each is recorded in the run log before 
 | `MISSING_ACS` | Story has no Acceptance Criteria section | Author the epic before shipping |
 | `WORKTREE_CONFLICT` | Path or branch already exists | Clean up old run before retry |
 | `SPEC_VALIDATION_FAILED` | Step 5 caught spec issues before any code burned | Re-run `bmad-create-story` and re-author, then retry |
-| `REVIEW_BLOCKED` | Reviewer said `block` or 3 passes elapsed without `approve` | Jack decides: iterate manually or `/bmad-correct-course` |
+| `REVIEW_BLOCKED` | Reviewer said `block` or budget passes elapsed without `approve` (3 for substrate, 5 for user-surface) | Jack decides: iterate manually or `/bmad-correct-course` |
 | `AC_VERIFICATION_FAILED` | One or more ACs not green, or QA left uncommitted files | Fix the failing AC's code/test (or commit the QA artefact); rerun from Step 8 |
 | `CI_BLOCKED` | 3 CI-fix passes elapsed and required checks still failing | Jack decides: iterate manually on the PR, or `/bmad-correct-course` |
 | `CI_TIMEOUT` | CI didn't settle within 15min poll cap | Re-run Step 10 once checks complete |

@@ -29,6 +29,9 @@ Subcommands:
   reviewer-issues <story_key>     render reviewer-flagged issues (from
                                   review_pass events' data.issues) as a
                                   markdown bullet list for Step 11 summary
+  review-budget <spec_path>       return the review-pass budget for a story
+                                  based on story_shape tag (substrate=3,
+                                  user-surface=5)
 """
 from __future__ import annotations
 
@@ -65,6 +68,17 @@ def runs_dir() -> Path:
 # Exit code mnemonic for the pre-PR user-surface gate.
 EXIT_USER_SURFACE_UNVERIFIED = 42
 
+# Review-pass budget by story shape (Epic 2 retro: user-surface stories need
+# more review cycles because LLM-driven output is non-deterministic and
+# stub-vs-real gaps are harder to catch statically).
+REVIEW_PASS_BUDGET: dict[str, int] = {
+    "substrate": 3,
+    "user-surface": 5,
+}
+_DEFAULT_STORY_SHAPE = "substrate"
+
+_STORY_SHAPE_RE = re.compile(r"^story_shape:\s*(substrate|user-surface)\s*$", re.MULTILINE)
+
 # AC tag extraction regex for the user-surface gate.
 USER_SURFACE_AC_RE = re.compile(
     r"^\*\*AC(\d+)\s*\(user-surface\)\s*:\*\*", re.MULTILINE
@@ -79,6 +93,26 @@ class MalformedVerificationEvent(ValueError):
 
 
 # ---------------------------------------------------------------- helpers
+
+
+def read_story_shape(spec_path: Path) -> str:
+    """Return 'substrate' or 'user-surface' from a spec's story_shape tag.
+
+    The tag must appear as a standalone line immediately after the title:
+      story_shape: user-surface
+
+    Defaults to 'substrate' if missing or spec does not exist.
+    """
+    if not spec_path.exists():
+        return _DEFAULT_STORY_SHAPE
+    m = _STORY_SHAPE_RE.search(spec_path.read_text())
+    return m.group(1) if m else _DEFAULT_STORY_SHAPE
+
+
+def review_pass_budget(spec_path: Path) -> int:
+    """Return the max review passes for the story at spec_path."""
+    shape = read_story_shape(spec_path)
+    return REVIEW_PASS_BUDGET.get(shape, REVIEW_PASS_BUDGET[_DEFAULT_STORY_SHAPE])
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -324,6 +358,11 @@ def cmd_pr_body(args) -> None:
     info = json.loads(Path(args.resolve_json).read_text())
     results = json.loads(Path(args.results).read_text())
 
+    # Resolve budget for the story shape so the PR body reflects the correct cap.
+    spec_path = REPO / info.get("spec_path", f"_bmad-output/implementation-artifacts/{info['story_key']}.md")
+    budget = review_pass_budget(spec_path)
+    story_shape = read_story_shape(spec_path)
+
     rows = "\n".join(
         f"| {r.get('ac','').strip()} | {r.get('test','').strip()} | {r.get('result','').strip()} | {r.get('evidence','').strip()} |"
         for r in results
@@ -342,7 +381,7 @@ Ships story {info['story_short']} — {info['title']}.
 {rows}
 
 ## Reviewer
-Approved by `bmad-code-review` (pass {args.review_passes} of 3)
+Approved by `bmad-code-review` (pass {args.review_passes} of {budget}, story_shape: {story_shape})
 
 🤖 Shipped via `/ship-story`
 """
@@ -622,6 +661,14 @@ def cmd_reviewer_issues(args) -> None:
         loc_part = f" `{loc}` —" if loc else ""
         lines.append(f"- {prefix}{loc_part} {desc}".strip())
     print("\n".join(lines))
+
+
+def cmd_review_budget(args) -> None:
+    """Return the review-pass budget for a story based on its story_shape tag."""
+    spec_path = Path(args.spec_path)
+    shape = read_story_shape(spec_path)
+    budget = REVIEW_PASS_BUDGET.get(shape, REVIEW_PASS_BUDGET[_DEFAULT_STORY_SHAPE])
+    print(json.dumps({"spec_path": str(spec_path), "story_shape": shape, "budget": budget}))
 
 
 def cmd_pending_cleanup(args) -> None:
@@ -955,6 +1002,10 @@ def main() -> None:
     )
     rv.add_argument("--data", required=True, help="JSON-encoded event data")
     rv.set_defaults(func=cmd_record_verification)
+
+    rb = sub.add_parser("review-budget")
+    rb.add_argument("spec_path", help="path to the story spec file")
+    rb.set_defaults(func=cmd_review_budget)
 
     args = p.parse_args()
     args.func(args)
