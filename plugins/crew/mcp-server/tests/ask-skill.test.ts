@@ -484,7 +484,7 @@ If you meant a different role id, run /crew:team to see your current roster.`;
 });
 
 // ---------------------------------------------------------------------------
-// AC4(e) — tool registration unchanged (Task 6.8)
+// AC4(e) — tool registration (Task 6.8)
 // ---------------------------------------------------------------------------
 describe("AC4(e) — tool registration unchanged at 8 tools (Task 6.8)", () => {
   it("MCP server lists exactly 8 tools and no new tool was added by Story 2.7", async () => {
@@ -505,7 +505,7 @@ describe("AC4(e) — tool registration unchanged at 8 tools (Task 6.8)", () => {
 
     const toolNames = result.tools.map((t) => t.name);
 
-    // The eight Story 2.6 tools.
+    // The eight Story 2.6 tools plus scanSources from Story 3.2.
     const expectedTools = [
       "getStatus",
       "readCatalogue",
@@ -515,13 +515,14 @@ describe("AC4(e) — tool registration unchanged at 8 tools (Task 6.8)", () => {
       "readRepoSignals",
       "readCustomRole",
       "getTeamSnapshot",
+      "scanSources",
     ];
     for (const name of expectedTools) {
       expect(toolNames).toContain(name);
     }
 
-    // Count stays at 8 — no new MCP tool registered by this story.
-    expect(result.tools.length).toBe(8);
+    // Story 3.2 added scanSources — count is now 9.
+    expect(result.tools.length).toBe(9);
 
     // /crew:ask registers no new MCP tool.
     expect(toolNames).not.toContain("ask");
