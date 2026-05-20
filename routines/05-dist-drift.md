@@ -1,0 +1,96 @@
+---
+name: dist-drift
+cron: "0 23 * * *"         # 09:00 Sydney daily (23:00 UTC prev day)
+label: dist-drift
+enabled: true
+model: claude-sonnet-4-6
+---
+
+# dist/src drift guard
+
+Catches the exact CI failure CLAUDE.md warns about: someone edits
+`plugins/crew/mcp-server/src/` and forgets to rebuild and commit
+`plugins/crew/mcp-server/dist/`. CI catches it too, but this routine
+catches it overnight so it doesn't block a teammate's PR.
+
+---
+
+## Prompt
+
+You are running as a scheduled remote agent against the
+`jackmcintyre/crew` repository. The repo is already cloned. You have
+read access, `gh`, `git`, `pnpm`, and `node`.
+
+## Task
+
+Build the MCP server and verify that the committed `dist/` matches the
+build output exactly. Report if they drift.
+
+## Steps
+
+1. **Install dependencies.** Run `pnpm install --frozen-lockfile` at
+   the repo root. If install fails, **open an issue** noting the
+   failure — don't try to recover.
+
+2. **Capture the committed `dist/`.** Copy
+   `plugins/crew/mcp-server/dist/` to `/tmp/dist-committed/` so you can
+   diff against it after rebuilding.
+
+3. **Build.** Run `pnpm --filter @crew/mcp-server build`. If the build
+   fails, **open an issue** with the build output and stop here.
+
+4. **Diff.** Compare the freshly built `plugins/crew/mcp-server/dist/`
+   against `/tmp/dist-committed/`. Use `diff -r` for a recursive diff.
+   Ignore timestamp-only or source-map-only differences if they are
+   obviously not content changes (e.g., line numbers in `.js.map` files
+   that match line-for-line otherwise).
+
+5. **Decide whether to report.**
+   - If the diff is empty (or only consists of stable, irrelevant
+     differences as above), **exit silently — no issue**.
+   - If there is real drift, proceed.
+
+6. **Open the issue.** Use `gh issue create`:
+   - **Title:** `dist drift — YYYY-MM-DD`
+   - **Label:** `dist-drift` (create with
+     `gh label create dist-drift --color D93F0B --description "Committed dist/ does not match a fresh build" || true`).
+   - **Body:** see structure below.
+
+## Issue body structure
+
+```
+## Drift detected
+
+**Last commit touching `src/`:** <SHA — author — date — title>
+**Last commit touching `dist/`:** <SHA — author — date — title>
+
+## Files that differ
+
+<For each file, one bullet: path — added/removed/modified — brief one-line description of the change (e.g., "function `foo` body changed", "new export `bar`").>
+
+## Diff summary
+
+```diff
+<First 200 lines of diff. If the full diff is larger, truncate and note the line count.>
+```
+
+## To fix locally
+
+```bash
+pnpm install --frozen-lockfile
+pnpm --filter @crew/mcp-server build
+git add plugins/crew/mcp-server/dist
+git commit -m "chore: rebuild mcp-server dist"
+```
+```
+
+## Important
+
+- **No commits, no PRs.** Even though the fix is to commit a rebuilt
+  `dist/`, this routine does *not* do that. A human reviews the
+  surface area of the change and commits it themselves.
+- **If `pnpm install` or the build fails,** that *is* a finding — open
+  an issue noting the failure, with output. Don't exit silently in that
+  case.
+- **If `gh` auth fails,** dump the report to stdout and clearly note
+  "Could not open issue — report in run output."
