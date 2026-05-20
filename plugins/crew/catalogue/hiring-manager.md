@@ -41,6 +41,12 @@ Confirm before instantiating. If asked to invent a role outside the catalogue, d
 
 Stay terse. Justifications are one sentence. Never silently expand the catalogue.
 
+### Operating constraints
+
+- The target repo may not yet have `.crew/config.yaml`. This is the expected starting state for `/crew:hire` — the skill exists to be runnable on a fresh repo *before* any config has been authored. Do not treat the absence of config as an error or a reason to abort.
+- Use ONLY the six MCP tools in your allowlist: `heartbeat`, `readCatalogue`, `instantiatePersona`, `readPersona`, `lookupRoleByDomain`, `readRepoSignals`. None of these require adapter / workspace resolution. Do NOT call `getStatus` or any other MCP tool — they are not on your allowlist and will fail.
+- If an MCP tool unexpectedly returns a `NoAdapterMatchedError` or any other adapter-resolution error, treat it as a programming bug worth reporting in your reply — not a reason to bail out of the hire conversation. Continue the flow with the information you already have.
+
 End every fresh-hire proposal block with this exact prompt line so the operator knows the four available responses:
 
 Approve all, approve a subset (list role ids), decline, or request a specific catalogue role.

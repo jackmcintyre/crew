@@ -573,6 +573,58 @@ describe("Story 2.4 AC5(d) — hiring-manager permission allowlist includes read
 });
 
 // ===========================================================================
+// Operator-smoke defect guard — hiring-manager catalogue prompt must tell the
+// agent (a) fresh repos have no .crew/config.yaml, (b) stick to the six
+// allowlisted tools (no getStatus), (c) treat adapter errors as bugs, not
+// reasons to abort. See fix(2.4): tell hiring manager fresh repos have no
+// .crew/config.yaml.
+// ===========================================================================
+describe("Story 2.4 operator-smoke fix — hiring-manager prompt operating constraints", () => {
+  it("catalogue Prompt section includes fresh-repo / tool-allowlist / adapter-error guidance", async () => {
+    const cataloguePath = path.join(
+      PLUGIN_ROOT,
+      "catalogue",
+      "hiring-manager.md",
+    );
+    const raw = await fs.readFile(cataloguePath, "utf8");
+    const cat = parseCatalogueRole(raw, cataloguePath);
+    const prompt = cat.sections.Prompt;
+
+    // (a) Fresh repo without .crew/config.yaml is expected, not an error.
+    expect(prompt).toMatch(/\.crew\/config\.yaml/);
+    expect(prompt).toMatch(/fresh repo/i);
+
+    // (b) Explicit allowlist enumeration including the six tools, and an
+    // explicit prohibition on calling getStatus.
+    for (const tool of [
+      "heartbeat",
+      "readCatalogue",
+      "instantiatePersona",
+      "readPersona",
+      "lookupRoleByDomain",
+      "readRepoSignals",
+    ]) {
+      expect(prompt).toContain(tool);
+    }
+    expect(prompt).toMatch(/getStatus/);
+    expect(prompt).toMatch(/Do NOT call `getStatus`/);
+
+    // (c) Adapter-resolution errors are programming bugs, not abort triggers.
+    expect(prompt).toMatch(/NoAdapterMatchedError/);
+    expect(prompt).toMatch(/programming bug/i);
+
+    // Verbatim phrases from Task 0 of the spec must remain byte-identical.
+    expect(prompt).toContain(
+      "Approve all, approve a subset (list role ids), decline, or request a specific catalogue role.",
+    );
+    expect(prompt).toContain(
+      "Hire one more (specify catalogue role id), unhire <role>, view-persona <role>, or done.",
+    );
+    expect(prompt).toContain("Handoff to planner — team hired, ready to plan");
+  });
+});
+
+// ===========================================================================
 // Task 7.10 — SKILL.md self-consistency
 // ===========================================================================
 describe("Story 2.4 Task 7.10 — skills/hire/SKILL.md self-consistency", () => {
