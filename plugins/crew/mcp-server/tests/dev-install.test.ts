@@ -17,6 +17,9 @@
  *   2. Second run is a no-op (mtime of symlink unchanged).
  *   3. Edit propagation — changes in the source are immediately visible via the cache
  *      (because the cache IS a symlink to the source, not a copy).
+ *   4. Error paths: exit 2 (no git repo / missing plugin.json), exit 3 (missing dist).
+ *   5. Happy-path replacement: a real dir at $target is rm -rf'd and replaced with symlink.
+ *   6. --kill-daemon flag: terminates a fake daemon process matching the pattern.
  *
  * The actual Claude Code daemon interaction is out of scope — verified by the story's
  * user-surface smoke gate.
@@ -30,12 +33,14 @@ import {
   mkdtempSync,
   realpathSync,
   existsSync,
+  lstatSync,
+  rmSync,
 } from "node:fs";
 import { rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync, spawn } from "node:child_process";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // tests/ -> mcp-server -> crew -> plugins -> repo root
@@ -166,9 +171,6 @@ describe("dev-install.sh integration scenario (Story 1.11 AC7)", () => {
       "0.0.0-test",
     );
     // The cache entry must be a symlink.
-    const stat = statSync(expectedCache);
-    // lstatSync would be clearer, but statSync follows symlinks — use lstat to check symlink.
-    const { lstatSync } = require("node:fs");
     const lstat = lstatSync(expectedCache);
     expect(lstat.isSymbolicLink()).toBe(true);
 
@@ -195,7 +197,6 @@ describe("dev-install.sh integration scenario (Story 1.11 AC7)", () => {
       "crew",
       "0.0.0-test",
     );
-    const { lstatSync } = require("node:fs");
     const mtimeBefore = lstatSync(expectedCache).mtimeMs;
 
     // Second run — no source changes.
@@ -237,11 +238,125 @@ describe("dev-install.sh integration scenario (Story 1.11 AC7)", () => {
   });
 
   it("AC7 error path: exits 3 when dist/index.js is missing", () => {
-    const { rmSync } = require("node:fs");
     rmSync(resolve(env.pluginsCrewDir, "mcp-server", "dist", "index.js"));
 
     const result = runScript(env.repoRoot, env.cacheParent);
     expect(result.status).toBe(3);
     expect(result.stderr).toContain("dist/index.js not found");
+  });
+
+  it("error path exit 2: exits 2 when run outside a git repo", () => {
+    // Create a plain directory with a valid plugin tree but no git repo.
+    const base = mkdtempSync(resolve(tmpdir(), "crew-no-git-"));
+    const pluginsCrewDir = resolve(base, "plugins", "crew");
+    mkdirSync(resolve(pluginsCrewDir, ".claude-plugin"), { recursive: true });
+    mkdirSync(resolve(pluginsCrewDir, "mcp-server", "dist"), { recursive: true });
+    writeFileSync(
+      resolve(pluginsCrewDir, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "crew", version: "0.0.0-test" }),
+    );
+    writeFileSync(
+      resolve(pluginsCrewDir, "mcp-server", "dist", "index.js"),
+      "// stub\n",
+    );
+
+    const result = spawnSync("sh", [SCRIPT_PATH], {
+      cwd: base,
+      env: { ...process.env, HOME: env.cacheParent, GIT_CONFIG_NOSYSTEM: "1" },
+      encoding: "utf8",
+    });
+
+    // Clean up the plain dir.
+    rmSync(base, { recursive: true, force: true });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("preflight");
+  });
+
+  it("error path exit 2: exits 2 when plugin.json is missing", () => {
+    // Remove the plugin.json from the valid git repo.
+    rmSync(resolve(env.pluginsCrewDir, ".claude-plugin", "plugin.json"));
+
+    const result = runScript(env.repoRoot, env.cacheParent);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("preflight");
+  });
+
+  it("happy-path replacement: replaces a real dir at $target with a symlink", () => {
+    // Simulate a previous /plugin install — create a real directory at the cache path.
+    const cacheVersionDir = resolve(
+      env.cacheParent,
+      ".claude",
+      "plugins",
+      "cache",
+      "crew",
+      "crew",
+      "0.0.0-test",
+    );
+    mkdirSync(resolve(cacheVersionDir, "some-subdir"), { recursive: true });
+    writeFileSync(resolve(cacheVersionDir, "old-file.txt"), "old content\n");
+
+    // Confirm it is a real directory (not a symlink).
+    expect(lstatSync(cacheVersionDir).isSymbolicLink()).toBe(false);
+    expect(lstatSync(cacheVersionDir).isDirectory()).toBe(true);
+
+    // Run dev:install — must rm -rf the real dir and replace with symlink.
+    const result = runScript(env.repoRoot, env.cacheParent);
+    expect(result.status).toBe(0);
+
+    // End state: the path is now a symlink.
+    const lstat = lstatSync(cacheVersionDir);
+    expect(lstat.isSymbolicLink()).toBe(true);
+
+    // And it resolves to the source tree.
+    const resolved = realpathSync(cacheVersionDir);
+    const expectedReal = realpathSync(env.pluginsCrewDir);
+    expect(resolved).toBe(expectedReal);
+
+    // The old file is gone (replaced, not overlaid).
+    expect(existsSync(resolve(cacheVersionDir, "old-file.txt"))).toBe(false);
+  });
+
+  it("--kill-daemon: kills a fake daemon process matching the pattern", async () => {
+    // Spawn a fake "daemon" whose argv matches the pkill pattern BEFORE running
+    // the script. The script reaches the kill step on the first (fresh-install) run.
+    // We append the sentinel path as an extra arg so pkill -f matches the string
+    // "node .*plugins/crew/mcp-server/dist/index.js" anywhere in the command line.
+    const fakeDaemon = spawn(
+      process.execPath,
+      ["-e", "setTimeout(()=>{},60000)", "plugins/crew/mcp-server/dist/index.js"],
+      { detached: false, stdio: "ignore" },
+    );
+
+    // Give the process time to appear in the process table.
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Confirm it is alive.
+    let alive = true;
+    try {
+      process.kill(fakeDaemon.pid!, 0);
+    } catch {
+      alive = false;
+    }
+    expect(alive).toBe(true);
+
+    // Run dev:install --kill-daemon on a fresh env (no prior install).
+    // The script creates the symlink then reaches the kill step.
+    const result = runScript(env.repoRoot, env.cacheParent, ["--kill-daemon"]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("killed");
+
+    // Give pkill a moment to deliver the signal.
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Process should now be dead.
+    let stillAlive = false;
+    try {
+      process.kill(fakeDaemon.pid!, 0);
+      stillAlive = true;
+    } catch {
+      // Expected — process is gone.
+    }
+    expect(stillAlive).toBe(false);
   });
 });

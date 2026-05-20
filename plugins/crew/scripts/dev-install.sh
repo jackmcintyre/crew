@@ -69,7 +69,8 @@ if [ ! -f "$plugin_json" ]; then
 fi
 
 # Read version from plugin.json using node (already a dep via pnpm workspace).
-version=$(node -e "process.stdout.write(require('$plugin_json').version)" 2>/dev/null) || \
+# Pass the path via env var to avoid single-quote injection if the path contains quotes.
+version=$(plugin_json="$plugin_json" node -e "process.stdout.write(require(process.env.plugin_json).version)" 2>/dev/null) || \
   die2 "preflight: could not read version from $plugin_json"
 
 if [ -z "$version" ]; then
@@ -104,6 +105,9 @@ if [ -L "$target" ]; then
 elif [ -e "$target" ]; then
   # Regular directory (e.g. from a previous /plugin install). Verify the path is
   # safely scoped to the crew cache before removing.
+  # NOTE: the case guard below is defensive belt-and-braces — $target is always
+  # constructed as "$HOME/.claude/plugins/cache/crew/crew/$version" (three lines above)
+  # so this branch cannot fire in normal usage. Kept as a future-refactor guard.
   case "$target" in
     "$HOME/.claude/plugins/cache/crew/crew/"*) ;;
     *)
@@ -128,7 +132,7 @@ if [ ! -f "$sentinel" ]; then
   die5 "sentinel verify: $sentinel not readable via symlink — check symlink target"
 fi
 
-installed_version=$(node -e "process.stdout.write(require('$sentinel').version)" 2>/dev/null) || \
+installed_version=$(plugin_json="$sentinel" node -e "process.stdout.write(require(process.env.plugin_json).version)" 2>/dev/null) || \
   die5 "sentinel verify: could not parse version from $sentinel"
 
 if [ "$installed_version" != "$version" ]; then
@@ -142,12 +146,14 @@ printf 'dev:install ok → %s (source: %s)\n' "$target" "$source_dir"
 # ── optional step 7: kill daemon ─────────────────────────────────────────────
 
 if [ "$kill_daemon" = "1" ]; then
-  # Only target processes whose command line includes our specific dist/index.js.
-  # pgrep -f matches the full command line. NEVER kill arbitrary PIDs.
-  mcp_pid=$(pgrep -f "plugins/crew/mcp-server/dist/index.js" 2>/dev/null || true)
-  if [ -n "$mcp_pid" ]; then
-    printf 'killed mcp daemon pid=%s\n' "$mcp_pid"
-    kill "$mcp_pid" 2>/dev/null || true
+  # Only target processes whose command line matches our specific dist/index.js.
+  # Use pkill -f directly to avoid the multi-PID-string pitfall from pgrep: if
+  # multiple matching processes exist, pgrep returns a newline-separated list and
+  # passing that as a single quoted arg to kill would fail. pkill handles this
+  # atomically. Pattern anchored to "node .*" so editors/viewers of the path
+  # are never matched. NEVER kill arbitrary PIDs.
+  if pkill -f "node .*plugins/crew/mcp-server/dist/index.js" 2>/dev/null; then
+    printf 'killed crew mcp daemon process(es) matching node .*plugins/crew/mcp-server/dist/index.js\n'
   else
     printf '(no crew mcp daemon process found to kill)\n'
   fi
