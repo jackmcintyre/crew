@@ -359,4 +359,61 @@ describe("dev-install.sh integration scenario (Story 1.11 AC7)", () => {
     }
     expect(stillAlive).toBe(false);
   });
+
+  it("--kill-daemon idempotent path: kills daemon even when symlink is already correct (issue #1 regression)", async () => {
+    // Seed the cache by running dev:install once (no --kill-daemon).
+    const firstResult = runScript(env.repoRoot, env.cacheParent);
+    expect(firstResult.status).toBe(0);
+    expect(firstResult.stdout).not.toContain("already up to date");
+
+    // Verify the symlink is in place.
+    const expectedCache = resolve(
+      env.cacheParent,
+      ".claude",
+      "plugins",
+      "cache",
+      "crew",
+      "crew",
+      "0.0.0-test",
+    );
+    expect(lstatSync(expectedCache).isSymbolicLink()).toBe(true);
+
+    // Spawn a fake daemon that the second (idempotent) run should kill.
+    const fakeDaemon = spawn(
+      process.execPath,
+      ["-e", "setTimeout(()=>{},60000)", "plugins/crew/mcp-server/dist/index.js"],
+      { detached: false, stdio: "ignore" },
+    );
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    let alive = true;
+    try {
+      process.kill(fakeDaemon.pid!, 0);
+    } catch {
+      alive = false;
+    }
+    expect(alive).toBe(true);
+
+    // Second run — symlink already points at source, so this is the idempotent
+    // fast-path. --kill-daemon must still be honoured.
+    const result = runScript(env.repoRoot, env.cacheParent, ["--kill-daemon"]);
+    expect(result.status).toBe(0);
+    // Must report "already up to date" (idempotent path taken).
+    expect(result.stdout).toContain("already up to date");
+    // Must also report that the daemon was killed.
+    expect(result.stdout).toContain("killed");
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The fake daemon process must be dead.
+    let stillAlive = false;
+    try {
+      process.kill(fakeDaemon.pid!, 0);
+      stillAlive = true;
+    } catch {
+      // Expected — process is gone.
+    }
+    expect(stillAlive).toBe(false);
+  });
 });

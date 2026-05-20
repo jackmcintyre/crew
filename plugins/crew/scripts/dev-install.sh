@@ -97,6 +97,15 @@ if [ -L "$target" ]; then
   existing_target=$(readlink "$target")
   if [ "$existing_target" = "$source_dir" ]; then
     printf 'dev:install ok → %s (already up to date)\n' "$target"
+    # Still honour --kill-daemon even on the idempotent fast-path: an engineer who
+    # rebuilt dist/ and re-runs with --kill-daemon expects the daemon to be respawned.
+    if [ "$kill_daemon" = "1" ]; then
+      if pkill -f "node .*plugins/crew/mcp-server/dist/index.js" 2>/dev/null; then
+        printf 'killed crew mcp daemon process(es) matching node .*plugins/crew/mcp-server/dist/index.js\n'
+      else
+        printf '(no crew mcp daemon process found to kill)\n'
+      fi
+    fi
     printf 'next: restart Claude Code to pick up skill-index changes, or run /reload-plugins for MCP-only changes — see plugins/crew/docs/dev-loop.md\n'
     exit 0
   fi
