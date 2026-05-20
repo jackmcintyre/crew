@@ -378,3 +378,22 @@ export class InvalidStateNameError extends DomainError {
         this.reason = opts.reason;
     }
 }
+/**
+ * Catalogue role file (`plugins/<plugin>/catalogue/<role>.md`) exists
+ * but failed the parser — YAML frontmatter syntax error, missing /
+ * unknown frontmatter key, or a required `##` section that is missing
+ * or out of canonical order (Story 2.1).
+ */
+export class CatalogueShapeError extends DomainError {
+    code = "CATALOGUE_SHAPE_ERROR";
+    sourcePath;
+    zodMessage;
+    constructor(opts) {
+        super(`Catalogue role at ${opts.sourcePath} is malformed: ${opts.zodMessage}. ` +
+            `See the canonical example in plugins/crew/catalogue/generalist-dev.md ` +
+            `and the file shape in architecture ` +
+            `implementation-patterns-consistency-rules §3.`);
+        this.sourcePath = opts.sourcePath;
+        this.zodMessage = opts.zodMessage;
+    }
+}
