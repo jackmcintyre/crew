@@ -7,6 +7,10 @@ coverage/
 # BMad tooling — installed/generated, not source
 _bmad/
 _bmad-output/
+# Exception: the BMad adapter's test fixtures contain a fake `_bmad-output/`
+# tree (committed test data, not local planning artefacts).
+!plugins/crew/mcp-server/src/adapters/bmad/fixtures/**/_bmad-output/
+!plugins/crew/mcp-server/src/adapters/bmad/fixtures/**/_bmad-output/**
 .claude/skills/bmad-*/
 
 # ...but track the active planning artifacts (PRD, epics, architecture, etc.)

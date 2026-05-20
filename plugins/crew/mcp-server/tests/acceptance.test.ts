@@ -135,9 +135,13 @@ describe("AC4 — BmadAdapter scaffold", () => {
     expect(mod.BmadAdapter).toBeDefined();
   });
 
-  it("listSourceStories() returns [] (hardcoded placeholder)", async () => {
-    const result = await BmadAdapter.listSourceStories();
-    expect(result).toEqual([]);
+  it("listSourceStories() throws when no context is bound (post-Story-3.3)", async () => {
+    // Pre-Story-3.3 the stub returned []. Story 3.3 replaced the stub
+    // with a real implementation that requires a bound (targetRepo,
+    // storiesRoot) context; without one the singleton refuses to walk.
+    await expect(BmadAdapter.listSourceStories()).rejects.toThrow(
+      /no bound context/,
+    );
   });
 
   it("declares the PlanningAdapter shape (name + required methods)", () => {

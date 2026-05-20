@@ -23,8 +23,15 @@ describe("plugin skeleton smoke", () => {
     }
   });
 
-  it("BmadAdapter.listSourceStories returns [] (AC6d)", async () => {
-    const stories = await BmadAdapter.listSourceStories();
-    expect(stories).toEqual([]);
+  it("BmadAdapter.listSourceStories returns [] when no context is bound (AC6d, post-Story-3.3)", async () => {
+    // Pre-Story-3.3 the stub returned []. Story 3.3 introduces a bound
+    // context; with no context configured the method now throws. This
+    // assertion documents the post-3.3 invariant that the registry's
+    // bare `BmadAdapter` singleton is non-functional until
+    // `configureBmadAdapter` (driven by Story 3.1's `getActiveAdapter`)
+    // has been called.
+    await expect(BmadAdapter.listSourceStories()).rejects.toThrow(
+      /no bound context/,
+    );
   });
 });
