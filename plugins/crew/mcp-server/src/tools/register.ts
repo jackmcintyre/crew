@@ -5,6 +5,7 @@ import { getStatus, renderStatus } from "./get-status.js";
 import { instantiatePersona } from "./instantiate-persona.js";
 import { lookupRoleByDomain } from "./lookup-role-by-domain.js";
 import { readCatalogue } from "./read-catalogue.js";
+import { readCustomRole } from "./read-custom-role.js";
 import { readPersona } from "./read-persona.js";
 import { readRepoSignals } from "./read-repo-signals.js";
 
@@ -163,6 +164,38 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         .parse(args);
       const result = await readRepoSignals({
         targetRepoRoot: parsed.targetRepoRoot,
+      });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      };
+    },
+  });
+
+  // Story 2.5 — manual escape hatch for operator-authored custom roles
+  // (FR92). Parses <target-repo>/team/custom/<role>.md against the same
+  // CatalogueRoleSchema as a shipped catalogue file.
+  server.registerTool({
+    name: "readCustomRole",
+    description:
+      "Read an operator-authored custom role file from <target-repo>/team/custom/<role>.md and return its parsed CatalogueRole. Used by /hire to support the FR92 manual escape hatch.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "role"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          role: z.string().min(1),
+        })
+        .parse(args);
+      const result = await readCustomRole({
+        targetRepoRoot: parsed.targetRepoRoot,
+        role: parsed.role,
       });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result) }],

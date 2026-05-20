@@ -320,6 +320,13 @@ describe("Story 2.3 — persona machinery (AC1–AC5)", () => {
         expect(err).toBeInstanceOf(CatalogueRoleNotFoundError);
         const e = err as CatalogueRoleNotFoundError;
         expect(e.role).toBe("not-a-real-role");
+        // Error message names BOTH checked paths (Story 2.5 fix).
+        expect(e.message).toContain(
+          path.join(tmp, "team", "custom", "not-a-real-role.md"),
+        );
+        expect(e.message).toContain(
+          path.join(getPluginRoot(), "catalogue", "not-a-real-role.md"),
+        );
       }
     });
 
@@ -350,6 +357,166 @@ describe("Story 2.3 — persona machinery (AC1–AC5)", () => {
         expect(e.role).toBe("planner");
         expect(e.personaPath).toBe(first.path);
       }
+    });
+  });
+
+  describe("Story 2.5 fix — instantiatePersona honours team/custom/ precedence", () => {
+    const CUSTOM_ROLE_BODY = `---
+role: data-scientist
+domain: "ml pipeline ownership"
+model_tier: sonnet
+tools_allow:
+  - Read
+  - Edit
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — <intent>"
+  yield: "This sits in <role>'s domain — handing off"
+  verdict: "**Verdict: <SENTINEL>**"
+---
+
+# Data scientist
+
+## Domain
+
+Owns the ML pipeline.
+
+## Mandate
+
+- Author training scripts.
+
+## Out of mandate
+
+- Production deploys.
+
+## Prompt
+
+You are the data scientist.
+`;
+
+    const CUSTOM_PLANNER_BODY = `---
+role: planner
+domain: "custom planner override"
+model_tier: sonnet
+tools_allow:
+  - Read
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — <intent>"
+  yield: "This sits in <role>'s domain — handing off"
+  verdict: "**Verdict: <SENTINEL>**"
+---
+
+# Planner
+
+## Domain
+
+custom planner override
+
+## Mandate
+
+- Custom mandate body.
+
+## Out of mandate
+
+- Custom out-of-mandate body.
+
+## Prompt
+
+Custom prompt body for the operator's planner override.
+`;
+
+    async function writeCustom(
+      root: string,
+      filename: string,
+      body: string,
+    ): Promise<void> {
+      const dir = path.join(root, "team", "custom");
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, filename), body, "utf8");
+    }
+
+    it("uses team/custom/<role>.md when only the custom file exists", async () => {
+      const tmp = await makeTmp("custom-only");
+      tmpDirs.push(tmp);
+      await writeCustom(tmp, "data-scientist.md", CUSTOM_ROLE_BODY);
+
+      const { path: personaPath } = await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "data-scientist",
+        clock: () => new Date(FIXED_HIRED_AT),
+        pluginVersion: FIXED_VERSION,
+      });
+
+      expect(personaPath).toBe(
+        path.join(tmp, "team", "data-scientist", "PERSONA.md"),
+      );
+      const persona = parsePersonaFile(
+        await fs.readFile(personaPath, "utf8"),
+        personaPath,
+      );
+      expect(persona.role).toBe("data-scientist");
+      expect(persona.domain).toBe("ml pipeline ownership");
+      expect(persona.sections.Prompt.trim()).toBe(
+        "You are the data scientist.",
+      );
+    });
+
+    it("uses plugin catalogue when only the catalogue file exists (existing behaviour preserved)", async () => {
+      const tmp = await makeTmp("catalogue-only");
+      tmpDirs.push(tmp);
+
+      const { path: personaPath } = await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        clock: () => new Date(FIXED_HIRED_AT),
+        pluginVersion: FIXED_VERSION,
+      });
+
+      const persona = parsePersonaFile(
+        await fs.readFile(personaPath, "utf8"),
+        personaPath,
+      );
+      const catalogue = await readCatalogue({
+        pluginRoot: getPluginRoot(),
+        role: "planner",
+      });
+      expect(persona.role).toBe("planner");
+      expect(persona.domain).toBe(catalogue.domain);
+      expect(persona.sections.Prompt).toBe(catalogue.sections.Prompt);
+    });
+
+    it("custom takes precedence over catalogue when both exist (regression guard)", async () => {
+      const tmp = await makeTmp("custom-wins");
+      tmpDirs.push(tmp);
+      await writeCustom(tmp, "planner.md", CUSTOM_PLANNER_BODY);
+
+      const { path: personaPath } = await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        clock: () => new Date(FIXED_HIRED_AT),
+        pluginVersion: FIXED_VERSION,
+      });
+
+      const persona = parsePersonaFile(
+        await fs.readFile(personaPath, "utf8"),
+        personaPath,
+      );
+      const shippedCatalogue = await readCatalogue({
+        pluginRoot: getPluginRoot(),
+        role: "planner",
+      });
+      // Custom source wins.
+      expect(persona.domain).toBe("custom planner override");
+      expect(persona.sections.Prompt.trim()).toBe(
+        "Custom prompt body for the operator's planner override.",
+      );
+      // And differs from the shipped catalogue (sanity).
+      expect(persona.domain).not.toBe(shippedCatalogue.domain);
+      expect(persona.sections.Prompt).not.toBe(shippedCatalogue.sections.Prompt);
     });
   });
 

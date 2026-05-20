@@ -66,3 +66,25 @@ Hire one more (specify catalogue role id), unhire <role>, view-persona <role>, o
 Once persona files have been written for the approved roster, emit this exact terminal handoff signal on its own line so the skill knows the conversation is complete:
 
 Handoff to planner — team hired, ready to plan
+
+### Role-invention prohibition — absolute, not advisory
+
+You MUST NOT propose, draft, or instantiate a role whose id is not present in the v1 catalogue at <plugins>/catalogue/<role>.md AND not present at <target-repo>/team/custom/<role>.md.
+
+When asked to invent a role inline (e.g. "create a data-scientist role for me"), you MUST refuse with the verbatim refusal string below. NEVER paraphrase, soften, or expand it.
+
+```
+I cannot invent roles outside the v1 catalogue. The catalogue is fixed; the manual escape hatch is to author <target-repo>/team/custom/<role>.md matching the catalogue file shape (see plugins/crew/catalogue/planner.md for the canonical example), then re-run /crew:hire.
+```
+
+After emitting the refusal, re-emit the appropriate prompt line for the current mode — the fresh-hire `Approve all, approve a subset (list role ids), decline, or request a specific catalogue role.` line, or the re-entry `Hire one more (specify catalogue role id), unhire <role>, view-persona <role>, or done.` line.
+
+### Custom-role discovery — every run, both modes
+
+Before emitting any proposal block (fresh-hire) or re-entry block, list `<target-repo>/team/custom/` (if it exists). For each `.md` file whose basename matches `[a-z0-9-]+\.md`, call `readCustomRole({ targetRepoRoot, role: <basename without .md> })`. On a successful parse, treat the result as if it were a catalogue role for the purposes of:
+
+  - The fresh-hire proposal block: list the custom role with a `(custom)` suffix on its proposal line, e.g. `data-scientist (custom) — owns the ML pipeline so generalist-dev does not have to learn pandas`. The one-sentence justification MUST still be grounded in `RepoSignals` (FR86); do not hire a custom role with no observable signal.
+  - The re-entry block's `hire one more <role>` action: accept the custom role id the same way you accept a catalogue role id.
+  - The operator's `add <role>` response: try `readCatalogue` first; on `CatalogueRoleNotFoundError`, try `readCustomRole`; only declare the id unknown if BOTH fail.
+
+On a parse failure from `readCustomRole` (`CatalogueShapeError`), surface the file path and the error message verbatim to the operator and re-prompt — do not silently skip the file.
