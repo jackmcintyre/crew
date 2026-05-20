@@ -551,9 +551,13 @@ describe("Story 2.4 AC3 — decline path", () => {
 
 // ===========================================================================
 // AC5(d) — permission allowlist
+// (Updated by Story 2.5 to add readCustomRole — the Story 2.4 contract was
+// "the six entries", now seven. Story 2.5's spec AC4(e) is the canonical
+// assertion. We update here to keep the suite consistent with the shipped
+// hiring-manager.yaml.)
 // ===========================================================================
-describe("Story 2.4 AC5(d) — hiring-manager permission allowlist includes readRepoSignals", () => {
-  it("tools_allow contains exactly the six expected entries", async () => {
+describe("Story 2.4 AC5(d) — hiring-manager permission allowlist (post-Story-2.5: includes readCustomRole)", () => {
+  it("tools_allow contains exactly the seven expected entries", async () => {
     const perms = await loadRolePermissions({
       pluginRoot: getPluginRoot(),
       role: "hiring-manager",
@@ -564,6 +568,7 @@ describe("Story 2.4 AC5(d) — hiring-manager permission allowlist includes read
         "instantiatePersona",
         "lookupRoleByDomain",
         "readCatalogue",
+        "readCustomRole",
         "readPersona",
         "readRepoSignals",
       ].sort(),
@@ -686,6 +691,148 @@ describe("Story 2.4 Task 7.10 — skills/hire/SKILL.md self-consistency", () => 
 
     // Body references the slash command literal.
     expect(body).toContain("/crew:hire");
+  });
+});
+
+// ===========================================================================
+// Story 2.5 extension — custom-role discovery via /crew:hire
+// ===========================================================================
+describe("custom-role discovery (Story 2.5 extension)", () => {
+  const VALID_CUSTOM_BODY = `---
+role: data-scientist
+domain: "ml pipeline ownership"
+model_tier: sonnet
+tools_allow:
+  - Read
+  - Edit
+  - Bash
+gh_allow: []
+locked_phrases:
+  handoff: "Handoff to <next role> — <intent>"
+  yield: "This sits in <role>'s domain — handing off"
+  verdict: "**Verdict: <SENTINEL>**"
+---
+
+# Data scientist
+
+## Domain
+
+Owns the ML pipeline so generalist-dev does not have to learn pandas.
+
+## Mandate
+
+- Author training scripts, model evaluation, and inference glue.
+
+## Out of mandate
+
+- Production deploys (orchestrator owns).
+
+## Prompt
+
+You are the data scientist. Stay terse.
+`;
+
+  async function seedCustomRole(root: string): Promise<void> {
+    const customDir = path.join(root, "team", "custom");
+    await fs.mkdir(customDir, { recursive: true });
+    await fs.writeFile(
+      path.join(customDir, "data-scientist.md"),
+      VALID_CUSTOM_BODY,
+      "utf8",
+    );
+  }
+
+  it("approve all does NOT silently include the custom role; five default hires only", async () => {
+    const tmp = await makeTmp("ac-2-5-approve-all");
+    tmpDirs.push(tmp);
+    await seedFreshFixture(tmp);
+    await seedCustomRole(tmp);
+
+    const spy = vi.spyOn(instantiatePersonaModule, "instantiatePersona");
+
+    const result = await runHireFlow({
+      targetRepoRoot: tmp,
+      response: "approve all",
+    });
+
+    // Default roster only — five hires, no data-scientist.
+    expect(spy).toHaveBeenCalledTimes(5);
+    const hiredRoles = spy.mock.calls.map(
+      (c) => (c[0] as { role: string }).role,
+    );
+    expect(hiredRoles.sort()).toEqual([...DEFAULT_ROSTER].sort());
+    expect(hiredRoles).not.toContain("data-scientist");
+    expect(result.instantiateCalls).toEqual([...DEFAULT_ROSTER]);
+    spy.mockRestore();
+  });
+
+  it("explicit approve subset including the custom role calls instantiatePersona six times", async () => {
+    const tmp = await makeTmp("ac-2-5-explicit");
+    tmpDirs.push(tmp);
+    await seedFreshFixture(tmp);
+    await seedCustomRole(tmp);
+
+    // Capture the real implementation BEFORE installing the spy, so
+    // the fallback path does not recurse into the spy wrapper.
+    const realModule = await vi.importActual<typeof instantiatePersonaModule>(
+      "../src/tools/instantiate-persona.js",
+    );
+    const real = realModule.instantiatePersona;
+    const spy = vi.spyOn(instantiatePersonaModule, "instantiatePersona");
+    // Stub so data-scientist instantiation reads from the custom file
+    // (the shipped catalogue has no data-scientist.md). Other roles
+    // pass through to the real implementation.
+    spy.mockImplementation(async (callOpts) => {
+      if (callOpts.role === "data-scientist") {
+        const { readCustomRole } = await import(
+          "../src/tools/read-custom-role.js"
+        );
+        const { renderPersonaFile } = await import(
+          "../src/lib/persona-file.js"
+        );
+        const customRole = await readCustomRole({
+          targetRepoRoot: callOpts.targetRepoRoot,
+          role: callOpts.role,
+        });
+        const personaPath = path.join(
+          callOpts.targetRepoRoot,
+          "team",
+          callOpts.role,
+          "PERSONA.md",
+        );
+        if (existsSync(personaPath)) {
+          throw new PersonaAlreadyExistsError({
+            role: callOpts.role,
+            personaPath,
+          });
+        }
+        const contents = renderPersonaFile({
+          catalogue: customRole,
+          hiredAt: FIXED_HIRED_AT,
+          catalogueVersion: FIXED_VERSION,
+        });
+        await fs.mkdir(path.dirname(personaPath), { recursive: true });
+        await fs.writeFile(personaPath, contents, "utf8");
+        return { path: personaPath };
+      }
+      return real(callOpts);
+    });
+
+    const result = await runHireFlow({
+      targetRepoRoot: tmp,
+      response:
+        "approve planner generalist-dev generalist-reviewer retro-analyst orchestrator data-scientist",
+    });
+
+    expect(spy).toHaveBeenCalledTimes(6);
+    expect(result.instantiateCalls).toContain("data-scientist");
+    for (const call of spy.mock.calls) {
+      expect((call[0] as { targetRepoRoot: string }).targetRepoRoot).toBe(tmp);
+    }
+    expect(
+      existsSync(path.join(tmp, "team", "data-scientist", "PERSONA.md")),
+    ).toBe(true);
+    spy.mockRestore();
   });
 });
 
