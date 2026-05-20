@@ -848,6 +848,30 @@ describe("AC4 — skill self-consistency (Task 7.15)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Bug 2 fix — TOCTOU PersonaFileNotFoundError mid-snapshot
+// ---------------------------------------------------------------------------
+describe("TOCTOU — persona file deleted mid-snapshot completes for remaining roles", () => {
+  it("snapshot skips the vanished role and includes surviving roles", async () => {
+    const root = await makeTmp("toctou");
+    // Hire two roles.
+    await hireRoster(root, ["planner", "generalist-dev"] as const);
+
+    // Delete generalist-dev's PERSONA.md to simulate a race between readdir
+    // and readPersona.
+    await fs.rm(path.join(root, "team", "generalist-dev", "PERSONA.md"));
+
+    // Should not throw — the missing file should be silently skipped.
+    const snapshot = await getTeamSnapshot({ targetRepoRoot: root });
+
+    // planner remains; generalist-dev is absent (not errored, just gone).
+    expect(snapshot.roles.length).toBe(1);
+    const roleIds = snapshot.roles.map((r) => r.role);
+    expect(roleIds).toContain("planner");
+    expect(roleIds).not.toContain("generalist-dev");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Task 7.16 — Header + no .only/.todo/.skip
 // All tests in this file meet that constraint by construction.
 // ---------------------------------------------------------------------------
