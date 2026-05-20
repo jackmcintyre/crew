@@ -10,13 +10,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { PlanningAdapter, SourceStory, DisciplineViolation } from "./adapter.js";
-import { getActiveAdapter } from "./registry.js";
+import type { PlanningAdapter, SourceStory, DisciplineViolation } from "../src/adapters/adapter.js";
+import { getActiveAdapter } from "../src/adapters/registry.js";
 import {
   UnknownAdapterError,
   AmbiguousAdapterError,
   NoAdapterMatchedError,
-} from "../errors.js";
+} from "../src/errors.js";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
