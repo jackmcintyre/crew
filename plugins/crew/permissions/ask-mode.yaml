@@ -1,0 +1,13 @@
+role: ask-mode
+tools_allow:
+  - heartbeat
+  - readPersona
+  - readCatalogue
+  - lookupRoleByDomain
+  - readRepoSignals
+  - readCustomRole
+  - getStatus
+  - getTeamSnapshot
+gh_allow:
+  - pr-view
+gh_allow_args: {}
