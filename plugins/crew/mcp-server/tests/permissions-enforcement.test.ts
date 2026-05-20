@@ -194,7 +194,7 @@ describe("shipped role specs (AC5e)", () => {
     expect(perms.tools_allow).toContain("completeStory");
   });
 
-  it("loads generalist-reviewer and asserts negative-capability (no pr-merge/pr-close/pr-review)", async () => {
+  it("loads generalist-reviewer and asserts negative-capability (no pr-merge/pr-close/push)", async () => {
     const perms = await loadRolePermissions({
       role: "generalist-reviewer",
       pluginRoot: REAL_PLUGIN_ROOT,
@@ -204,6 +204,9 @@ describe("shipped role specs (AC5e)", () => {
     expect(perms.gh_allow.length).toBeGreaterThan(0);
     expect(perms.gh_allow).not.toContain("pr-merge");
     expect(perms.gh_allow).not.toContain("pr-close");
-    expect(perms.gh_allow).not.toContain("pr-review");
+    expect(perms.gh_allow.some((s) => /push/i.test(s))).toBe(false);
+    // Positive guard: pr-review is a required capability for the reviewer
+    // (catalogue pins it). Asserting presence prevents future drift.
+    expect(perms.gh_allow).toContain("pr-review");
   });
 });

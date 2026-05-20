@@ -1,0 +1,5 @@
+role: hiring-manager
+tools_allow:
+  - heartbeat
+gh_allow: []
+gh_allow_args: {}

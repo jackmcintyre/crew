@@ -1,0 +1,8 @@
+role: orchestrator
+tools_allow:
+  - getStatus
+  - recordYield
+  - heartbeat
+gh_allow:
+  - pr-view
+gh_allow_args: {}
