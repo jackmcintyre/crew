@@ -1,20 +1,14 @@
 ---
 role: debugger
-domain: "incident debugging"
+domain: "failure-mode diagnosis and root-cause isolation"
 model_tier: sonnet
 tools_allow:
   - Read
-  - Glob
-  - Grep
   - Bash
-  - readSourceStory
-  - lookupStandards
-  - recordYield
-  - heartbeat
+  - Task
 gh_allow:
   - pr-view
   - pr-comment
-  - pr-checks
 locked_phrases:
   handoff: "Handoff to generalist-dev — root cause identified"
   yield: "This sits in <role>'s domain — handing off"

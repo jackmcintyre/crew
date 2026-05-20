@@ -1,6 +1,39 @@
 import { parse as yamlParse } from "yaml";
-import { CatalogueRoleMalformedError } from "../errors.js";
-import { CatalogueRoleFrontmatterSchema, REQUIRED_CATALOGUE_SECTIONS, } from "../schemas/catalogue-role.js";
+import { CatalogueShapeError } from "../errors.js";
+import { CatalogueRoleSchema, REQUIRED_CATALOGUE_SECTIONS, assertCatalogueBodySections, } from "../schemas/catalogue.js";
+/**
+ * Split a Markdown file into its YAML frontmatter head and the body.
+ *
+ * Frontmatter must be the first non-empty content, delimited by `---`
+ * lines at the file start and the next `---` line. CRLF / BOM are
+ * normalised. Reused across catalogue (Story 2.1) and future persona
+ * (Story 2.3) parsing.
+ *
+ * Throws `CatalogueShapeError` when delimiters are missing — the
+ * catalogue is the only v1 caller, so error specificity is acceptable;
+ * Story 2.3 can introduce a sibling helper / error if persona parsing
+ * needs a distinct surface.
+ */
+export function splitFrontmatter(raw, sourcePath) {
+    const text = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+    if (!text.startsWith("---\n") && !text.startsWith("---\r")) {
+        throw new CatalogueShapeError({
+            sourcePath,
+            zodMessage: "file must start with '---' YAML frontmatter opener",
+        });
+    }
+    const closeIdx = text.indexOf("\n---", 4);
+    if (closeIdx === -1) {
+        throw new CatalogueShapeError({
+            sourcePath,
+            zodMessage: "missing closing '---' YAML frontmatter delimiter",
+        });
+    }
+    const frontmatterRaw = text.slice(4, closeIdx);
+    const afterFence = text.slice(closeIdx + 4);
+    const body = afterFence.replace(/^\s*\n/, "");
+    return { frontmatterRaw, body };
+}
 /**
  * Pure catalogue file parser — no IO. The caller supplies the file
  * contents and a `sourcePath` for error reporting (mirrors
@@ -8,59 +41,34 @@ import { CatalogueRoleFrontmatterSchema, REQUIRED_CATALOGUE_SECTIONS, } from "..
  *
  * Validates:
  *  - YAML frontmatter delimited by `---` lines parses cleanly.
- *  - Frontmatter matches `CatalogueRoleFrontmatterSchema`.
+ *  - Frontmatter matches `CatalogueRoleSchema`.
  *  - Body contains all four required `##` sections (`Domain`,
- *    `Mandate`, `Out of mandate`, `Prompt`).
+ *    `Mandate`, `Out of mandate`, `Prompt`) in canonical order.
  *
- * Throws `CatalogueRoleMalformedError` on any failure.
+ * Throws `CatalogueShapeError` on any failure.
  */
 export function parseCatalogueRole(raw, sourcePath) {
-    // Normalise CRLF, strip BOM. Mirrors parse-bmad-story.ts.
-    const text = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
-    // Frontmatter must be the first non-empty content, opened by a `---`
-    // line at file start and closed by another `---` line.
-    if (!text.startsWith("---\n") && !text.startsWith("---\r")) {
-        throw new CatalogueRoleMalformedError({
-            sourcePath,
-            zodMessage: "file must start with '---' YAML frontmatter opener",
-        });
-    }
-    const closeIdx = text.indexOf("\n---", 4);
-    if (closeIdx === -1) {
-        throw new CatalogueRoleMalformedError({
-            sourcePath,
-            zodMessage: "missing closing '---' YAML frontmatter delimiter",
-        });
-    }
-    const frontmatterRaw = text.slice(4, closeIdx);
-    // Body starts after the closing fence + its newline.
-    const afterFence = text.slice(closeIdx + 4);
-    const body = afterFence.replace(/^\s*\n/, "");
+    const { frontmatterRaw, body } = splitFrontmatter(raw, sourcePath);
     let parsedYaml;
     try {
         parsedYaml = yamlParse(frontmatterRaw);
     }
     catch (err) {
-        throw new CatalogueRoleMalformedError({
+        throw new CatalogueShapeError({
             sourcePath,
             zodMessage: `frontmatter YAML parse error: ${err instanceof Error ? err.message : String(err)}`,
         });
     }
-    const result = CatalogueRoleFrontmatterSchema.safeParse(parsedYaml);
+    const result = CatalogueRoleSchema.safeParse(parsedYaml);
     if (!result.success) {
-        throw new CatalogueRoleMalformedError({
+        throw new CatalogueShapeError({
             sourcePath,
             zodMessage: formatZodIssues(result.error.issues),
         });
     }
+    // Order + presence assertion (throws CatalogueShapeError on failure).
+    assertCatalogueBodySections(body, sourcePath);
     const sections = extractSections(body);
-    const missing = REQUIRED_CATALOGUE_SECTIONS.filter((s) => !(s in sections));
-    if (missing.length > 0) {
-        throw new CatalogueRoleMalformedError({
-            sourcePath,
-            zodMessage: `missing required '##' section(s): ${missing.join(", ")}`,
-        });
-    }
     return {
         ...result.data,
         sections: sections,
@@ -69,10 +77,8 @@ export function parseCatalogueRole(raw, sourcePath) {
 }
 /**
  * Walk the body line-by-line and collect `## <Heading>` sections.
- * Returns a map from heading text to the joined body lines (with
- * leading / trailing blank lines trimmed). Only top-level `##`
- * headings split sections — `###` and deeper are part of the
- * enclosing `##` section.
+ * Returns the four required headings as a record; extra `##` sections
+ * are ignored.
  */
 function extractSections(body) {
     const lines = body.split("\n");
@@ -96,9 +102,6 @@ function extractSections(body) {
         }
     }
     flush();
-    // Narrow to only the required heading set; extra `##` sections are
-    // ignored by the schema (the four required headings must be present
-    // but a future catalogue file is free to add more).
     const filtered = {};
     for (const required of REQUIRED_CATALOGUE_SECTIONS) {
         if (required in out)

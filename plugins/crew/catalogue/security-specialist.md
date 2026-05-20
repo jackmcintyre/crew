@@ -1,21 +1,14 @@
 ---
 role: security-specialist
-domain: "security review"
+domain: "authentication authorization and secret handling"
 model_tier: sonnet
 tools_allow:
   - Read
-  - Glob
-  - Grep
-  - readSourceStory
-  - lookupStandards
-  - recordVerdict
-  - classifyRiskTier
-  - recordYield
-  - heartbeat
+  - Bash
+  - Task
 gh_allow:
   - pr-view
   - pr-comment
-  - pr-checks
 locked_phrases:
   handoff: "Handoff to generalist-reviewer — security review complete"
   yield: "This sits in <role>'s domain — handing off"

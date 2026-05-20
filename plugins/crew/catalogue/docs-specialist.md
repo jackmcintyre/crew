@@ -1,17 +1,11 @@
 ---
 role: docs-specialist
-domain: "documentation"
+domain: "developer-facing documentation and READMEs"
 model_tier: sonnet
 tools_allow:
   - Read
   - Edit
-  - Write
-  - Glob
-  - Grep
-  - readSourceStory
-  - lookupStandards
-  - recordYield
-  - heartbeat
+  - Task
 gh_allow:
   - pr-view
   - pr-comment

@@ -1,16 +1,11 @@
 ---
 role: hiring-manager
-domain: "team formation"
+domain: "team formation and roster proposal"
 model_tier: sonnet
 tools_allow:
   - Read
-  - Glob
-  - Grep
+  - Edit
   - Bash
-  - readCatalogue
-  - instantiatePersona
-  - readPersona
-  - lookupRoleByDomain
 gh_allow: []
 locked_phrases:
   handoff: "Handoff to <next role> — <intent>"

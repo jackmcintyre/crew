@@ -1,23 +1,15 @@
 ---
 role: generalist-reviewer
-domain: "code review"
+domain: "code review and verdict authoring"
 model_tier: sonnet
 tools_allow:
   - Read
-  - Glob
-  - Grep
-  - readSourceStory
-  - lookupStandards
-  - recordVerdict
-  - classifyRiskTier
-  - computeAgreement
-  - recordYield
-  - heartbeat
+  - Bash
+  - Task
 gh_allow:
   - pr-view
   - pr-comment
-  - pr-checks
-  - api
+  - pr-review
 locked_phrases:
   handoff: "Handoff to generalist-dev — verdict recorded"
   yield: "This sits in <role>'s domain — handing off"

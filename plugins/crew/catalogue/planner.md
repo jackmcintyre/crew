@@ -1,20 +1,13 @@
 ---
 role: planner
-domain: "backlog planning"
+domain: "story authoring and acceptance criteria"
 model_tier: sonnet
 tools_allow:
   - Read
-  - Glob
-  - Grep
-  - readSourceStory
-  - listSourceStories
-  - validateStory
-  - lookupStandards
-  - recordYield
-  - heartbeat
+  - Edit
+  - Task
 gh_allow:
   - pr-view
-  - pr-comment
 locked_phrases:
   handoff: "Handoff to generalist-dev — story <story-id> ready to claim"
   yield: "This sits in <role>'s domain — handing off"

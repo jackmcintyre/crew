@@ -1,23 +1,13 @@
 ---
 role: retro-analyst
-domain: "retrospectives and calibration"
+domain: "cycle-end lessons and rule proposals"
 model_tier: sonnet
 tools_allow:
   - Read
-  - Glob
-  - Grep
-  - computeOutcomeStats
-  - readSourceStory
-  - readPersona
-  - appendPersonaKnowledge
-  - applyRuleProposal
-  - applySkillProposal
-  - applyTeamChange
-  - lookupStandards
-  - heartbeat
+  - Edit
+  - Task
 gh_allow:
   - pr-view
-  - pr-comment
 locked_phrases:
   handoff: "Handoff to <next role> — retro proposal ready for review"
   yield: "This sits in <role>'s domain — handing off"

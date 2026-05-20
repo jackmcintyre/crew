@@ -305,10 +305,11 @@ export declare class InvalidStateNameError extends DomainError {
 /**
  * Catalogue role file (`plugins/<plugin>/catalogue/<role>.md`) exists
  * but failed the parser — YAML frontmatter syntax error, missing /
- * unknown frontmatter key, or missing one of the four required `##`
- * sections (Story 2.1).
+ * unknown frontmatter key, or a required `##` section that is missing
+ * or out of canonical order (Story 2.1).
  */
-export declare class CatalogueRoleMalformedError extends DomainError {
+export declare class CatalogueShapeError extends DomainError {
+    readonly code: "CATALOGUE_SHAPE_ERROR";
     readonly sourcePath: string;
     readonly zodMessage: string;
     constructor(opts: {

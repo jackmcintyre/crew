@@ -1,21 +1,13 @@
 ---
 role: orchestrator
-domain: "session orchestration and recovery"
+domain: "session liveness and story state transitions"
 model_tier: sonnet
 tools_allow:
   - Read
-  - Glob
-  - Grep
-  - heartbeat
-  - getStatus
-  - readSourceStory
-  - readPersona
-  - blockStory
-  - claimStory
-  - completeStory
+  - Bash
+  - Task
 gh_allow:
   - pr-view
-  - pr-checks
 locked_phrases:
   handoff: "Handoff to <next role> — resuming work"
   yield: "This sits in <role>'s domain — handing off"

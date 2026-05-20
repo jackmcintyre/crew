@@ -1,22 +1,15 @@
 ---
 role: test-specialist
-domain: "test strategy and coverage"
+domain: "test design and coverage gaps"
 model_tier: sonnet
 tools_allow:
   - Read
   - Edit
-  - Write
   - Bash
-  - Glob
-  - Grep
-  - readSourceStory
-  - lookupStandards
-  - recordYield
-  - heartbeat
+  - Task
 gh_allow:
   - pr-view
   - pr-comment
-  - pr-checks
 locked_phrases:
   handoff: "Handoff to generalist-dev — tests scaffolded"
   yield: "This sits in <role>'s domain — handing off"

@@ -1,28 +1,16 @@
 ---
 role: generalist-dev
-domain: "story implementation"
+domain: "feature implementation in a story scope"
 model_tier: sonnet
 tools_allow:
   - Read
   - Edit
-  - Write
   - Bash
-  - Glob
-  - Grep
-  - claimStory
-  - completeStory
-  - blockStory
-  - readSourceStory
-  - lookupStandards
-  - recordYield
-  - heartbeat
-  - classifyRiskTier
+  - Task
 gh_allow:
   - pr-create
   - pr-view
   - pr-comment
-  - pr-checks
-  - pr-edit
 locked_phrases:
   handoff: "Handoff to reviewer — story <story-id> ready for review."
   yield: "This sits in <role>'s domain — handing off"
