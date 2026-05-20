@@ -41,6 +41,7 @@ function makeStubAdapter(opts: {
       return opts.defaultCfg ?? {};
     },
     adapterConfigSchema: opts.schema ?? z.record(z.string(), z.unknown()),
+    validateAgainstDiscipline: (s: SourceStory) => s,
   };
 }
 

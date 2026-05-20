@@ -27,6 +27,7 @@ function makeStubAdapter(opts: {
       return {};
     },
     adapterConfigSchema: z.record(z.string(), z.unknown()),
+    validateAgainstDiscipline: (s: SourceStory) => s,
   };
 }
 
@@ -128,6 +129,7 @@ describe("validateActiveAdapter", () => {
         return {};
       },
       adapterConfigSchema: z.record(z.string(), z.unknown()),
+      validateAgainstDiscipline: (s: SourceStory) => s,
     };
     const stubOther: PlanningAdapter = {
       name: "stubOther",
@@ -148,6 +150,7 @@ describe("validateActiveAdapter", () => {
         return {};
       },
       adapterConfigSchema: z.record(z.string(), z.unknown()),
+      validateAgainstDiscipline: (s: SourceStory) => s,
     };
     const workspace = makeSyntheticWorkspace(stubA);
 

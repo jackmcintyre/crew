@@ -33,6 +33,25 @@ export declare class InvalidWorkspaceConfigError extends DomainError {
     });
 }
 /**
+ * `.crew/config.yaml` declares an `adapter:` name that does not match
+ * any registered adapter. The user must either install the matching
+ * adapter package or edit the `adapter:` key in the config file.
+ *
+ * Thrown by `getActiveAdapter()` in Branch A (configured-adapter path)
+ * when the named adapter is absent from the in-process registry.
+ * (Story 3.1 AC2)
+ */
+export declare class UnknownAdapterError extends DomainError {
+    readonly configuredAdapterName: string;
+    readonly registeredAdapterNames: string[];
+    readonly configPath: string;
+    constructor(opts: {
+        configuredAdapterName: string;
+        registeredAdapterNames: string[];
+        configPath: string;
+    });
+}
+/**
  * No registered adapter's `detect()` returned true for the target repo.
  * User must author `.crew/config.yaml` manually.
  */
