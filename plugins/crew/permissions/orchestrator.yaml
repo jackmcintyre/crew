@@ -3,6 +3,8 @@ tools_allow:
   - getStatus
   - recordYield
   - heartbeat
+  - readPersona
+  - lookupRoleByDomain
 gh_allow:
   - pr-view
 gh_allow_args: {}
