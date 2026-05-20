@@ -2,7 +2,7 @@
 
 AI Engineering Team v1 — a Claude Code plugin that drives a continuous-flow backlog of stories through dev and review subagents.
 
-See `_bmad-output/planning-artifacts/prd-crew-v1.md` for the PRD (local-only).
+See `_bmad-output/planning-artifacts/prd-crew-v1/` for the PRD (sharded — start at `index.md`).
 
 ## Install
 

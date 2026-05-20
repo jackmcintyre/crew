@@ -38,7 +38,7 @@ Folders:
 ## Process notes
 
 - **Planning lives in `_bmad-output/planning-artifacts/`.** The authoritative PRD (sharded under `prd-crew-v1/`), epics, and architecture all sit here and are tracked in git. Older briefs and backlogs are in `_bmad-output/_archive/`, which stays gitignored.
-- **The new plugin does not yet exist.** When implementation work begins, it will live under `plugins/<new-plugin-name>/`. Until then, this repo holds planning artifacts only.
+- **The plugin lives at `plugins/crew/`.** Epic 1 (plugin foundation) is in progress — the plugin is installable but not yet runnable end-to-end. Subsequent epics build on this scaffold.
 - **Discipline rules (inherited from sprint-orchestrator era):** the five planning-discipline rules from `_archive/planning-discipline.md` are the bar for every story we author. They're inherited by the new PRD even though the standalone file is archived.
 - **Deferred work tracker:** captured inside the relevant brief or PRD's deferred section, with reasoning. Promote to a follow-up workstream when ready.
 - **Plugin build output is tracked in git.** `plugins/crew/mcp-server/dist/` is committed because `/plugin install` copies the tree as-is and won't run a build step. If you change `src/`, rebuild and commit `dist/` in the same change — CI fails on drift. See `plugins/crew/docs/README-install.md` § Build artefacts.
