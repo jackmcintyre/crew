@@ -42,6 +42,10 @@ during the Story 2.7 ship-story smoke gate.
 > **Use this only when switching branches**, not for daily editing (see Daily dev
 > loop above).
 
+> **One-command alternative:** `pnpm --dir plugins/crew dev:install` (shell command,
+> not a TUI slash-command) replaces the three steps below with a single call and
+> a Claude Code restart. See [`docs/dev-loop.md`](dev-loop.md) for details.
+
 Paste these three commands into the Claude Code TUI **in order**:
 
 ```

@@ -1,5 +1,11 @@
 # Install crew
 
+> **Engineer working on the plugin itself?** Use `pnpm dev:install` from the repo
+> root and see [dev-loop.md](./dev-loop.md). The six checkpoints below are the
+> production install path for end-users. These two paths are kept separate so an
+> engineer iterating on a worktree branch does not interfere with the stable
+> production install, and vice versa.
+
 Six checkpoints from clone to seeing the plugin recognise your repo. Each step has one runnable command and one expected confirmation. If a checkpoint fails, the failure is local to that step — don't proceed.
 
 > Heads-up: steps 3a, 3b, 4, and 6 are **slash commands you type inside a running Claude Code session**, not shell commands. Each one prints a single-line toast back into the transcript — there's no separate TUI panel to confirm in.

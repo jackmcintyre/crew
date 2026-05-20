@@ -5,6 +5,7 @@
   "description": "AI Engineering Team v1 plugin — scaffold (see PRD).",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "dev:install": "./scripts/dev-install.sh"
   }
 }
