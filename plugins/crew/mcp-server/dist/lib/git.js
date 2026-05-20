@@ -75,3 +75,28 @@ export async function gitCommit(opts) {
         stderr: commitResult.stderr ?? "",
     };
 }
+/**
+ * Read up to `limit` recent commit titles from the target repo via
+ * `git log -<limit> --pretty=%s`. Best-effort: on non-zero exit (no
+ * git, no commits, not a repo, etc.) returns `[]`. Used by
+ * `readRepoSignals` (Story 2.4 FR85).
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard
+ * (which forbids any file under `src/**` other than `lib/git.ts` from
+ * spawning `git`) stays satisfied.
+ */
+export async function readRecentCommitTitles(opts) {
+    const limit = opts.limit ?? 5;
+    const execaImpl = opts.execaImpl ?? defaultExeca;
+    const result = await execaImpl("git", ["log", `-${limit}`, "--pretty=%s"], {
+        cwd: opts.cwd,
+        reject: false,
+    });
+    if (result.exitCode !== 0)
+        return [];
+    return (result.stdout ?? "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .slice(0, limit);
+}

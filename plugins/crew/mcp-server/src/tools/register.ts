@@ -6,6 +6,7 @@ import { instantiatePersona } from "./instantiate-persona.js";
 import { lookupRoleByDomain } from "./lookup-role-by-domain.js";
 import { readCatalogue } from "./read-catalogue.js";
 import { readPersona } from "./read-persona.js";
+import { readRepoSignals } from "./read-repo-signals.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -138,6 +139,31 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         })
         .parse(args);
       const result = await lookupRoleByDomain(parsed);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      };
+    },
+  });
+
+  // Story 2.4 — repo signal read for the hiring manager (FR85).
+  server.registerTool({
+    name: "readRepoSignals",
+    description:
+      "Return a typed RepoSignals payload (languages, layout, README excerpt, recent commit titles, dependency manifests) for the resolved target repo. Used by /hire (FR85).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+      },
+      required: ["targetRepoRoot"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({ targetRepoRoot: z.string().min(1) })
+        .parse(args);
+      const result = await readRepoSignals({
+        targetRepoRoot: parsed.targetRepoRoot,
+      });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result) }],
       };
