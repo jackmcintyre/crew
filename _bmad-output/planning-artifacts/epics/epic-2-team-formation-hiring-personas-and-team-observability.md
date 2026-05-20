@@ -134,4 +134,16 @@ So that I can lean on the team for clarification without mutating canonical stat
 
 **AC4 (integration):** vitest drives `/ask planner "explain this verdict comment"` against a fixture and asserts (a) no canonical-state mutation occurs, AND (b) the planner successfully reads the PR comment body via `gh pr view`.
 
+## Story 2.8: Worktree-smoke workflow and 2.7 Task `_meta.role` verification
+
+As a plugin maintainer,
+I want a reliable way to smoke-test branch-specific plugin changes in a real Claude Code session and verified proof that Task propagates `_meta.role: "ask-mode"` for `/crew:ask`,
+So that PR smoke tests aren't blocked on cache-reload quirks and the non-mutating contract of `/ask` is confirmed end-to-end.
+
+**Acceptance Criteria:**
+
+**AC1:** A developer can exercise `/crew:ask` from a worktree branch in a real Claude Code session without an unreliable uninstall+reinstall cycle (shell script, skill, or documented procedure that accounts for plugin-cache mechanics).
+
+**AC2:** The `_meta.role: "ask-mode"` propagation through the Claude Code `Task` tool is verified — either confirming Task carries the field as expected (documented) or an alternative enforcement path is implemented and tested in its place.
+
 ---
