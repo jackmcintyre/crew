@@ -25,7 +25,7 @@ Authoritative PRD: `_bmad-output/planning-artifacts/prd-crew-v1/` (sharded — s
 
 ## What this project is
 
-`crew` is the home of **AI Engineering Team v1** — a Claude Code plugin (not yet built; PRD in `_bmad-output/planning-artifacts/prd-crew-v1/`) that lets a non-engineer drive a project-shaped team of long-lived AI agents through a continuous-flow backlog.
+`crew` is the home of **AI Engineering Team v1** — a Claude Code plugin (Epic 1 in progress) that lets a non-engineer drive a project-shaped team of long-lived AI agents through a continuous-flow backlog.
 
 The repo previously hosted a `sprint-orchestrator` plugin which was used to dog-food the same broad idea against a sprint construct. That plugin was treated as legacy from day one of the new effort and has been removed (2026-05-19); the new product is being built from scratch.
 
@@ -38,7 +38,7 @@ Folders:
 ## Process notes
 
 - **Planning lives in `_bmad-output/planning-artifacts/`.** The authoritative PRD (sharded under `prd-crew-v1/`), epics, and architecture all sit here and are tracked in git. Older briefs and backlogs are in `_bmad-output/_archive/`, which stays gitignored.
-- **The new plugin does not yet exist.** When implementation work begins, it will live under `plugins/<new-plugin-name>/`. Until then, this repo holds planning artifacts only.
+- **The plugin lives under `plugins/crew/`.** Epic 1 (plugin foundation) is in progress.
 - **Discipline rules (inherited from sprint-orchestrator era):** the five planning-discipline rules from `_archive/planning-discipline.md` are the bar for every story we author. They're inherited by the new PRD even though the standalone file is archived.
 - **Deferred work tracker:** captured inside the relevant brief or PRD's deferred section, with reasoning. Promote to a follow-up workstream when ready.
 - **Plugin build output is tracked in git.** `plugins/crew/mcp-server/dist/` is committed because `/plugin install` copies the tree as-is and won't run a build step. If you change `src/`, rebuild and commit `dist/` in the same change — CI fails on drift. See `plugins/crew/docs/README-install.md` § Build artefacts.

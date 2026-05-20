@@ -15,7 +15,8 @@ See [`plugins/crew/docs/README-install.md`](plugins/crew/docs/README-install.md)
 ```
 plugins/crew/                  — the plugin (MCP server, skills, adapters)
 plugins/crew/docs/             — install walkthrough, standards template
-_bmad-output/                  — planning artifacts (PRD, epics, stories) — gitignored
+_bmad-output/planning-artifacts/ — tracked planning artifacts (PRD, epics, architecture)
+_bmad-output/_archive/         — gitignored historical record
 ```
 
 ## License
