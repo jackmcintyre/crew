@@ -203,9 +203,15 @@ describe("getStatus", () => {
     expect(matches).not.toBeNull();
     expect(matches!.length).toBe(6);
 
-    // Checkpoint 6's expected confirmation contains the literal substrings.
-    expect(raw).toContain("crew v");
-    expect(raw).toContain("standards: ok");
+    // Checkpoint 6's expected confirmation is the parked-adapter known
+    // limitation (Story 3.3 lands the BMad adapter detect path); until
+    // then, the README documents the verbatim error toast `/crew:status`
+    // produces on a clean install (observed on Claude Code 2.1.145,
+    // 2026-05-20). The earlier `crew v…` / `standards: ok` happy-path
+    // block is documented as the post-Story-3.3 target, not as today's
+    // observed output.
+    expect(raw).toContain("bmad adapter: detect lands in Story 3.3");
+    expect(raw).toContain("Story 3.3");
 
     // File ends with the forward-reference line (allow trailing newline).
     const trimmed = raw.replace(/\s+$/, "");
