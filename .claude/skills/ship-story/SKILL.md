@@ -19,6 +19,25 @@ You are the orchestrator. You do NOT write story specs, code, tests, or reviews 
 
 Run-state is persisted as JSONL in `.claude/skills/ship-story/.runs/<story-key>.jsonl`. Every milestone is recorded; on a halt, you can resume by reading state.
 
+## Model selection
+
+Each subagent spawn below specifies an explicit `model:` to pass to the Agent tool. The bet: a well-specced story is well within Sonnet's reach for execution, so reserve Opus for the judgement-heavy phases (spec authoring, adversarial review). The reviewer is the quality gate — if Sonnet dev produces something weak, the Opus reviewer catches it and the rework loop fires.
+
+| Phase | `model` | Rationale |
+|---|---|---|
+| Step 4 — spec authoring | `opus` | Sets up everything downstream; a bad spec wastes a full dev+review cycle. Pay here. |
+| Step 5 — spec validation | `sonnet` | Structural check; cheap. |
+| Step 6 — dev / implementation | `sonnet` | Well-specced execution. Planning-discipline rules are doing the heavy lifting. |
+| Step 7 — code review | `opus` | Adversarial reasoning; lowest call volume, highest leverage. |
+| Step 7 — dev rework | `sonnet` | Scope bounded by reviewer's issue list. |
+| Step 8 — QA test generation | `sonnet` | Pattern-matchy given the AC list. |
+| Step 10 — CI rework dev | `sonnet` | Same shape as Step 6. |
+
+Notes:
+- The Agent tool's `model` param only exposes the family (`opus` / `sonnet` / `haiku`), not the specific version. Pin 4.7 vs 4.6 at the CLI/launch level (whichever model the orchestrator itself is running on supplies the specific version for inheriting subagents).
+- Reasoning effort is not exposed per-Agent in the tool schema; rely on family selection. If a reviewer pass feels under-considered, escalate that phase by re-running it explicitly rather than reaching for a thinking knob.
+- **Canary signal:** if average review passes per story climbs above ~1.5, the Sonnet-dev bet is hurting. Surface this in retros — it usually means planning discipline has slipped, not that Sonnet has.
+
 ## Execution
 
 Let `SH=python3 .claude/skills/ship-story/scripts/ship.py` for brevity below.
@@ -59,7 +78,7 @@ $SH record <story_key> worktree_ready --data '{"path":"..."}'
 
 ### Step 4 — Author the story spec (subagent: bmad-create-story)
 
-Spawn ONE subagent. Prompt:
+Spawn ONE subagent with `model: opus`. Prompt:
 
 > Run the `bmad-create-story` skill (action: `create`) for story key `<story_key>`. The epic source is `<epic_file>`. Output the spec to `<spec_path>`. Do NOT implement code — spec only. Do NOT modify `sprint-status.yaml` or any other status/state file — the orchestrator owns status transitions. Do NOT pause for clarifying questions; make reasonable defaults and proceed.
 >
@@ -85,7 +104,7 @@ $SH record <story_key> spec_authored
 
 ### Step 5 — Validate the spec (subagent: bmad-create-story validate)
 
-Cheap insurance — a malformed spec wastes a full dev+review cycle. Spawn ONE subagent. Prompt:
+Cheap insurance — a malformed spec wastes a full dev+review cycle. Spawn ONE subagent with `model: sonnet`. Prompt:
 
 > Run the `bmad-create-story` skill with action `validate` against `<spec_path>`. Return the validation report verbatim and a single-word verdict: `pass` or `fail`. Do NOT modify `sprint-status.yaml`. Do NOT pause for clarifying questions.
 >
@@ -107,7 +126,7 @@ $SH record <story_key> spec_validated
 
 ### Step 6 — Implement (subagent: bmad-dev-story)
 
-Spawn ONE subagent. Prompt:
+Spawn ONE subagent with `model: sonnet`. Prompt:
 
 > Run `bmad-dev-story` against `<spec_path>`. Your working directory is the worktree at `<worktree_path>`. Implement code and unit tests. Run `pnpm install && pnpm build && pnpm test` (or the project's equivalent) from the relevant package directory and confirm all green before returning.
 >
@@ -128,7 +147,7 @@ If the returned summary reports no commit (or `git -C <worktree_path> log --onel
 Maintain a local counter `passes = 0`. Loop:
 
 1. `passes += 1`. Halt with `REVIEW_BLOCKED` if `passes > 3`.
-2. Spawn a fresh subagent: "Run `bmad-code-review` against the diff on branch `story/<story_key>`. Return verdict (`approve` / `request-changes` / `block`) and an itemised issue list, where each item has `severity` (Critical/High/Medium/Low/Info), `location` (`file:line` if applicable), and `description`. Do NOT modify `sprint-status.yaml`. Do NOT pause for questions."
+2. Spawn a fresh subagent with `model: opus`: "Run `bmad-code-review` against the diff on branch `story/<story_key>`. Return verdict (`approve` / `request-changes` / `block`) and an itemised issue list, where each item has `severity` (Critical/High/Medium/Low/Info), `location` (`file:line` if applicable), and `description`. Do NOT modify `sprint-status.yaml`. Do NOT pause for questions."
 3. Record the verdict AND the issue list — this is how Step 11 surfaces non-blocker issues that shipped:
    ```bash
    $SH record <story_key> review_pass --data '{"pass":N,"verdict":"...","issues":[{"severity":"Low","location":"foo.ts:12","description":"..."}, ...]}'
@@ -136,11 +155,11 @@ Maintain a local counter `passes = 0`. Loop:
    If the reviewer returned no issues, omit `issues` (or pass `[]`).
 4. If `approve` → break; continue to Step 8.
 5. If `block` → halt with `REVIEW_BLOCKED`. No PR.
-6. If `request-changes` → spawn a fresh dev subagent (running `bmad-dev-story`) with the issue list and `<spec_path>`: "Address each issue. Do not change scope beyond what was flagged. Commit your fixes to `story/<story_key>` before returning (do not push, do not touch sprint-status.yaml). Confirm tests still green." Then loop to step 1.
+If `request-changes` → spawn a fresh dev subagent with `model: sonnet` (running `bmad-dev-story`) with the issue list and `<spec_path>`: "Address each issue. Do not change scope beyond what was flagged. Commit your fixes to `story/<story_key>` before returning (do not push, do not touch sprint-status.yaml). Confirm tests still green." Then loop to step 1.
 
 ### Step 8 — Systematic AC verification (subagent: bmad-qa-generate-e2e-tests)
 
-Spawn ONE fresh subagent. Prompt (with the AC list pasted verbatim from `/tmp/ship-<story_key>.resolve.json`):
+Spawn ONE fresh subagent with `model: sonnet`. Prompt (with the AC list pasted verbatim from `/tmp/ship-<story_key>.resolve.json`):
 
 > Story: `<story_key>`. Spec at `<spec_path>`. Acceptance criteria:
 > <numbered AC list>
@@ -245,7 +264,7 @@ Mirrors Step 7's review/rework structure. Maintain a local counter `ci_passes = 
 4. If all required checks are `success` → break; continue to Step 11.
 5. If any required check is `failure`:
    - Pull failing-job logs: `gh run view <run_id> --log-failed` for each failing run.
-   - Spawn a fresh dev subagent (running `bmad-dev-story`) with: the failing-check names, the captured logs, the spec path, and the worktree path. Prompt:
+   - Spawn a fresh dev subagent with `model: sonnet` (running `bmad-dev-story`) with: the failing-check names, the captured logs, the spec path, and the worktree path. Prompt:
      > CI failed on PR #<pr_number> for branch `story/<story_key>` (worktree `<worktree_path>`). Failures: <list>. Logs: <paste>. Diagnose the root cause, fix it inside the worktree, and re-run `pnpm install && pnpm build && pnpm test` locally to confirm green. **Before returning, commit your fix to `story/<story_key>` with a conventional-commit message (e.g. `fix(<story_short>): <one-line>`) and push to origin so CI re-runs. Do NOT modify `sprint-status.yaml`. Do NOT widen scope beyond what the failing checks demanded. Do NOT pause for clarifying questions.**
    - Then loop to step 1.
 
