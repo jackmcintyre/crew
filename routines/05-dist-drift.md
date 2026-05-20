@@ -30,16 +30,18 @@ build output exactly. Report if they drift.
 
 ## Steps
 
-1. **Install dependencies.** Run `pnpm install --frozen-lockfile` at
-   the repo root. If install fails, **open an issue** noting the
-   failure — don't try to recover.
+1. **Install dependencies.** From `plugins/crew/` (the pnpm workspace
+   root — there is no workspace at the repo root), run
+   `pnpm install --frozen-lockfile`. If install fails, **open an issue**
+   noting the failure — don't try to recover.
 
 2. **Capture the committed `dist/`.** Copy
    `plugins/crew/mcp-server/dist/` to `/tmp/dist-committed/` so you can
    diff against it after rebuilding.
 
-3. **Build.** Run `pnpm --filter @crew/mcp-server build`. If the build
-   fails, **open an issue** with the build output and stop here.
+3. **Build.** From `plugins/crew/`, run
+   `pnpm --filter @crew/mcp-server build`. If the build fails, **open
+   an issue** with the build output and stop here.
 
 4. **Diff.** Compare the freshly built `plugins/crew/mcp-server/dist/`
    against `/tmp/dist-committed/`. Use `diff -r` for a recursive diff.
@@ -80,8 +82,10 @@ build output exactly. Report if they drift.
 ## To fix locally
 
 ```bash
+cd plugins/crew
 pnpm install --frozen-lockfile
 pnpm --filter @crew/mcp-server build
+cd ../..
 git add plugins/crew/mcp-server/dist
 git commit -m "chore: rebuild mcp-server dist"
 ```
