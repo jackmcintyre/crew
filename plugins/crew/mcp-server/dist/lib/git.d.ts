@@ -32,3 +32,18 @@ export declare function gitCommit(opts: {
     role: string;
     execaImpl?: typeof defaultExeca;
 }): Promise<GitCommitResult>;
+/**
+ * Read up to `limit` recent commit titles from the target repo via
+ * `git log -<limit> --pretty=%s`. Best-effort: on non-zero exit (no
+ * git, no commits, not a repo, etc.) returns `[]`. Used by
+ * `readRepoSignals` (Story 2.4 FR85).
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard
+ * (which forbids any file under `src/**` other than `lib/git.ts` from
+ * spawning `git`) stays satisfied.
+ */
+export declare function readRecentCommitTitles(opts: {
+    cwd: string;
+    limit?: number;
+    execaImpl?: typeof defaultExeca;
+}): Promise<string[]>;
