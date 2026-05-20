@@ -1,0 +1,6 @@
+# gh-error-map.yaml — NFR18 error-class table.
+# Story 4.5 (Epic 4) will populate `entries` with
+# `(exit_code, stderr_regex) → defer | retry | needs-human` rows.
+# Story 2.2 ships the file so the path resolves and AC1's
+# "one YAML per role plus gh-error-map.yaml" count holds.
+entries: []
