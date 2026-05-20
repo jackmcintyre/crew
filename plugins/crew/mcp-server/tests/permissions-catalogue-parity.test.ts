@@ -58,6 +58,18 @@ const PERMISSION_FILES = [
   "gh-error-map.yaml",
 ] as const;
 
+/**
+ * Special-case permission specs that have NO matching catalogue role.
+ * These are mode-overlay specs used by specific skill invocations.
+ *
+ * Story 2.7: `ask-mode` is the non-mutating side-session allowlist for
+ * `/crew:ask`. It lives alongside catalogue-role specs but does not have
+ * a `plugins/crew/catalogue/ask-mode.md` counterpart. Excluded from the
+ * catalogue-parity loop; its shape is asserted independently in
+ * `ask-skill.test.ts` AC4(f).
+ */
+const SPECIAL_PERMISSION_SPECS = ["ask-mode"] as const;
+
 async function readCatalogueGhAllow(role: string): Promise<string[]> {
   const abs = path.join(CATALOGUE_DIR, `${role}.md`);
   const raw = await fs.readFile(abs, "utf8");
@@ -70,16 +82,17 @@ async function readCatalogueGhAllow(role: string): Promise<string[]> {
 }
 
 describe("Story 2.2 — per-role permission spec files (catalogue parity)", () => {
-  describe("AC1: permissions/ contains exactly the eleven expected files", () => {
-    it("lists exactly the 10 per-role YAMLs plus gh-error-map.yaml", async () => {
+  describe("AC1: permissions/ contains exactly the expected files (11 + special-case specs)", () => {
+    it("lists the 10 per-role YAMLs plus gh-error-map.yaml plus special-case specs", async () => {
       const entries = (await fs.readdir(PERMISSIONS_DIR))
         .filter((e) => e !== ".gitkeep")
         .sort();
-      const expected = [...PERMISSION_FILES].sort();
-      const extra = entries.filter((e) => !expected.includes(e as never));
-      const missing = expected.filter((e) => !entries.includes(e));
+      // All expected files: the eleven original + any special-case specs (ask-mode.yaml).
+      const expectedSpecialFiles = SPECIAL_PERMISSION_SPECS.map((s) => `${s}.yaml`);
+      const expectedAll = [...PERMISSION_FILES, ...expectedSpecialFiles].sort();
+      const extra = entries.filter((e) => !expectedAll.includes(e));
+      const missing = expectedAll.filter((e) => !entries.includes(e));
       expect({ extra, missing }).toEqual({ extra: [], missing: [] });
-      expect(entries).toEqual(expected);
     });
   });
 
@@ -97,11 +110,13 @@ describe("Story 2.2 — per-role permission spec files (catalogue parity)", () =
       expect(orphans).toEqual([]);
     });
 
-    it("every permissions/<role>.yaml (except gh-error-map.yaml) has a matching catalogue file", async () => {
+    it("every permissions/<role>.yaml (except gh-error-map.yaml and special-case specs) has a matching catalogue file", async () => {
       const orphans: string[] = [];
       for (const file of PERMISSION_FILES) {
         if (file === "gh-error-map.yaml") continue;
         const role = file.replace(/\.yaml$/, "");
+        // Story 2.7: skip special-case specs that have no catalogue counterpart.
+        if ((SPECIAL_PERMISSION_SPECS as readonly string[]).includes(role)) continue;
         const catPath = path.join(CATALOGUE_DIR, `${role}.md`);
         try {
           await fs.access(catPath);
