@@ -3,6 +3,8 @@ coverage/
 *.log
 .DS_Store
 .sprint-orchestrator/
+__pycache__/
+*.pyc
 
 # BMad tooling — installed/generated, not source
 _bmad/
