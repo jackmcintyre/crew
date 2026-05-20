@@ -19,7 +19,9 @@ class of problem: under-specified stories sneaking into a sprint.
 
 You are running as a scheduled remote agent against the
 `jackmcintyre/crew` repository. The repo is already cloned. You have
-read access, the `gh` CLI, and `git`.
+read access, `git`, and tools to read and write GitHub (issues,
+labels). Use whichever GitHub-write mechanism is available in your
+environment.
 
 ## Task
 
@@ -59,10 +61,11 @@ Audit the **next active epic** for readiness and report any gaps.
 4. **Decide whether to report.** If every story passes every check,
    **exit silently — no issue**. Otherwise, proceed.
 
-5. **Open the issue.** Use `gh issue create`:
+5. **Open the issue.** Create a GitHub issue with:
    - **Title:** `Backlog readiness — Epic N — YYYY-MM-DD`
-   - **Label:** `backlog-ready` (create with
-     `gh label create backlog-ready --color 0E8A16 --description "Backlog readiness pre-flight" || true`).
+   - **Label:** `backlog-ready` (if the label doesn't exist, create it
+     with colour `0E8A16` and description "Backlog readiness
+     pre-flight").
    - **Body:** see structure below.
 
 ## Issue body structure
@@ -94,6 +97,5 @@ Audit the **next active epic** for readiness and report any gaps.
 - **Quote evidence.** When you say a story has a gap, paste the relevant
   line or note its absence. Don't claim "AC2 is vague" without showing
   why.
-- **If `gh` auth fails,** dump the report to stdout and clearly note
-  "Could not open issue — report in run output."
-- **Read-only.** No commits, no PRs, no branch changes.
+- **Read-only on the codebase.** No commits, no PRs, no branch
+  changes. Issue creation is the only write.

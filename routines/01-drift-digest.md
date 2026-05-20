@@ -19,8 +19,9 @@ and any PR that touched files outside its stated story scope.
 
 You are running as a scheduled remote agent against the
 `jackmcintyre/crew` repository. The repo is already cloned at the
-current working directory. You have read access to the codebase, the
-`gh` CLI for GitHub operations, and `git` for history.
+current working directory. You have read access to the codebase, `git`
+for history, and tools to read and write GitHub (PRs, issues, labels).
+Use whichever GitHub mechanism is available in your environment.
 
 ## Task
 
@@ -29,9 +30,9 @@ acceptance criteria still open across active epics.
 
 ## Steps
 
-1. **Gather merges.** Run
-   `gh pr list --state merged --search "merged:>=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)" --json number,title,mergedAt,author,files,body --limit 50`
-   to list PRs merged in the last 24 hours. If the list is empty, **exit
+1. **Gather merges.** List all PRs merged in the last 24 hours
+   (since `now - 24h` UTC), including PR number, title, author,
+   merge time, body, and files changed. If the list is empty, **exit
    silently without opening an issue**. Do not open empty digests.
 
 2. **Read the epics.** For each file under
@@ -53,10 +54,11 @@ acceptance criteria still open across active epics.
    touches `mcp-server/src/`), flag it as "scope-creep candidate." Don't
    be aggressive — only flag clear cases.
 
-5. **Open the issue.** Use `gh issue create` with:
+5. **Open the issue.** Create a GitHub issue with:
    - **Title:** `Drift digest — YYYY-MM-DD` (today's UTC date).
-   - **Label:** `drift-digest` (create the label if it doesn't exist
-     using `gh label create drift-digest --color FBCA04 --description "Daily PR vs Epic drift digest" || true`).
+   - **Label:** `drift-digest` (if the label doesn't exist, create it
+     with colour `FBCA04` and description "Daily PR vs Epic drift
+     digest").
    - **Body:** the structure below.
 
 ## Issue body structure
@@ -84,7 +86,5 @@ acceptance criteria still open across active epics.
 - **Be a reporter, not a critic.** State what you see. Don't editorialise
   about quality or recommend follow-up work. The humans decide what to
   do with the findings.
-- **If you can't authenticate to `gh`,** dump the digest to stdout as
-  your final message instead and clearly note "Could not open issue —
-  digest in run output."
-- **No commits, no PRs, no branch changes.** Read-only.
+- **Read-only on the codebase.** No commits, no PRs, no branch
+  changes. Issue creation is the only write.

@@ -22,7 +22,9 @@ Claude in every future session — silent, invisible, compounding.
 
 You are running as a scheduled remote agent against the
 `jackmcintyre/crew` repository. The repo is already cloned. You have
-read access, the `gh` CLI, and `git`.
+read access, `git`, and tools to read and write GitHub (issues, PRs,
+labels). Use whichever GitHub-write mechanism is available in your
+environment.
 
 ## Task
 
@@ -63,10 +65,11 @@ docs *should* say.
 4. **Decide whether to report.** If every claim checks out, **exit
    silently — no issue**. Otherwise, proceed.
 
-5. **Open the issue.** Use `gh issue create`:
+5. **Open the issue.** Create a GitHub issue with:
    - **Title:** `Docs freshness — YYYY-MM-DD`
-   - **Label:** `docs-freshness` (create with
-     `gh label create docs-freshness --color 5319E7 --description "Stale claims in project documentation" || true`).
+   - **Label:** `docs-freshness` (if the label doesn't exist, create
+     it with colour `5319E7` and description "Stale claims in project
+     documentation").
    - **Body:** see structure below.
 
 ## Issue body structure
@@ -94,6 +97,5 @@ docs *should* say.
   not a copy-edit.
 - **Skip auto-generated or installed files.** Don't audit
   `.claude/skills/bmad-*` content, `node_modules`, `dist/` outputs.
-- **If `gh` auth fails,** dump the report to stdout and clearly note
-  "Could not open issue — report in run output."
-- **Read-only.** No commits, no PRs, no branch changes.
+- **Read-only on the codebase.** No commits, no PRs, no branch changes.
+  Issue creation is the only write.
