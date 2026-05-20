@@ -12,7 +12,7 @@ The endgame: **replace the traditional product engineering team with AI tooling*
 
 Success target: a relatively technical non-engineer (like Jack himself, or one external reader of his eventual writeup) installs the plugin on a clean machine, primes a continuous-flow backlog with a planning conversation, walks away, and comes back to a stack of merged PRs they want to keep using — without Jack on the chat.
 
-Authoritative PRD: `_bmad-output/planning-artifacts/prd-crew-v1.md`.
+Authoritative PRD: `_bmad-output/planning-artifacts/prd-crew-v1/` (sharded — start at `index.md`). Epics live alongside in `epics/`, architecture in `architecture/`.
 
 ## How to talk to Jack
 
@@ -25,19 +25,19 @@ Authoritative PRD: `_bmad-output/planning-artifacts/prd-crew-v1.md`.
 
 ## What this project is
 
-`crew` is the home of **AI Engineering Team v1** — a Claude Code plugin (not yet built; PRD in `_bmad-output/planning-artifacts/prd-crew-v1.md`) that lets a non-engineer drive a project-shaped team of long-lived AI agents through a continuous-flow backlog.
+`crew` is the home of **AI Engineering Team v1** — a Claude Code plugin (not yet built; PRD in `_bmad-output/planning-artifacts/prd-crew-v1/`) that lets a non-engineer drive a project-shaped team of long-lived AI agents through a continuous-flow backlog.
 
 The repo previously hosted a `sprint-orchestrator` plugin which was used to dog-food the same broad idea against a sprint construct. That plugin was treated as legacy from day one of the new effort and has been removed (2026-05-19); the new product is being built from scratch.
 
 Folders:
-- `_bmad-output/planning-artifacts/` — the active PRD plus its validation report. **Gitignored** — local-only.
+- `_bmad-output/planning-artifacts/` — the active PRD (sharded under `prd-crew-v1/`), epics, architecture, and validation reports. **Tracked in git** so remote agents and future readers can ground in them. Its internal `archive/` subfolder is gitignored.
 - `_bmad-output/_archive/` — superseded briefs, PRDs, sprint backlogs, and the historical record of the sprint-orchestrator era. **Gitignored**.
 - `.claude/skills/bmad-*/` — installed BMad skills used for planning. Gitignored.
 - `_bmad/` — BMad config/scripts. Gitignored.
 
 ## Process notes
 
-- **Planning lives in `_bmad-output/planning-artifacts/`.** The authoritative PRD is there. Older briefs and backlogs are in `_bmad-output/_archive/`. The folder is gitignored by design — Jack's machine is the source of truth.
+- **Planning lives in `_bmad-output/planning-artifacts/`.** The authoritative PRD (sharded under `prd-crew-v1/`), epics, and architecture all sit here and are tracked in git. Older briefs and backlogs are in `_bmad-output/_archive/`, which stays gitignored.
 - **The new plugin does not yet exist.** When implementation work begins, it will live under `plugins/<new-plugin-name>/`. Until then, this repo holds planning artifacts only.
 - **Discipline rules (inherited from sprint-orchestrator era):** the five planning-discipline rules from `_archive/planning-discipline.md` are the bar for every story we author. They're inherited by the new PRD even though the standalone file is archived.
 - **Deferred work tracker:** captured inside the relevant brief or PRD's deferred section, with reasoning. Promote to a follow-up workstream when ready.
