@@ -1,28 +1,46 @@
 # Worktree smoke-test recipe for the crew plugin
 
-> **Cache-reload trap:** `/plugin install crew@crew` is a **no-op** when the
-> plugin is already installed globally — even if the source on disk has
-> changed. **Uninstall first** or the worktree's updated code never loads.
+> **Two workflows exist — choose the right one:**
+>
+> | Situation | Workflow |
+> |-----------|----------|
+> | Editing TypeScript or SKILL.md on the current branch | **Daily dev loop** (below) — ~5–8 s |
+> | Switching to a different branch to test it | **Branch switching** (`## Recipe` below) — full uninstall cycle |
+
+## Daily dev loop
+
+> **This is the 99% case.** Claude Code runs the plugin directly from the live
+> source tree — no install copy, no cache layer. See the spike report at
+> [`plugins/crew/docs/spikes/symlink-dev-install.md`](spikes/symlink-dev-install.md)
+> for the evidence.
+
+**MCP server changes (TypeScript src/):**
+
+1. Start the watch compiler in a terminal:
+   ```sh
+   pnpm --dir plugins/crew/mcp-server build:watch
+   ```
+   `tsc --watch` incrementally recompiles into `dist/` in 1–3 seconds.
+2. After each rebuild, in the Claude Code TUI: `/reload-plugins`
+
+**Skill-only changes (SKILL.md files):** no rebuild needed — just `/reload-plugins`.
 
 ## Why this exists
 
-The crew plugin is installed into Claude Code via `/plugin install crew@crew`.
-When a contributor is working on a worktree branch (e.g. under `.worktrees/<branch>/`),
-a naive `/plugin install crew@crew` silently skips installation because Claude Code
-sees the plugin as already installed — even when the worktree branch has different
-code. The symptom is that stale main-branch code surfaces instead of the worktree edits.
+The crew plugin is installed via `/plugin install crew@crew`.
+When switching to a worktree branch, a naive `/plugin install crew@crew` silently
+skips installation because Claude Code sees the plugin as already installed — a
+**no-op** — even when the source on disk has changed. **Uninstall first** or the
+worktree's updated code never loads.
 
 This trap was first recorded at
 `~/.claude/projects/-Users-jackmcintyre-projects-crew/memory/project_smoke_test_install.md`
-during the Story 2.7 ship-story smoke gate. It costs at least one confused smoke
-session per `(user-surface)`-tagged story that hits it for the first time.
-
-The fix is a three-step sequence that forces a fresh plugin load without killing
-the operator's Claude Code session. This doc and the companion helper script
-(`plugins/crew/scripts/worktree-smoke.sh`) move that recipe out of tribal memory
-and into the repo so every future contributor can find it in two minutes.
+during the Story 2.7 ship-story smoke gate.
 
 ## Recipe
+
+> **Use this only when switching branches**, not for daily editing (see Daily dev
+> loop above).
 
 Paste these three commands into the Claude Code TUI **in order**:
 
@@ -43,46 +61,40 @@ on disk has changed.
 ## Helper script
 
 `plugins/crew/scripts/worktree-smoke.sh` prints the recipe above with your
-current branch and version interpolated, so you can copy-paste with confidence:
+current branch and version interpolated:
 
 ```sh
 ./plugins/crew/scripts/worktree-smoke.sh
 ```
 
-**Exit codes and stdout contract (AC3):**
+**Exit codes:**
 
-| Exit code | Meaning | Output |
-|-----------|---------|--------|
-| `0` | Inside a worktree; recipe printed to stdout | Preamble + three slash-command lines + footer |
-| `2` | Not inside a worktree — refusing to print | Diagnostic to stderr: `worktree-smoke: refusing to run outside a worktree — cd into .worktrees/<branch>/ first` |
-| `3` | Preflight failure (e.g. `git` not on PATH) | Diagnostic to stderr naming the missing dependency |
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Inside a worktree; recipe printed to stdout |
+| `2` | Not inside a worktree — `worktree-smoke: refusing to run outside a worktree — cd into .worktrees/<branch>/ first` |
+| `3` | Preflight failure (e.g. `git` not on PATH) |
 
-The script has **no side-effects**: it does not invoke `claude`, does not shell
-out to any Claude Code binary, and does not modify `~/.claude/`. It only writes
-to stdout / stderr.
-
-The script requires only `git` and standard POSIX shell built-ins. `node` is
-used optionally for version display in the confirmation footer; if absent the
-footer shows `unknown` and the recipe still works.
+The script has **no side-effects** and requires only `git` and standard POSIX
+shell built-ins.
 
 ## Verifying the recipe worked
 
-After running `/reload-plugins`, verify the worktree code is loaded by using a
-sentinel-surface check:
+After running `/reload-plugins`, verify the worktree code is loaded:
 
 1. Insert a known string into `plugins/crew/skills/ask/SKILL.md`'s
    `# What this skill does` section (e.g. `WORKTREE-SENTINEL-2.8`).
 2. Save the file (no rebuild needed for skill body changes).
 3. Run the recipe above.
 4. Run `/crew:ask <role> "<question>"` or `/help crew:ask`.
-5. Observe the sentinel string surfaced in the printed response or skill help.
+5. Observe the sentinel string in the response.
 
-If the sentinel is absent, the worktree code did not load — repeat the recipe,
-confirm you ran it from inside the worktree, and check that `/crew:status`
+If the sentinel is absent, repeat the recipe and check that `/crew:status`
 reports the expected version.
 
 ## Cross-references
 
+- Spike report (live-source behaviour): [`plugins/crew/docs/spikes/symlink-dev-install.md`](spikes/symlink-dev-install.md)
 - Story 1.8 user-surface gate: [`plugins/crew/docs/user-surface-acs.md`](user-surface-acs.md)
 - Story 2.7 `/crew:ask` skill: [`plugins/crew/skills/ask/SKILL.md`](../skills/ask/SKILL.md)
 - `_meta.role` enforcement record: [`plugins/crew/docs/ask-mode-enforcement.md`](ask-mode-enforcement.md)
