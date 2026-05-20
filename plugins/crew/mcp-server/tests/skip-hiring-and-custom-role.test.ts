@@ -65,7 +65,7 @@ const REFUSAL_STRING =
   "I cannot invent roles outside the v1 catalogue. The catalogue is fixed; the manual escape hatch is to author <target-repo>/team/custom/<role>.md matching the catalogue file shape (see plugins/crew/catalogue/planner.md for the canonical example), then re-run /crew:hire.";
 
 const REENTRY_PROMPT =
-  "Hire one more (specify catalogue role id), unhire <role>, view-persona <role>, or done.";
+  "Hire one more (specify catalogue role id), unhire {role}, view-persona {role}, or done.";
 
 const VALID_CUSTOM_ROLE_BODY = `---
 role: data-scientist

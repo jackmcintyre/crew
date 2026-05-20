@@ -22,5 +22,5 @@ A target repo with `.crew/config.yaml` resolved (auto-detected on first run by t
 # Failure modes
 
 - **No `.crew/config.yaml` and no adapter matches:** the tool throws `NoAdapterMatchedError`. The skill surfaces the error message verbatim — it already tells the user to either init a planning tool the plugin understands or follow `docs/README-install.md` step 5.
-- **`.crew/config.yaml` exists but the listed adapter no longer matches the repo:** the status line shows `adapter: <name> (mismatched)` and lists any other matching adapters the user can switch to. No exception is thrown — the report itself carries the downgrade.
-- **`docs/standards.md` missing or malformed:** the `standards:` line shows `missing` or `malformed` (with the absolute path). Run `cp plugins/crew/docs/standards-example.md <target-repo>/docs/standards.md` to fix (README-install.md checkpoint 5).
+- **`.crew/config.yaml` exists but the listed adapter no longer matches the repo:** the status line shows `adapter: {name} (mismatched)` and lists any other matching adapters the user can switch to. No exception is thrown — the report itself carries the downgrade.
+- **`docs/standards.md` missing or malformed:** the `standards:` line shows `missing` or `malformed` (with the absolute path). Run `cp plugins/crew/docs/standards-example.md {target-repo}/docs/standards.md` to fix (README-install.md checkpoint 5).

@@ -188,7 +188,7 @@ async function runHireFlow(opts: {
       (r) => `${r.role} — ${r.domain} — hired ${r.hired_at}`,
     );
     const prompt =
-      "Hire one more (specify catalogue role id), unhire <role>, view-persona <role>, or done.";
+      "Hire one more (specify catalogue role id), unhire {role}, view-persona {role}, or done.";
     reentryBlock = ["Currently hired:", "", ...lines, "", prompt].join("\n");
 
     if (opts.response === "done") {
@@ -439,7 +439,7 @@ describe("Story 2.4 AC4 / AC5(b, e) — re-entry against existing roster", () =>
 
     // Verbatim re-entry prompt line (AC4).
     expect(result.reentryBlock).toContain(
-      "Hire one more (specify catalogue role id), unhire <role>, view-persona <role>, or done.",
+      "Hire one more (specify catalogue role id), unhire {role}, view-persona {role}, or done.",
     );
 
     // Domain cross-check: domain string in each line equals the catalogue's domain.
@@ -623,7 +623,7 @@ describe("Story 2.4 operator-smoke fix — hiring-manager prompt operating const
       "Approve all, approve a subset (list role ids), decline, or request a specific catalogue role.",
     );
     expect(prompt).toContain(
-      "Hire one more (specify catalogue role id), unhire <role>, view-persona <role>, or done.",
+      "Hire one more (specify catalogue role id), unhire {role}, view-persona {role}, or done.",
     );
     expect(prompt).toContain("Handoff to planner — team hired, ready to plan");
   });

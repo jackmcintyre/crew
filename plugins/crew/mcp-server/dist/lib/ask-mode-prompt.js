@@ -13,6 +13,9 @@
  *
  * (FR76, FR109, NFR12)
  */
+// Convention: operator-facing prose strings must use {placeholder} not <placeholder> — angle
+// brackets are stripped by Claude Code's markdown renderer (unknown HTML tags). Code blocks
+// are exempt. See: Epic 2 retro, Story 2.4 / 2.5.
 /** The static `<ask-mode>` block template. `__QUESTION__` is the substitution sentinel. */
 const ASK_MODE_BLOCK_TEMPLATE = `<ask-mode>
 You are running in /crew:ask mode. This is a non-mutating side-session.
