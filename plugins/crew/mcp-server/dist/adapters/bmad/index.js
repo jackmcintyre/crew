@@ -254,6 +254,18 @@ export const BmadAdapter = {
         return { stories_root: DEFAULT_STORIES_ROOT };
     },
     adapterConfigSchema: z.object({ stories_root: z.string() }),
+    /**
+     * Pass-through discipline validator — returns the input story unchanged.
+     *
+     * Real BMad discipline validation lands in Story 3.5. This pass-through
+     * keeps `BmadAdapter` type-conformant against Story 3.1's expanded
+     * interface.
+     *
+     * @see _bmad-output/planning-artifacts/epics/epic-3-backlog-layer-planning-adapters-story-manifests-and-the-planning-conversation.md § Story 3.5
+     */
+    validateAgainstDiscipline(story) {
+        return story;
+    },
 };
 // Re-exports — the test suite and downstream consumers import these via
 // the adapter's index module for a single entry point per adapter

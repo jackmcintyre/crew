@@ -55,6 +55,7 @@ function makeBmadStub(opts: { detectResult: boolean }): PlanningAdapter {
       return { stories_root: "_bmad-output/planning-artifacts/stories" };
     },
     adapterConfigSchema: z.object({ stories_root: z.string() }),
+    validateAgainstDiscipline: (s: SourceStory) => s,
   };
 }
 
