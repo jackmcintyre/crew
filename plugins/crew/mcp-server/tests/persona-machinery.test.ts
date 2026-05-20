@@ -240,6 +240,58 @@ describe("Story 2.3 — persona machinery (AC1–AC5)", () => {
     });
   });
 
+  describe("AC5 — end-to-end integration: instantiate, read, lookup, plain-Markdown round-trip", () => {
+    it("exercises the full persona lifecycle in a single test (planner)", async () => {
+      const tmp = await makeTmp("ac5-e2e");
+      tmpDirs.push(tmp);
+
+      // 1) Instantiate.
+      const { path: personaPath } = await instantiatePersona({
+        pluginRoot: getPluginRoot(),
+        targetRepoRoot: tmp,
+        role: "planner",
+        clock: () => new Date(FIXED_HIRED_AT),
+        pluginVersion: FIXED_VERSION,
+      });
+      expect(personaPath).toBe(path.join(tmp, "team", "planner", "PERSONA.md"));
+
+      // 2) Read.
+      const readBack = await readPersona({ targetRepoRoot: tmp, role: "planner" });
+      expect(readBack.role).toBe("planner");
+      expect(readBack.hired_at).toBe(FIXED_HIRED_AT);
+      expect(readBack.catalogue_version).toBe(FIXED_VERSION);
+      expect(readBack.sections.Knowledge).toBe("");
+
+      // 3) Lookup by domain.
+      const catalogue = await readCatalogue({
+        pluginRoot: getPluginRoot(),
+        role: "planner",
+      });
+      const lookup = await lookupRoleByDomain({
+        targetRepoRoot: tmp,
+        domain: catalogue.domain,
+      });
+      expect(lookup).toEqual({ role: "planner" });
+
+      // 4) Plain-Markdown round-trip: hand-edit the file, re-read, confirm
+      //    the edit is preserved and lookup still resolves.
+      await fs.appendFile(
+        personaPath,
+        "- learned: prefer explicit guard clauses\n",
+        "utf8",
+      );
+      const afterEdit = await readPersona({ targetRepoRoot: tmp, role: "planner" });
+      expect(afterEdit.sections.Knowledge).toContain(
+        "learned: prefer explicit guard clauses",
+      );
+      const lookupAfter = await lookupRoleByDomain({
+        targetRepoRoot: tmp,
+        domain: catalogue.domain,
+      });
+      expect(lookupAfter).toEqual({ role: "planner" });
+    });
+  });
+
   describe("AC5(f) — typed errors on unknown role and re-instantiation", () => {
     it("throws CatalogueRoleNotFoundError for an unknown role", async () => {
       const tmp = await makeTmp("unknown");
