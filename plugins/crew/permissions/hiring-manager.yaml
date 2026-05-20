@@ -1,5 +1,9 @@
 role: hiring-manager
 tools_allow:
   - heartbeat
+  - readCatalogue
+  - instantiatePersona
+  - readPersona
+  - lookupRoleByDomain
 gh_allow: []
 gh_allow_args: {}

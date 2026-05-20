@@ -397,3 +397,71 @@ export class CatalogueShapeError extends DomainError {
         this.zodMessage = opts.zodMessage;
     }
 }
+/**
+ * `readCatalogue` / `instantiatePersona` was asked for a role that
+ * does not exist in `plugins/crew/catalogue/`. Distinct from
+ * `CatalogueShapeError` (file exists but malformed) — this error
+ * means no file was found at the expected path. (Story 2.3)
+ */
+export class CatalogueRoleNotFoundError extends DomainError {
+    code = "CATALOGUE_ROLE_NOT_FOUND";
+    role;
+    cataloguePath;
+    constructor(opts) {
+        super(`Unknown catalogue role '${opts.role}': no file at ${opts.cataloguePath}. ` +
+            `See plugins/crew/catalogue/ for the v1 roster.`);
+        this.role = opts.role;
+        this.cataloguePath = opts.cataloguePath;
+    }
+}
+/**
+ * `instantiatePersona` was asked to materialise a persona file for a
+ * role that has already been hired (the persona file already exists
+ * on disk). v1's `/hire` skill checks this and surfaces the re-entry
+ * actions (FR90); the underlying tool stays a pure create-or-fail.
+ * (Story 2.3)
+ */
+export class PersonaAlreadyExistsError extends DomainError {
+    code = "PERSONA_ALREADY_EXISTS";
+    role;
+    personaPath;
+    constructor(opts) {
+        super(`Role '${opts.role}' is already hired at ${opts.personaPath}. ` +
+            `Use /hire to view, unhire, or hire-one-more — re-instantiating is not idempotent.`);
+        this.role = opts.role;
+        this.personaPath = opts.personaPath;
+    }
+}
+/**
+ * `readPersona` was asked for a role whose persona file does not
+ * exist under `<target-repo>/team/<role>/PERSONA.md`. (Story 2.3)
+ */
+export class PersonaFileNotFoundError extends DomainError {
+    code = "PERSONA_FILE_NOT_FOUND";
+    role;
+    personaPath;
+    constructor(opts) {
+        super(`No persona file for role '${opts.role}' at ${opts.personaPath}. ` +
+            `Run /hire to create one.`);
+        this.role = opts.role;
+        this.personaPath = opts.personaPath;
+    }
+}
+/**
+ * `parsePersonaFile` found a file on disk but it failed the parser —
+ * YAML frontmatter syntax error, missing / unknown frontmatter key,
+ * a required `##` section missing / out of canonical order, or the
+ * required `## Knowledge` section absent / preceding `## Prompt`.
+ * (Story 2.3)
+ */
+export class PersonaFileMalformedError extends DomainError {
+    code = "PERSONA_FILE_MALFORMED";
+    personaPath;
+    zodMessage;
+    constructor(opts) {
+        super(`Persona file at ${opts.personaPath} is malformed: ${opts.zodMessage}. ` +
+            `Persona files are plain Markdown — fix by hand or git-revert.`);
+        this.personaPath = opts.personaPath;
+        this.zodMessage = opts.zodMessage;
+    }
+}

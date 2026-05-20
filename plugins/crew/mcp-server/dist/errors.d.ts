@@ -317,3 +317,63 @@ export declare class CatalogueShapeError extends DomainError {
         zodMessage: string;
     });
 }
+/**
+ * `readCatalogue` / `instantiatePersona` was asked for a role that
+ * does not exist in `plugins/crew/catalogue/`. Distinct from
+ * `CatalogueShapeError` (file exists but malformed) — this error
+ * means no file was found at the expected path. (Story 2.3)
+ */
+export declare class CatalogueRoleNotFoundError extends DomainError {
+    readonly code: "CATALOGUE_ROLE_NOT_FOUND";
+    readonly role: string;
+    readonly cataloguePath: string;
+    constructor(opts: {
+        role: string;
+        cataloguePath: string;
+    });
+}
+/**
+ * `instantiatePersona` was asked to materialise a persona file for a
+ * role that has already been hired (the persona file already exists
+ * on disk). v1's `/hire` skill checks this and surfaces the re-entry
+ * actions (FR90); the underlying tool stays a pure create-or-fail.
+ * (Story 2.3)
+ */
+export declare class PersonaAlreadyExistsError extends DomainError {
+    readonly code: "PERSONA_ALREADY_EXISTS";
+    readonly role: string;
+    readonly personaPath: string;
+    constructor(opts: {
+        role: string;
+        personaPath: string;
+    });
+}
+/**
+ * `readPersona` was asked for a role whose persona file does not
+ * exist under `<target-repo>/team/<role>/PERSONA.md`. (Story 2.3)
+ */
+export declare class PersonaFileNotFoundError extends DomainError {
+    readonly code: "PERSONA_FILE_NOT_FOUND";
+    readonly role: string;
+    readonly personaPath: string;
+    constructor(opts: {
+        role: string;
+        personaPath: string;
+    });
+}
+/**
+ * `parsePersonaFile` found a file on disk but it failed the parser —
+ * YAML frontmatter syntax error, missing / unknown frontmatter key,
+ * a required `##` section missing / out of canonical order, or the
+ * required `## Knowledge` section absent / preceding `## Prompt`.
+ * (Story 2.3)
+ */
+export declare class PersonaFileMalformedError extends DomainError {
+    readonly code: "PERSONA_FILE_MALFORMED";
+    readonly personaPath: string;
+    readonly zodMessage: string;
+    constructor(opts: {
+        personaPath: string;
+        zodMessage: string;
+    });
+}
