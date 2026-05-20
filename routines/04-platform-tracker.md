@@ -25,8 +25,10 @@ instead of the surprised party.
 
 You are running as a scheduled remote agent against the
 `jackmcintyre/crew` repository. The repo is already cloned. You have
-read access, the `gh` CLI, the `git` CLI, and the **Context7** MCP
-connector for fetching current library/SDK documentation.
+read access, `git`, tools to read and write GitHub (PRs, issues,
+labels), and the **Context7** MCP connector for fetching current
+library/SDK documentation. Use whichever GitHub-write mechanism is
+available in your environment.
 
 ## Task
 
@@ -75,26 +77,19 @@ the last snapshot, and report ones that affect crew.
    **exit silently — no issue**. The snapshot still updates (next step).
 
 6. **Update the snapshot in the repo.** Even if you don't open an issue,
-   if the new snapshot differs from the previous, commit it. Use a
-   single commit on a new branch and open a PR:
+   if the new snapshot differs from the previous, commit it on a new
+   branch named `platform-snapshot-YYYY-MM-DD`, push it, and open a
+   pull request titled `chore(routines): platform snapshot YYYY-MM-DD`
+   with body "Automated snapshot refresh from the platform-tracker
+   routine." If push or PR creation fails, don't sweat it — the issue
+   is still the primary deliverable.
 
-   ```
-   git checkout -b platform-snapshot-$(date -u +%Y-%m-%d)
-   <write the new snapshot to routines/snapshots/platform.md>
-   git add routines/snapshots/platform.md
-   git commit -m "chore(routines): update platform snapshot $(date -u +%Y-%m-%d)"
-   git push -u origin HEAD
-   gh pr create --title "chore(routines): platform snapshot $(date -u +%Y-%m-%d)" --body "Automated snapshot refresh from the platform-tracker routine."
-   ```
-
-   If push or PR creation fails, don't sweat it — the issue is still the
-   primary deliverable.
-
-7. **Open the issue** if there are breaking or opportunity items. Use
-   `gh issue create`:
+7. **Open the issue** if there are breaking or opportunity items.
+   Create a GitHub issue with:
    - **Title:** `Platform tracker — YYYY-MM-DD`
-   - **Label:** `platform-track` (create with
-     `gh label create platform-track --color 1D76DB --description "Claude Code platform changes affecting crew" || true`).
+   - **Label:** `platform-track` (if the label doesn't exist, create
+     it with colour `1D76DB` and description "Claude Code platform
+     changes affecting crew").
    - **Body:** see structure below.
 
 ## Issue body structure
@@ -127,5 +122,5 @@ Snapshot diff committed via PR: <link to the snapshot PR, if one was opened>
   "First snapshot established. Watching from here."
 - **If Context7 is not available,** exit silently and log "Context7 not
   reachable" to stdout. Don't try to substitute with web fetches.
-- **If `gh` auth fails,** dump the report to stdout and skip the PR.
-- **Snapshot PR is the only write.** No other commits, no other PRs.
+- **Snapshot PR + issue are the only writes.** No other commits, no
+  other PRs.

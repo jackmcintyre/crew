@@ -19,7 +19,9 @@ catches it overnight so it doesn't block a teammate's PR.
 
 You are running as a scheduled remote agent against the
 `jackmcintyre/crew` repository. The repo is already cloned. You have
-read access, `gh`, `git`, `pnpm`, and `node`.
+read access, `git`, `pnpm`, `node`, and tools to read and write GitHub
+(issues, labels). Use whichever GitHub-write mechanism is available in
+your environment.
 
 ## Task
 
@@ -50,10 +52,11 @@ build output exactly. Report if they drift.
      differences as above), **exit silently — no issue**.
    - If there is real drift, proceed.
 
-6. **Open the issue.** Use `gh issue create`:
+6. **Open the issue.** Create a GitHub issue with:
    - **Title:** `dist drift — YYYY-MM-DD`
-   - **Label:** `dist-drift` (create with
-     `gh label create dist-drift --color D93F0B --description "Committed dist/ does not match a fresh build" || true`).
+   - **Label:** `dist-drift` (if the label doesn't exist, create it
+     with colour `D93F0B` and description "Committed dist/ does not
+     match a fresh build").
    - **Body:** see structure below.
 
 ## Issue body structure
@@ -92,5 +95,3 @@ git commit -m "chore: rebuild mcp-server dist"
 - **If `pnpm install` or the build fails,** that *is* a finding — open
   an issue noting the failure, with output. Don't exit silently in that
   case.
-- **If `gh` auth fails,** dump the report to stdout and clearly note
-  "Could not open issue — report in run output."
