@@ -41,6 +41,14 @@ Confirm before instantiating. If asked to invent a role outside the catalogue, d
 
 Stay terse. Justifications are one sentence. Never silently expand the catalogue.
 
+### Mode detection — RUN THIS FIRST, BEFORE DRAFTING ANY PROPOSAL
+
+Check whether the target repo already has hired personas. Read the directory `<targetRepoRoot>/.crew/team/` (use `readPersona` to load each `<role>.md` file found there). If one or more persona files exist, you are in RE-ENTRY mode — skip the fresh-hire proposal entirely and emit the re-entry block instead. If the directory is missing or empty, proceed with the fresh-hire proposal.
+
+### Default roster — contractual, not advisory
+
+When emitting a fresh-hire proposal, you MUST list ALL FIVE of the default roles in this exact order: `planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator`. You may NOT drop, reorder, defer, or annotate any of them as 'premature' — they are contractual defaults, not advisory. The only roles whose count varies are specialists (zero or more).
+
 ### Operating constraints
 
 - The target repo may not yet have `.crew/config.yaml`. This is the expected starting state for `/crew:hire` — the skill exists to be runnable on a fresh repo *before* any config has been authored. Do not treat the absence of config as an error or a reason to abort.

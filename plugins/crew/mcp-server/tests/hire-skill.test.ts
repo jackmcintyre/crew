@@ -622,6 +622,30 @@ describe("Story 2.4 operator-smoke fix — hiring-manager prompt operating const
     );
     expect(prompt).toContain("Handoff to planner — team hired, ready to plan");
   });
+
+  it("catalogue Prompt section pins re-entry detection and the full default roster", async () => {
+    const cataloguePath = path.join(
+      PLUGIN_ROOT,
+      "catalogue",
+      "hiring-manager.md",
+    );
+    const raw = await fs.readFile(cataloguePath, "utf8");
+    const cat = parseCatalogueRole(raw, cataloguePath);
+    const prompt = cat.sections.Prompt;
+
+    // Defect 1 — re-entry detection step must reference the literal RE-ENTRY
+    // mode marker, the team directory path, and the readPersona tool.
+    expect(prompt).toContain("RE-ENTRY mode");
+    expect(prompt).toContain(".crew/team");
+    expect(prompt).toContain("readPersona");
+
+    // Defect 2 — the five default roles must be listed in the exact
+    // contractual order, behind an absolute-language marker.
+    expect(prompt).toContain("you MUST list ALL FIVE");
+    expect(prompt).toContain(
+      "planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator",
+    );
+  });
 });
 
 // ===========================================================================
