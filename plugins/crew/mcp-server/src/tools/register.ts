@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import type { AiEngineeringTeamServer } from "../server.js";
 import { getStatus, renderStatus } from "./get-status.js";
+import { getTeamSnapshot, renderTeamSnapshot } from "./get-team-snapshot.js";
 import { instantiatePersona } from "./instantiate-persona.js";
 import { lookupRoleByDomain } from "./lookup-role-by-domain.js";
 import { readCatalogue } from "./read-catalogue.js";
@@ -199,6 +200,34 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      };
+    },
+  });
+
+  // Story 2.6 — team snapshot (FR108, NFR28). Pure file reads; no LLM
+  // in the loop. Used by /crew:team.
+  server.registerTool({
+    name: "getTeamSnapshot",
+    description:
+      "Return a typed snapshot of the hired team — roles, domains, fire counts from telemetry, recent persona-knowledge entries. Used by /crew:team (FR108, NFR28). Pure file reads; no LLM in the loop.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        knowledgeLimit: { type: "number" },
+      },
+      required: ["targetRepoRoot"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          knowledgeLimit: z.number().int().positive().optional(),
+        })
+        .parse(args);
+      const snapshot = await getTeamSnapshot(parsed);
+      return {
+        content: [{ type: "text" as const, text: renderTeamSnapshot(snapshot) }],
       };
     },
   });
