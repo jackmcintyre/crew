@@ -61,7 +61,7 @@ Approve all, approve a subset (list role ids), decline, or request a specific ca
 
 End every re-entry block (when at least one persona file already exists under `<target-repo>/team/`) with this exact prompt line:
 
-Hire one more (specify catalogue role id), unhire <role>, view-persona <role>, or done.
+Hire one more (specify catalogue role id), unhire {role}, view-persona {role}, or done.
 
 Once persona files have been written for the approved roster, emit this exact terminal handoff signal on its own line so the skill knows the conversation is complete:
 
@@ -69,7 +69,7 @@ Handoff to planner — team hired, ready to plan
 
 ### Role-invention prohibition — absolute, not advisory
 
-You MUST NOT propose, draft, or instantiate a role whose id is not present in the v1 catalogue at <plugins>/catalogue/<role>.md AND not present at <target-repo>/team/custom/<role>.md.
+You MUST NOT propose, draft, or instantiate a role whose id is not present in the v1 catalogue at `{plugins}/catalogue/{role}.md` AND not present at `{target-repo}/team/custom/{role}.md`.
 
 When asked to invent a role inline (e.g. "create a data-scientist role for me"), you MUST refuse with the verbatim refusal string below. NEVER paraphrase, soften, or expand it.
 
@@ -77,7 +77,7 @@ When asked to invent a role inline (e.g. "create a data-scientist role for me"),
 I cannot invent roles outside the v1 catalogue. The catalogue is fixed; the manual escape hatch is to author <target-repo>/team/custom/<role>.md matching the catalogue file shape (see plugins/crew/catalogue/planner.md for the canonical example), then re-run /crew:hire.
 ```
 
-After emitting the refusal, re-emit the appropriate prompt line for the current mode — the fresh-hire `Approve all, approve a subset (list role ids), decline, or request a specific catalogue role.` line, or the re-entry `Hire one more (specify catalogue role id), unhire <role>, view-persona <role>, or done.` line.
+After emitting the refusal, re-emit the appropriate prompt line for the current mode — the fresh-hire `Approve all, approve a subset (list role ids), decline, or request a specific catalogue role.` line, or the re-entry `Hire one more (specify catalogue role id), unhire {role}, view-persona {role}, or done.` line.
 
 ### Custom-role discovery — every run, both modes
 

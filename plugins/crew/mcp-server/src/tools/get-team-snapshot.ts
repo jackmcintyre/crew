@@ -14,7 +14,7 @@
 
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import { PersonaFileMalformedError } from "../errors.js";
+import { PersonaFileMalformedError, PersonaFileNotFoundError } from "../errors.js";
 import { readTeamTelemetryStats } from "../lib/team-stats.js";
 import {
   TeamSnapshotSchema,
@@ -89,14 +89,9 @@ export async function getTeamSnapshot(
       continue;
     }
 
-    // Must have a PERSONA.md (cheap existence check before readPersona).
-    const personaPath = path.join(teamDir, entry, "PERSONA.md");
-    try {
-      await fs.access(personaPath);
-    } catch {
-      continue;
-    }
-
+    // Candidate role: PERSONA.md existence is verified lazily by readPersona
+    // to avoid a TOCTOU race between an fs.access check and the actual read.
+    // PersonaFileNotFoundError is caught in the per-role try/catch below.
     roleIds.push(entry);
   }
 
@@ -129,6 +124,10 @@ export async function getTeamSnapshot(
           role,
           error: err.message,
         });
+      } else if (err instanceof PersonaFileNotFoundError) {
+        // File was deleted between readdir and readPersona (TOCTOU). Skip with
+        // a warning-level note rather than crashing the entire snapshot.
+        console.warn(`[getTeamSnapshot] persona file for '${role}' vanished mid-snapshot — skipping`);
       } else {
         throw err;
       }

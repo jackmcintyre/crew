@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, type Dirent } from "node:fs";
 import * as path from "node:path";
 import { readRecentCommitTitles } from "../lib/git.js";
 import {
@@ -40,7 +40,16 @@ export async function readRepoSignals(
     .filter((name) => !name.startsWith(".") || name === ".crew")
     .sort();
 
-  const languages = detectLanguagesFromLayout(topLevelLayout);
+  // Primary language scan from top-level entries. If it returns [] (common for
+  // monorepos where manifests live under src/ or packages/), do a depth-1 scan
+  // of immediate subdirectories and retry — capped at one level, no recursion.
+  let languages = detectLanguagesFromLayout(topLevelLayout);
+  if (languages.length === 0) {
+    const subEntries = await collectDepthOneManifests(opts.targetRepoRoot, dirents);
+    if (subEntries.length > 0) {
+      languages = detectLanguagesFromLayout(subEntries);
+    }
+  }
   const dependencyManifests = detectDependencyManifests(topLevelLayout);
 
   const readmePath = path.join(opts.targetRepoRoot, "README.md");
@@ -70,6 +79,34 @@ export async function readRepoSignals(
   };
 
   return RepoSignalsSchema.parse(payload);
+}
+
+/**
+ * Scan immediate subdirectories (depth 1 only) for recognisable manifest
+ * filenames and return a flat list of those filenames. Used as a fallback
+ * when the root scan yields no languages (monorepo with source under src/).
+ * Errors from individual subdirectory reads are silently skipped — this is
+ * a best-effort signal, not a hard requirement.
+ */
+async function collectDepthOneManifests(
+  repoRoot: string,
+  rootDirents: Dirent[],
+): Promise<string[]> {
+  const found: string[] = [];
+  for (const dirent of rootDirents) {
+    if (!dirent.isDirectory()) continue;
+    // Skip hidden directories and the node_modules / .git noise.
+    if (dirent.name.startsWith(".") || dirent.name === "node_modules") continue;
+    try {
+      const children = await fs.readdir(path.join(repoRoot, dirent.name));
+      for (const child of children) {
+        found.push(child);
+      }
+    } catch {
+      // Unreadable subdirectory — skip silently.
+    }
+  }
+  return found;
 }
 
 function isEnoent(err: unknown): boolean {

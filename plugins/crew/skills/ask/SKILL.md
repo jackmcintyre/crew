@@ -21,32 +21,32 @@ If your team is not yet hired, run `/crew:hire` to go through the full hiring co
 
 # Prerequisites
 
-A target repo with the specific `<role>` already hired — i.e. `<target-repo>/team/<role>/PERSONA.md` exists and parses. Created by `/crew:hire` or `/crew:skip-hiring`.
+A target repo with the specific `{role}` already hired — i.e. `{target-repo}/team/{role}/PERSONA.md` exists and parses. Created by `/crew:hire` or `/crew:skip-hiring`.
 
 `.crew/config.yaml` is NOT required. The skill takes `targetRepoRoot` directly; the adapter is not consulted.
 
 # Steps
 
-1. **Parse invocation arguments.** Extract `<role>` (single token, kebab-case role id) and `<question>` (the remaining quoted string) from the slash-command invocation. If `<role>` is empty or `<question>` is empty after parsing, print `Usage: /crew:ask <role> "<question>"` and exit.
+1. **Parse invocation arguments.** Extract `{role}` (single token, kebab-case role id) and `{question}` (the remaining quoted string) from the slash-command invocation. If `{role}` is empty or `{question}` is empty after parsing, print `Usage: /crew:ask {role} "{question}"` and exit.
 
 2. **Identify the target repo root.** Use the current Claude Code workspace root as `targetRepoRoot`. Do NOT call `getStatus` — adapter resolution is not needed.
 
-3. **Verify the role is hired.** Call `readPersona({ targetRepoRoot, role: <role> })`.
-   - If it throws `PersonaFileNotFoundError`, print the following block verbatim (substituting `<role>` with the operator-typed token) and exit:
+3. **Verify the role is hired.** Call `readPersona({ targetRepoRoot, role: {role} })`.
+   - If it throws `PersonaFileNotFoundError`, print the following block verbatim (substituting `{role}` with the operator-typed token) and exit:
      ```
-     crew:ask — role "<role>" is not hired in this repo.
+     crew:ask — role "{role}" is not hired in this repo.
 
      Run /crew:hire to hire a project-shaped team (interactive), or /crew:skip-hiring to hire the default roster (planner, generalist-dev, generalist-reviewer, retro-analyst, orchestrator).
 
      If you meant a different role id, run /crew:team to see your current roster.
      ```
-   - If it throws `PersonaFileMalformedError`, print `crew:ask — persona for "<role>" is malformed: <zod-message>. Open <target-repo>/team/<role>/PERSONA.md and fix the malformation; git revert <persona-path> is the bail-out.` and exit.
+   - If it throws `PersonaFileMalformedError`, print `crew:ask — persona for "{role}" is malformed: {zod-message}. Open {target-repo}/team/{role}/PERSONA.md and fix the malformation; git revert {persona-path} is the bail-out.` and exit.
    - Otherwise capture the persona's `## Prompt` section body.
 
 4. **Assemble the side-session system prompt.** Concatenate:
    - The persona's `## Prompt` body verbatim.
    - A blank line.
-   - The literal `<ask-mode>` block below, with `<question>` substituted by the operator's actual question text:
+   - The literal `<ask-mode>` block below (see code fence), with `{question}` substituted by the operator's actual question text:
 
    ```
    <ask-mode>
@@ -68,16 +68,16 @@ A target repo with the specific `<role>` already hired — i.e. `<target-repo>/t
    </ask-mode>
    ```
 
-5. **Spawn the side-session subagent.** Use the Claude Code `Task` tool. Pass the assembled system prompt and the operator's `<question>` verbatim as the initial user message. The `Task` invocation should carry `_meta.role: "ask-mode"` so the MCP server's permission boundary refuses any canonical-state mutation attempt. Additionally, pass `allowed_tools: <ask-mode-allowed-set>` to the `Task` invocation — where the allowed set is read from `permissions/ask-mode.yaml`'s `tools_allow` plus `"Read"` (see `plugins/crew/docs/ask-mode-enforcement.md` for the enforcement rationale). The ask-mode allowlist permits only read-shaped tools (`getStatus`, `readCatalogue`, `readPersona`, `lookupRoleByDomain`, `readRepoSignals`, `readCustomRole`, `getTeamSnapshot`, `heartbeat`) and a single `gh` subcommand (`pr-view`).
+5. **Spawn the side-session subagent.** Use the Claude Code `Task` tool. Pass the assembled system prompt and the operator's `{question}` verbatim as the initial user message. The `Task` invocation should carry `_meta.role: "ask-mode"` so the MCP server's permission boundary refuses any canonical-state mutation attempt. Additionally, pass `allowed_tools: {ask-mode-allowed-set}` to the `Task` invocation — where the allowed set is read from `permissions/ask-mode.yaml`'s `tools_allow` plus `"Read"` (see `plugins/crew/docs/ask-mode-enforcement.md` for the enforcement rationale). The ask-mode allowlist permits only read-shaped tools (`getStatus`, `readCatalogue`, `readPersona`, `lookupRoleByDomain`, `readRepoSignals`, `readCustomRole`, `getTeamSnapshot`, `heartbeat`) and a single `gh` subcommand (`pr-view`).
 
 6. **Print the subagent's final reply verbatim.** No post-processing. No "the planner says:" prefix. The skill body is a pipe.
 
 # Failure modes
 
 - **Role not hired:** the skill prints the error block from Step 3 and exits. Run `/crew:hire` to hire interactively, or `/crew:skip-hiring` to hire the default roster.
-- **Persona file malformed:** the skill prints a diagnostic naming the path and the Zod issue, and exits. Open the persona file directly (it is plain Markdown per NFR25) and fix the malformation; `git revert <persona-path>` is the bail-out.
-- **Empty `<question>`:** the skill prints the usage line and exits. Re-invoke with a quoted question.
-- **The asked role yields to a different role (locked-phrase yield in its reply):** the yield (`This sits in <role>'s domain — handing off.`) is surfaced as plain text in the printed reply. `/crew:ask` does NOT chain — the operator decides whether to re-invoke `/crew:ask` against the yielded-to role.
-- **Subagent attempts a canonical-state mutation:** the MCP server refuses at the `_meta.role: ask-mode` boundary (`PermissionDeniedError`); the subagent observes the refusal as a tool error and — per the `<ask-mode>` prompt block — surfaces it as plain text in the final reply.
+- **Persona file malformed:** the skill prints a diagnostic naming the path and the Zod issue, and exits. Open the persona file directly (it is plain Markdown per NFR25) and fix the malformation; `git revert {persona-path}` is the bail-out.
+- **Empty `{question}`:** the skill prints the usage line and exits. Re-invoke with a quoted question.
+- **The asked role yields to a different role (locked-phrase yield in its reply):** the yield (`This sits in {role}'s domain — handing off.`) is surfaced as plain text in the printed reply. `/crew:ask` does NOT chain — the operator decides whether to re-invoke `/crew:ask` against the yielded-to role.
+- **Subagent attempts a canonical-state mutation:** the MCP server refuses at the `_meta.role: ask-mode` boundary (`PermissionDeniedError`); the subagent observes the refusal as a tool error and — per the ask-mode prompt block — surfaces it as plain text in the final reply.
 - **Subagent attempts a write-shaped `gh` subcommand (`pr-comment`, `pr-create`, `pr-review`, `pr-close`, `pr-merge`):** the `gh_allow` allowlist refuses; same refusal-surface as above.
 - **`Task` tool does not propagate `_meta.role` to subagent MCP calls:** the `allowed_tools` argument passed to the `Task` invocation (Step 5) serves as a second enforcement layer at the Claude Code tool-surface level — independently of `_meta.role` propagation. See `plugins/crew/docs/ask-mode-enforcement.md` for the propagation investigation record and enforcement rationale.
