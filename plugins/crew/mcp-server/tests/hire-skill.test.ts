@@ -636,7 +636,7 @@ describe("Story 2.4 operator-smoke fix — hiring-manager prompt operating const
     // Defect 1 — re-entry detection step must reference the literal RE-ENTRY
     // mode marker, the team directory path, and the readPersona tool.
     expect(prompt).toContain("RE-ENTRY mode");
-    expect(prompt).toContain(".crew/team");
+    expect(prompt).toContain("team/<role>/PERSONA.md");
     expect(prompt).toContain("readPersona");
 
     // Defect 2 — the five default roles must be listed in the exact

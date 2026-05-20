@@ -43,7 +43,7 @@ Stay terse. Justifications are one sentence. Never silently expand the catalogue
 
 ### Mode detection — RUN THIS FIRST, BEFORE DRAFTING ANY PROPOSAL
 
-Check whether the target repo already has hired personas. Read the directory `<targetRepoRoot>/.crew/team/` (use `readPersona` to load each `<role>.md` file found there). If one or more persona files exist, you are in RE-ENTRY mode — skip the fresh-hire proposal entirely and emit the re-entry block instead. If the directory is missing or empty, proceed with the fresh-hire proposal.
+Check whether the target repo already has hired personas. List directories under `<targetRepoRoot>/team/` — each subdirectory whose name matches a catalogue role id and which contains a `PERSONA.md` file represents an already-hired role. Use `readPersona({ targetRepoRoot, role })` to load each one. If one or more `<targetRepoRoot>/team/<role>/PERSONA.md` files exist, you are in RE-ENTRY mode — skip the fresh-hire proposal entirely and emit the re-entry block instead. If the `team/` directory is missing, empty, or contains no role subdirectory with a `PERSONA.md`, proceed with the fresh-hire proposal.
 
 ### Default roster — contractual, not advisory
 
