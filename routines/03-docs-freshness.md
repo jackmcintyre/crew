@@ -37,11 +37,13 @@ docs *should* say.
 1. **Gather the docs to scan.** Read:
    - `CLAUDE.md` (top-level)
    - `README.md` (top-level)
-   - Every `README.md`, `README-*.md`, and `*.md` directly under
-     `plugins/crew/docs/` and `plugins/crew/`.
+   - Every `*.md` file under `plugins/crew/` (recursive), including
+     `plugins/crew/docs/` and any subdirectories such as
+     `plugins/crew/docs/spikes/`.
    - `routines/README.md` and every file under `routines/`.
 
-   If a path above doesn't exist, just skip it.
+   If a path above doesn't exist, just skip it. Skip `node_modules/`,
+   `dist/`, and any `.claude/skills/bmad-*/` content.
 
 2. **For each doc, extract claims that are checkable.** Specifically:
    - **Path references.** Any string that looks like a file or directory

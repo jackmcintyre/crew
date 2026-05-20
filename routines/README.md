@@ -7,13 +7,12 @@ findings as a GitHub issue.
 ## Why this folder exists
 
 The prompt for each routine lives here as the source of truth. The
-cloud copy (configured via the `RemoteTrigger` API) is the *deployed*
-version. When you want to tune a prompt:
+cloud copy registered with Claude Code's scheduled-trigger system is
+the *deployed* version. When you want to tune a prompt:
 
 1. Edit the file here.
-2. Re-run the routine via Claude Code with the schedule skill, asking
-   it to update the routine from this file. Or open the routine in the
-   web UI and paste the new prompt in directly.
+2. Open the routine in the Claude Code web UI and paste the new prompt
+   in to update the deployed copy.
 3. Commit the edit so the source of truth stays in sync.
 
 Editing the cloud copy without updating the file here will drift —
@@ -33,8 +32,12 @@ fixer that consumes a detector's issues and opens PRs to resolve them.
 | 5 | dist-drift        | Daily 09:00 Sydney | `dist-drift`      | Catches built `dist/` drifting from `src/` overnight                                          |
 | 6 | issue-fixer-docs  | Daily 11:00 Sydney | `auto-fix` (PR)   | Picks up the oldest open `docs-freshness` issue and opens a PR fixing it (or comments if not) |
 
-All times are Australia/Sydney local; the cron expressions in each
-routine's frontmatter are UTC.
+All times above are Australia/Sydney local; the cron expressions in
+each routine's frontmatter are UTC. The crons are currently pinned to
+AEST (UTC+10), so during AEDT (UTC+11, roughly October to April) every
+routine fires one hour later in Sydney than the table claims. Re-shift
+the cron values by an hour at each DST changeover if the schedule
+matters.
 
 ## Conventions
 
