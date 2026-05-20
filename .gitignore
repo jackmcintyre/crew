@@ -10,13 +10,14 @@ _bmad-output/
 .claude/skills/bmad-*/
 
 # ...but track the active planning artifacts (PRD, epics, architecture, etc.)
-# so remote agents and future readers can ground in them. Internal archives
-# stay ignored.
+# so remote agents and future readers can ground in them. Everything else
+# under _bmad-output/ — including the internal archive/ subfolder — stays
+# ignored.
 !_bmad-output/
+_bmad-output/*
 !_bmad-output/planning-artifacts/
 !_bmad-output/planning-artifacts/**
 _bmad-output/planning-artifacts/archive/
-_bmad-output/_archive/
 
 # Claude Code runtime — generated per-session/per-machine, not source
 .claude/scheduled_tasks.lock
