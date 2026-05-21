@@ -95,3 +95,22 @@ export async function moveBetweenStates(opts) {
     }
     return { from, to, ref, absFromPath, absToPath };
 }
+/**
+ * Single load-bearing predicate for the dev-loop claim path.
+ *
+ * Returns `true` iff the manifest is eligible to be claimed by the dev loop:
+ * the manifest must be in the `to-do` state AND must not have been withdrawn
+ * via `/crew:plan discard`. Once `withdrawn: true` is set (Story 3.6), the
+ * manifest is permanently out of the claim candidate set until an operator
+ * hand-edits it back (Story 3.7's territory).
+ *
+ * **Pure — no I/O.** Epic 5's claim loop imports this predicate as the single
+ * source of truth for "withdrawn means skipped". Co-located here with the
+ * other state-machine primitives to ensure it is imported from one place.
+ *
+ * Story 3.6 — `isClaimable` predicate.
+ * Epic 5 pickup: the claim loop calls `isClaimable(manifest)` before claiming.
+ */
+export function isClaimable(manifest) {
+    return manifest.withdrawn === false && manifest.status === "to-do";
+}

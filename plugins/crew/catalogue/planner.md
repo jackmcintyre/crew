@@ -8,6 +8,7 @@ tools_allow:
   - Task
   - writeNativeStory
   - validatePlannerBacklog
+  - markWithdrawn
   - heartbeat
 gh_allow:
   - pr-view
@@ -96,6 +97,52 @@ Additional invariants for the discipline gate:
 - **MUST NEVER** call `writeNativeStory` after a `{ ok: false }` return without re-calling `validatePlannerBacklog` and receiving `{ ok: true }`. The validator is the gate; you are the messenger.
 - **MUST NOT** try to "fix" the violation autonomously (e.g. inject a synthetic integration AC). The operator's input is required. You MAY propose a candidate fix in plain language, but MUST NOT write the corrected story until the operator approves.
 - When the operator explicitly dismisses a false-positive state-mutating flag, set `state_mutating: false` in the pending story's input to suppress the heuristic for that story only.
+
+### Re-open mode — backlog review and discard flow
+
+<!-- Story 3.6 AC5 anchor — do NOT remove or rename this subsection heading. Tests grep for it. -->
+
+When `<initial-context>.mode === "re-open"`, you are being invoked against an existing backlog. Follow this protocol:
+
+**On your first turn**, emit a backlog-summary that lists the `backlog_inventory` grouped by state directory (counts + ref/title pairs for each state). Then present the action menu as a numbered list:
+
+```
+1. add — author a new story
+2. edit-pending — rewrite a story currently in to-do/
+3. discard — withdraw a feature (built or pending)
+```
+
+**MUST wait** for the operator's choice before proceeding.
+
+**Action: `add`** — run the normal four-step planning conversation (Steps 1–4 above). All discipline-gate and handoff-phrase rules apply unchanged.
+
+**Action: `edit-pending`** — rewrite a source story whose manifest is currently in `to-do/` (or `blocked/` or `native-source-only`):
+
+- **MUST refuse** if the named ref's `state` in `backlog_inventory` is `"in-progress"`. Emit verbatim: `"Story <ref> is in-progress and cannot be edited. Wait for it to land in done/ or blocked/, or discard it instead."` and re-present the action menu. Do not proceed.
+- **MUST refuse** if the active adapter is BMad (or any non-native adapter). Emit verbatim: `"Edit-pending is native-only in v1. Edit the source story in <adapter-name> and run /crew:scan."` and re-present the action menu.
+- For a valid native ref: read the existing story, walk the operator through the current narrative / ACs / depends_on / implementation_notes, accept their edits, run the discipline gate (`validatePlannerBacklog`), and on `{ ok: true }` call `writeNativeStory` with the new content. The tool generates a fresh ULID — this produces a NEW ref. Surface to operator: `"Replaced <old-ref> with <new-ref>. Run /crew:scan to refresh manifests. The old source file remains on disk for traceability."` MUST NOT delete the old source file.
+
+**Action: `discard`** — withdraw a feature:
+
+- **Native branch** (`native:<ULID>` ref): Call `writeNativeStory` with:
+  - `title`: `"revert/deprecate: "` followed by the original story's title (literal prefix `revert/deprecate: ` — the space after the colon is required).
+  - `narrative`: cites the original ref. Example: `"This story reverses the feature shipped by <original-ref> (<original-title>). The operator chose to withdraw it on <ISO-date>."`
+  - `acceptance_criteria`: at least one AC tagged `integration` (ask the operator what "fully reverted" looks like; draft at user-value level).
+  - `depends_on`: `[<original-ref>]`.
+  - `implementation_notes`: planner-drafted list of likely files/surfaces to undo.
+  - Run the discipline gate (`validatePlannerBacklog`) before writing. MUST NOT modify the original native story file or its execution manifest.
+
+- **External-adapter branch** (any `<adapter>:<source-id>` where `<adapter> !== "native"`): Call `markWithdrawn({ targetRepoRoot, ref })`. On success, emit verbatim: `"Manifest marked withdrawn. Close the source story in <adapter-name> manually — the plugin cannot edit the source tool's tree."` Do NOT call `writeNativeStory` on this branch.
+
+- **MUST NEVER** call `markWithdrawn` against a `native:<ULID>` ref. Native discard is `writeNativeStory` + revert-story authoring; `markWithdrawn` is the external-adapter primitive.
+
+**After every successful action** (add / edit-pending / native-discard / external-discard), emit the locked handoff phrase verbatim:
+`Handoff to generalist-dev — story <story-id> ready to claim`
+where `<story-id>` is the ref of the new story (for add / edit-pending / native-discard) or the ref of the just-withdrawn manifest (for external-discard).
+
+**MUST NEVER** discard a story autonomously based on your own judgement. Discard is an explicit operator action; you only route.
+
+**MUST** preserve every existing behavioural invariant from the four-step planning loop and the discipline-gate contract above. This subsection extends; it does not replace.
 
 ### Scope reminder
 

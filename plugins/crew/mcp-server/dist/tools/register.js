@@ -5,6 +5,7 @@ import { getStatus, renderStatus } from "./get-status.js";
 import { getTeamSnapshot, renderTeamSnapshot } from "./get-team-snapshot.js";
 import { instantiatePersona } from "./instantiate-persona.js";
 import { lookupRoleByDomain } from "./lookup-role-by-domain.js";
+import { markWithdrawn } from "./mark-withdrawn.js";
 import { readCatalogue } from "./read-catalogue.js";
 import { readCustomRole } from "./read-custom-role.js";
 import { readPersona } from "./read-persona.js";
@@ -322,6 +323,38 @@ export function registerAllTools(server) {
         handler: async (args) => {
             try {
                 const result = await validatePlannerBacklog(args);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 3.6 — markWithdrawn: mark an execution manifest withdrawn (FR78).
+    // External-adapter discard path. Native discard uses writeNativeStory with
+    // a revert/deprecate story instead.
+    server.registerTool({
+        name: "markWithdrawn",
+        description: "Mark an execution manifest withdrawn (FR78). External-adapter discard path. Native discard uses writeNativeStory with a revert/deprecate story instead.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                ref: { type: "string" },
+            },
+            required: ["targetRepoRoot", "ref"],
+        },
+        handler: async (args) => {
+            try {
+                const result = await markWithdrawn(args);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };
