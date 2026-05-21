@@ -155,6 +155,40 @@ Story 3.6 introduces a first-class discard flow accessible from `/crew:plan` on 
 
 **Confirming a withdrawal landed:** Inspect the manifest under `.crew/state/<state>/<ref>.yaml` and check for the `withdrawn: true` field. Once set, the dev loop's claim path skips the manifest automatically — it will never be picked up for implementation unless you hand-edit the field back.
 
+## Editing stories on disk (FR14)
+
+You can open any execution manifest in a text editor and change it directly. This is the v1 hand-edit contract.
+
+**Where hand-edits are allowed:** any `.yaml` file under `<target-repo>/.crew/state/to-do/` or `<target-repo>/.crew/state/blocked/`. Plugin skills MUST honour your edits on the next invocation — your bytes are the source of truth until the source story's content changes.
+
+**Fields you may edit:**
+
+| Field | What it controls |
+|---|---|
+| `title` | The story's display name. |
+| `narrative` | The "as a user…" paragraph. |
+| `acceptance_criteria` | The list of success conditions (each has `text` and `kind`). |
+| `implementation_notes` | Free-text guidance for the developer. |
+| `depends_on` | The list of refs this story must come after. |
+| `withdrawn` | Set `true` to manually withdraw the story from the backlog. |
+
+**What happens on the next `/crew:scan`:** If the source story's content has not changed since the last scan, your edited values are preserved — `scan-sources` detects no change to the source hash and leaves the manifest untouched. If the source story's content has changed (its fingerprint differs), `scan-sources` rewrites only the `source_hash` and `source_path` fields; your edits to `title`, `narrative`, `acceptance_criteria`, `implementation_notes`, `depends_on`, and `withdrawn` are preserved.
+
+**Schema-violating edits:** If your edit produces invalid YAML (for example, you remove the `title` field, which is required), the next plugin skill invocation that reads the manifest will surface a `MalformedExecutionManifestError` with the path to the offending field. Fix the YAML in your editor and re-run the skill.
+
+**Where hand-edits are NOT allowed:** `.yaml` files under `<target-repo>/.crew/state/in-progress/` are read-only for operators in v1. Once the dev loop has claimed a story (moved it to `in-progress/`), the plugin owns those bytes. The next skill invocation (`/crew:status`, `/crew:plan`, or any future tool that acts on the in-progress layer) will detect the edit and refuse to proceed with this message:
+
+```
+Refusing: <ref> in in-progress/ has been hand-edited (fields: <comma-separated field names>). v1 does not support editing stories mid-flight. Wait for the story to land in done/ or blocked/, or discard it via /crew:plan.
+```
+
+Your options when you see this refusal:
+
+1. **Wait** for the dev loop to finish the story — it will land in `done/` or `blocked/`, at which point you can edit freely again.
+2. **Discard** the story via `/crew:plan` (the discard flow from Story 3.6). This withdraws the manifest cleanly without a hand-edit.
+
+Manifests in `<target-repo>/.crew/state/done/` may be hand-edited without any plugin refusal — `done/` is the terminal state in v1 and no future tool transitions out of it.
+
 ## Build artefacts
 
 `plugins/crew/mcp-server/dist/` is **committed to git by design** (Story 1.9). `/plugin install` copies the working tree as-is and does not run a build step, so the compiled MCP server must already be present in the tree.

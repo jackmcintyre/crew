@@ -532,6 +532,34 @@ export class WrongAdapterError extends DomainError {
     }
 }
 /**
+ * An execution manifest at `<target-repo>/.crew/state/in-progress/<ref>.yaml`
+ * was found to have been hand-edited after it was claimed by the dev loop.
+ * Thrown by `detectInProgressHandEdit` when the on-disk manifest's
+ * operator-editable fields or `source_hash` differ from the canonical values
+ * at scan-time.
+ *
+ * This is a hard refusal: the caller MUST surface this to the operator and
+ * MUST NOT proceed with any operation on the manifest. The operator's options
+ * are: wait for the story to land in `done/` or `blocked/`, or use
+ * `/crew:plan` to discard the story (Story 3.6 flow).
+ *
+ * See Story 3.7, FR14 (second half — "orchestration surfaces the violation in v1").
+ */
+export class InProgressHandEditError extends DomainError {
+    ref;
+    changedFields;
+    absPath;
+    constructor(opts) {
+        const fieldList = [...opts.changedFields].sort().join(", ");
+        super(`Refusing: ${opts.ref} in in-progress/ has been hand-edited (fields: ${fieldList}). ` +
+            `v1 does not support editing stories mid-flight. ` +
+            `Wait for the story to land in done/ or blocked/, or discard it via /crew:plan.`);
+        this.ref = opts.ref;
+        this.changedFields = opts.changedFields;
+        this.absPath = opts.absPath;
+    }
+}
+/**
  * `readPersona` was asked for a role whose persona file does not
  * exist under `<target-repo>/team/<role>/PERSONA.md`. (Story 2.3)
  */
