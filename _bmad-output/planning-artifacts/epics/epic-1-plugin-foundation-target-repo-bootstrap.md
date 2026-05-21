@@ -252,4 +252,28 @@ So that I don't hit "the docs said I'd see X, but Claude Code showed me a UI pan
 
 **AC4 (smoke + integration):** the story flows through Story 1.8's new smoke gate. The gate's `user_surface_verified` event records Jack (or an operator) running each README command verbatim in a real Claude Code session, pasting the observed UI/toast/output for each step, and confirming match-vs-mismatch with the rewritten copy. Any mismatch fails the gate; the README must be edited until reality and copy agree. vitest additionally asserts `docs/README-install.md` parses as valid Markdown and every internal link resolves.
 
+## Story 1.11: Dev-install loop — make plugin changes visible without a daemon restart
+
+As an engineer iterating on the crew plugin,
+I want a one-command dev-install path that makes my local changes (worktree or main) visible to a fresh Claude Code session without manual `/plugin uninstall` + reinstall dances or file-overlay hacks into `~/.claude/plugins/cache/...`,
+So that every future `story_shape: user-surface` story can actually pass its smoke gate end-to-end instead of being shipped via the automated-route escape hatch.
+
+**Context:** Discovered the hard way during Story 3.2 (PR #90). The current install path resolves `crew@crew` to a copy of `/Users/<user>/projects/crew/` (main branch) under `~/.claude/plugins/cache/crew/crew/0.1.0/`. Changes on a feature branch in a worktree are invisible until a manual reinstall — and reinstall wipes any file overlays. Worse, Claude Code's plugin daemon caches the skill index across sessions, so even after a correct file is in the cache, `/reload-plugins` doesn't re-scan; only killing the daemon (or a full Claude Code restart) does. The result: the pre-PR user-surface gate could not be satisfied for `/crew:scan` on 3.2, and the story shipped via the automated-route fallback with a known evidence gap. Every subsequent user-surface story (3.5, 3.6, 4.x slash commands, …) will hit the same wall until this is fixed.
+
+**Acceptance Criteria:**
+
+**Given** a working tree on any branch (main or worktree) with local plugin changes (modified `skills/`, `mcp-server/src/`, or `mcp-server/dist/`), **When** I run a single documented dev-install command from the repo root (e.g. `pnpm dev:install` — exact name TBD by spec), **Then** the installed plugin cache at `~/.claude/plugins/cache/crew/crew/<version>/` reflects the current working-tree state (skills, dist, catalogue) — verifiable by `diff -r` between source and cache, or a sentinel substring assertion.
+
+**Given** the dev-install has run, **When** a fresh Claude Code session is launched in this repo, **Then** the slash-command picker lists every skill present under `plugins/crew/skills/` (including any new ones added since the last "real" `/plugin install`) — i.e. the daemon's skill-index cache no longer masks the new state. _(The mechanism — daemon kill, cache-invalidation file, symlink trick, or whatever the spec chooses — is an implementation detail.)_
+
+**Given** the dev-install is re-run twice in a row with no source changes, **When** I observe the cache state and any side effects (daemon restarts, file mtimes), **Then** the second run is a no-op (idempotent) — no destructive re-copy, no daemon thrash unless the source actually changed.
+
+**Given** the dev-install fails partway (e.g. uncommitted changes in a state the script doesn't trust, or the daemon refuses to restart), **When** the script exits, **Then** it exits non-zero with a clear human-readable error and the cache is left in a recoverable state — never silently broken.
+
+**Given** the repo's `docs/README-install.md` (operator-facing) and a new engineer-facing dev-loop doc, **When** an engineer reads either doc, **Then** the production install path (`/plugin install crew@crew`) and the new dev-install path are clearly distinguished, with one short paragraph explaining when to use which.
+
+**AC6 (deterministic content-structure anchor):** vitest assertion that the dev-install script file exists at the documented path, is executable, and contains the substring identifying its core mechanism (e.g. `~/.claude/plugins/cache/crew/crew` — proving the script targets the right cache location). Plus: the engineer-facing dev-loop doc contains the substring naming the script command (e.g. `pnpm dev:install`) so docs and reality stay in sync.
+
+**AC7 (integration):** vitest scenario that, given a temp source dir simulating a worktree and a temp cache dir simulating `~/.claude/plugins/cache/`, the dev-install script (a) populates the cache from the source, (b) running it again with no changes is a no-op (mtime preserved on key files), (c) running it after editing a `skills/<x>/SKILL.md` propagates only that file. The actual Claude Code daemon interaction is out of scope for vitest — that part is verified by the story's user-surface smoke gate.
+
 ---
