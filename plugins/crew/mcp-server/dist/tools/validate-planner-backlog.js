@@ -103,34 +103,41 @@ export async function validatePlannerBacklog(rawInput) {
     }
     // Backlog-level ship-gate check.
     // Read already-on-disk native stories to include in the ship-gate search.
+    // If listing fails we proceed with an empty existing-stories list (best-effort)
+    // so that per-story violations already accumulated are not discarded. The I/O
+    // error is recorded as a detail on the missing-ship-gate violation that the
+    // backlog check will produce (if no ship-gate story exists in the pending batch
+    // alone), giving the operator enough context to diagnose the problem.
     let existingStories = [];
+    let listStoriesErrorDetail;
     try {
         existingStories = await workspace.activeAdapter.listSourceStories();
     }
     catch (err) {
         const errMessage = err instanceof Error ? err.message : String(err);
         console.error(`[validatePlannerBacklog] Could not list existing stories: ${errMessage}`);
-        return {
-            ok: false,
-            violations: [
-                {
-                    kind: "discipline-violation",
-                    ref: `backlog:${createHash("sha256").update(targetRepoRoot).digest("hex").slice(0, 8)}`,
-                    violations: [
-                        {
-                            code: "missing-ship-gate",
-                            field: "backlog",
-                            detail: `Could not list existing stories: ${errMessage}`,
-                        },
-                    ],
-                },
-            ],
-        };
+        listStoriesErrorDetail = `Could not list existing stories: ${errMessage}; ship-gate check skipped for on-disk stories`;
+        // Continue with existingStories = [] — best-effort behaviour that preserves
+        // per-story violations already collected above.
     }
     const backlogViolations = validateBacklogAgainstDiscipline(pendingStories, {
         existingStories,
         backlogPseudoRef: `backlog:${createHash("sha256").update(targetRepoRoot).digest("hex").slice(0, 8)}`,
     });
+    // If listing on-disk stories failed, annotate any missing-ship-gate violation
+    // with the I/O error context so the operator understands why the check may be
+    // incomplete. If no missing-ship-gate violation was produced (pending batch
+    // already contains a ship-gate story), no annotation is needed.
+    if (listStoriesErrorDetail !== undefined) {
+        for (const v of backlogViolations) {
+            for (const r of v.violations) {
+                if (r.code === "missing-ship-gate") {
+                    r.detail =
+                        `${r.detail} (Note: ${listStoriesErrorDetail})`;
+                }
+            }
+        }
+    }
     allViolations.push(...backlogViolations);
     if (allViolations.length === 0) {
         return { ok: true };

@@ -147,6 +147,41 @@ export async function scanSources(opts) {
         blockedRefs: [],
     };
     const stateRoot = path.join(targetRepoRoot, ".crew", "state");
+    // Startup guard: resolve any refs that appear in both to-do/ and blocked/
+    // simultaneously. This can occur if a previous blocked→to-do promotion wrote
+    // the to-do manifest successfully but the subsequent unlink of the blocked
+    // manifest failed (non-atomic write sequence). When both exist, to-do/ wins —
+    // delete the stale blocked/ manifest and log a warning so the operator is
+    // aware of the recovery. This guard prevents the inconsistency from persisting
+    // across subsequent scans.
+    {
+        const toDoDir = path.join(stateRoot, "to-do");
+        const blockedDir = path.join(stateRoot, "blocked");
+        let toDoFiles = [];
+        let blockedFiles = [];
+        try {
+            toDoFiles = await fs.readdir(toDoDir);
+        }
+        catch {
+            // Directory may not exist yet on a fresh repo — not an error.
+        }
+        try {
+            blockedFiles = await fs.readdir(blockedDir);
+        }
+        catch {
+            // Directory may not exist yet on a fresh repo — not an error.
+        }
+        const toDoRefs = new Set(toDoFiles.filter((f) => f.endsWith(".yaml")).map((f) => f.slice(0, -5)));
+        for (const blockedFile of blockedFiles) {
+            if (!blockedFile.endsWith(".yaml"))
+                continue;
+            const ref = blockedFile.slice(0, -5);
+            if (toDoRefs.has(ref)) {
+                console.warn(`[scanSources] Ref ${ref} exists in both to-do/ and blocked/ — recovering by removing stale blocked/ manifest (to-do/ wins).`);
+                await fs.unlink(path.join(blockedDir, blockedFile));
+            }
+        }
+    }
     // Step 3 + 4 + 5: For each story, check presence map, validate discipline,
     // then branch on create/blocked-create/update/unchanged/skip.
     //
@@ -197,6 +232,11 @@ export async function scanSources(opts) {
             const disciplineResult = activeAdapter.validateAgainstDiscipline(story);
             if (!("kind" in disciplineResult) || disciplineResult.kind !== "discipline-violation") {
                 // Story now passes discipline — promote from blocked/ to to-do/.
+                // NOTE: This sequence is non-atomic: the to-do/ manifest is written
+                // first, then the blocked/ manifest is deleted. If the unlink fails
+                // (e.g. a mid-flight crash or permission error), both manifests will
+                // exist simultaneously. The startup guard above detects and recovers
+                // this state on the next scan (to-do/ wins, blocked/ is deleted).
                 const absToDoPathNew = path.join(stateRoot, "to-do", `${story.ref}.yaml`);
                 const manifest = composeManifest(story, activeAdapterName, targetRepoRoot);
                 const yamlText = yamlStringify(manifest, { lineWidth: 0 });

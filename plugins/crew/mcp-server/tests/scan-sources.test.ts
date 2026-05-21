@@ -338,6 +338,59 @@ describe("AC4 (Story 3.5) — scan-sources blocked manifest on discipline violat
     expect(mtimeAfter).toBe(mtimeBefore);
   });
 
+  it("path (c): source changed AND validator still fails — blocked manifest is rewritten with new hash and violations", async () => {
+    // First scan — creates the blocked manifest with the original source_hash.
+    await scanSources({ targetRepoRoot: disciplineScratch });
+
+    const blockedPath = path.join(disciplineScratch, ".crew", "state", "blocked", "bmad:2.1.yaml");
+    const toDoPath = path.join(disciplineScratch, ".crew", "state", "to-do", "bmad:2.1.yaml");
+
+    const rawAfterFirstScan = await fs.readFile(blockedPath, "utf8");
+    const manifestAfterFirstScan = yamlParse(rawAfterFirstScan) as Record<string, unknown>;
+    const originalBlockedHash = manifestAfterFirstScan["source_hash"] as string;
+
+    // Edit the source story to change its hash — but keep it discipline-violating
+    // (still state-mutating with no integration AC).
+    const storyPath = path.join(
+      disciplineScratch,
+      "_bmad-output",
+      "planning-artifacts",
+      "stories",
+      "2-1-state-mutating-no-integration.md",
+    );
+    const original = await fs.readFile(storyPath, "utf8");
+    // Append a comment to change the content (still no integration AC → still fails).
+    const edited = original + "\n<!-- narrative updated, still missing integration AC -->\n";
+    await fs.writeFile(storyPath, edited, "utf8");
+
+    const newExpectedHash = createHash("sha256").update(edited).digest("hex");
+    expect(newExpectedHash).not.toBe(originalBlockedHash); // Sanity: hash must differ.
+
+    // Second scan — validator re-runs (source hash changed), story still fails.
+    const result2 = await scanSources({ targetRepoRoot: disciplineScratch });
+
+    // (i) The blocked manifest's source_hash must be updated to the new hash.
+    const rawAfterSecondScan = await fs.readFile(blockedPath, "utf8");
+    const manifestAfterSecondScan = yamlParse(rawAfterSecondScan) as Record<string, unknown>;
+    expect(manifestAfterSecondScan["source_hash"]).toBe(newExpectedHash);
+
+    // (ii) discipline_violations must reflect the latest validator output (still non-empty).
+    const violations = manifestAfterSecondScan["discipline_violations"] as Array<{
+      code: string;
+      field: string;
+      detail: string;
+    }>;
+    expect(Array.isArray(violations)).toBe(true);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations.some((v) => v.code === "missing-integration-ac")).toBe(true);
+
+    // (iii) The ref appears in blockedRefs.
+    expect(result2.blockedRefs).toContain("bmad:2.1");
+
+    // (iv) No to-do/ manifest was written.
+    await expect(fs.stat(toDoPath)).rejects.toThrow();
+  });
+
   it("AC4 — fix-then-rescan: fixing blocked story deletes blocked manifest and writes to-do/ manifest", async () => {
     // First scan — creates the blocked manifest.
     await scanSources({ targetRepoRoot: disciplineScratch });
