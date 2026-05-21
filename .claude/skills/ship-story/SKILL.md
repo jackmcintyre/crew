@@ -265,11 +265,36 @@ The gate resolves the spec path in order: `--spec-path <p>` flag if provided (te
    ```bash
    $SH record-verification <story_key> --type automated_e2e_verified --data '{"ac_refs":[<n>,...],"test_path":"<path>","test_command":"<cmd>"}'
    ```
-2. **Operator-smoke route.** If the surface is a slash command, an install path, or any Claude Code TUI behaviour that has no programmatic driver, prompt the operator (Jack) to run the surface in a real Claude Code session and paste verbatim output back to you. Then record:
+2. **Operator-smoke route.** If the surface is a slash command, an install path, or any Claude Code TUI behaviour that has no programmatic driver, you (orchestrator) MUST set up the smoke environment for Jack — do not just ask him to "run it somewhere." The setup is small but specific:
+
+   **a. Mint a scratch target repo** with whatever `.crew/config.yaml` the AC needs. Example for `adapter: native`:
+   ```bash
+   SCRATCH=$(mktemp -d -t crew-smoke-XXXX)
+   mkdir -p "$SCRATCH/.crew"
+   printf 'adapter: native\n' > "$SCRATCH/.crew/config.yaml"
+   git -C "$SCRATCH" init -q
+   # initial commit so HEAD resolves (avoids `git rev-parse failed` noise in the planner):
+   git -C "$SCRATCH" commit --allow-empty -q -m 'init'
+   echo "$SCRATCH"
+   ```
+
+   **b. Launch Claude Code against the worktree's plugin via `--plugin-dir`** — NOT via the dev-install symlink, NOT via `/plugin install`. The `--plugin-dir` flag is Anthropic's officially-blessed dev workflow (`Load a plugin from a directory or .zip for this session only`); it bypasses the marketplace cache that gets nuked on Claude Code restart. Give Jack the exact invocation:
+   ```sh
+   cd $SCRATCH
+   claude --plugin-dir /Users/jackmcintyre/projects/crew/.worktrees/<story_key>/plugins/crew
+   ```
+
+   **Do NOT recommend `pnpm dev:install` or symlink dancing here.** Story 1.11's symlink approach works once but gets deleted on every Claude Code restart by the plugin healer (it sees a symlink where it expects a directory-copy install and removes it). See `anthropics/claude-code` issues [#17361](https://github.com/anthropics/claude-code/issues/17361) and [#23819](https://github.com/anthropics/claude-code/issues/23819) for the underlying mechanism, and PR #94's retro comment for the trace.
+
+   **c. Tell Jack what to run and what to paste back.** Be specific about which slash command, what input, and what verbatim output to capture (planner messages, file contents, error text, etc.). One paragraph max.
+
+   **d. After Jack pastes back, record:**
    ```bash
    $SH record-verification <story_key> --type user_surface_verified --data '{"ac_refs":[<n>,...],"operator":"jack","observations":[{"ac_ref":<n>,"pasted_output":"<verbatim>"},...]}'
    ```
-   `record-verification` schema-validates the payload at write time; on schema failure it exits 2 and refuses to append. After a successful write, re-run `$SH pre-pr-gate <story_key>` — the loop terminates because the operator either provides evidence or aborts the story.
+   `record-verification` schema-validates the payload at write time; on schema failure it exits 2 and refuses to append. After a successful write, re-run `$SH pre-pr-gate <story_key>`.
+
+   **e. Tear down the scratch repo as part of cleanup messaging:** include `rm -rf $SCRATCH` in your end-of-story summary so Jack can wipe it after merge. `ship.py cleanup` does not touch scratch dirs.
 
 **Dog-fooding clause for Story 1.8 itself.** Story 1.8 introduces this gate AND has one `user-surface` AC (AC1 — it touches `bmad-create-story`). The orchestrator (not the dev agent) is responsible for: invoking `bmad-create-story` in a real Claude Code session against a throwaway story idea after dev sign-off, confirming the skill prompts for `user-surface` tagging per AC, capturing the verbatim output, and writing it via `record-verification` against story key `1-8-user-surface-ac-type-and-smoke-gate-in-ship-story`. Story 1.10 is the first non-self-referential production user.
 
@@ -324,24 +349,40 @@ When CI is green, record:
 $SH record <story_key> ci_green
 ```
 
-### Step 11 — Summarise
+### Step 11 — Retro comment + summarise
 
-First, render any reviewer-flagged issues (even ones the reviewer approved-with-notes — these are easy to lose between merge and the next story):
+**Step 11a — Post the retro comment on the PR (mandatory, every story).** Telling the user "remember to post a retro" doesn't work — the retro evaporates between merge and the next sprint (#80 lesson). The orchestrator posts the comment directly via `gh pr comment` so it lives in the PR's permanent record.
 
-```bash
-$SH reviewer-issues <story_key>
-```
+1. Gather the inputs:
+   ```bash
+   $SH reviewer-issues <story_key>
+   ```
+2. Compose the body and write to `/tmp/ship-<story_key>.retro.md`. The body MUST include:
+   - **Header:** `## Ship-story retro` (level-2; PR comments don't get TOCs).
+   - **Run stats line:** `Review passes: N of <budget> · CI passes: M of 3 · Run log: .claude/skills/ship-story/.runs/<story_key>.jsonl`.
+   - **Reviewer notes (shipped anyway):** verbatim output of `$SH reviewer-issues`. If the script lists items addressed in a later rework pass (the script dumps *all* recorded issues, including resolved ones), annotate each item inline with `_(resolved in <sha>)_` or `_(unresolved — Info-only, shipped)_` so the merged record is honest. Omit the heading if the tool's output is empty.
+   - **For `story_shape: user-surface`:** a **Smoke observations** subsection summarising what was observed during the operator-smoke pass (pulled from `user_surface_verified` events in the run log) — prompt-level surprises, stub-vs-real gaps, behavioural-contract drift, anything the reviewer wouldn't have caught from static analysis. Omit the subsection if there are no notable observations.
+   - **Process gotchas (this run only):** anything that bit the orchestrator during *this* execution that would bite future runs — e.g. `cd`-leak that put a record in the wrong path, a broken dev-loop, a misconfigured marketplace install. Two or three lines, no more. Omit the subsection if nothing of note happened.
+   - **Follow-ups proposed (if any):** bullets of new stories or fixes this run surfaced, with one-line justification. Omit the subsection if none.
+3. Post the comment:
+   ```bash
+   gh pr comment <pr_number> --body-file /tmp/ship-<story_key>.retro.md
+   ```
+   Run from the main repo cwd (not the worktree — `gh` resolves the repo from cwd's git remote, and the main repo's remote is the right one). Capture the returned comment URL.
+4. Record:
+   ```bash
+   $SH record <story_key> retro_posted --data '{"comment_url":"..."}'
+   ```
 
-If the output is non-empty, include it in the summary under a **Reviewer notes (shipped anyway)** heading so Jack can decide whether to log a follow-up before forgetting. Empty output → omit the heading.
+If `gh pr comment` fails (network, auth, etc.), halt with `RETRO_POST_FAILED`, surface stderr, and do NOT proceed to the chat summary — the retro is the audit trail; a quiet skip undermines its whole purpose. Jack can retry the post after fixing the underlying issue.
 
-Then tell the user, in 2-3 sentences plus the optional notes block:
+**Step 11b — Summarise to the user.** 2-3 sentences max:
 - which story shipped + PR URL
 - review passes consumed (`N of <budget>`, where `<budget>` comes from `$SH review-budget <spec_path>`) and CI passes consumed (`M of 3`)
-- where the run log lives (for replay/debug)
-- reviewer notes block (if any — see above)
+- retro comment URL (from Step 11a)
 - one-line reminder: "Tell me when you've merged and I'll clean up."
-- **If `story_shape: user-surface`:** add a visible TODO block:
-  > **TODO (before closing this story):** Post a retro comment on PR #<n> noting any prompt-level surprises, stub-vs-real gaps caught in review, or behavioural contract violations observed during smoke testing. The story isn't considered fully closed until this comment exists. (#80 lesson: retro observations on user-surface stories were lost between merge and the next sprint.)
+
+Do NOT re-render the reviewer notes block in the chat summary — they're now in the PR retro comment, which is the durable surface. The chat summary is ephemeral; the retro is the record.
 
 ### Step 12 — Post-merge cleanup (conversational trigger)
 
@@ -408,6 +449,7 @@ The skill halts (no PR) on any of these. Each is recorded in the run log before 
 | `AC_VERIFICATION_FAILED` | One or more ACs not green, or QA left uncommitted files | Fix the failing AC's code/test (or commit the QA artefact); rerun from Step 8 |
 | `CI_BLOCKED` | 3 CI-fix passes elapsed and required checks still failing | Jack decides: iterate manually on the PR, or `/bmad-correct-course` |
 | `CI_TIMEOUT` | CI didn't settle within 15min poll cap | Re-run Step 10 once checks complete |
+| `RETRO_POST_FAILED` | `gh pr comment` failed in Step 11a (network / auth / etc.) | Fix the underlying issue and re-run Step 11a manually; the retro body is at `/tmp/ship-<story_key>.retro.md` |
 
 ## Resume after halt
 

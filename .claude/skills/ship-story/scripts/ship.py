@@ -53,7 +53,26 @@ except ImportError:
     sys.exit(2)
 
 # scripts/ship.py → ship-story/scripts/ship.py → ship-story/ → skills/ → .claude/ → repo
-REPO = Path(__file__).resolve().parents[4]
+_RAW_REPO = Path(__file__).resolve().parents[4]
+
+
+def _canonical_repo(p: Path) -> Path:
+    # Worktrees check out their branch under <repo>/.worktrees/<key>/ and
+    # therefore carry a copy of this script at the same relative path. When
+    # ship.py is invoked via a relative path from inside a worktree,
+    # Path(__file__).resolve() points at the worktree's copy, and run-log
+    # writes land in <worktree>/.claude/skills/ship-story/.runs/ instead of
+    # the canonical .runs/ — breaking pending-cleanup, the pre-PR gate, and
+    # any other reader of the run log. Walk up to the ancestor above
+    # .worktrees so REPO is invocation-path-agnostic. See PR #94 retro.
+    parts = p.parts
+    if ".worktrees" in parts:
+        idx = parts.index(".worktrees")
+        return Path(*parts[:idx])
+    return p
+
+
+REPO = _canonical_repo(_RAW_REPO)
 STATUS_FILE = REPO / "_bmad-output/implementation-artifacts/sprint-status.yaml"
 EPICS_DIR = REPO / "_bmad-output/planning-artifacts/epics"
 # Tests override the runs dir via CREW_SHIP_RUNS_DIR. Resolved at call time
@@ -576,7 +595,7 @@ def cmd_cleanup(args) -> None:
 
     # 6. tidy /tmp artefacts
     removed = []
-    for suffix in (".resolve.json", ".acs.json", ".body.md"):
+    for suffix in (".resolve.json", ".acs.json", ".body.md", ".retro.md"):
         f = Path(f"/tmp/ship-{key}{suffix}")
         if f.exists():
             f.unlink()
