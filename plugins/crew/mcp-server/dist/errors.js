@@ -560,6 +560,44 @@ export class InProgressHandEditError extends DomainError {
     }
 }
 /**
+ * `claimStory` refused because one or more `depends_on` refs are not yet in
+ * `done/`. The calling session must wait for the listed dependencies to
+ * complete before the ref can be claimed.
+ *
+ * FR18 — dependency check at claim time (Story 4.1).
+ * Message format mirrors `GitCommitMessageMalformedError`'s `<tool-name> refused: <reason>`.
+ */
+export class DependenciesNotReadyError extends DomainError {
+    ref;
+    missingDeps;
+    constructor(opts) {
+        super(`claim-story refused: '${opts.ref}' depends on refs not yet in done/: [${opts.missingDeps.join(", ")}]. ` +
+            `Wait for these stories to complete, or remove them from depends_on via the source story.`);
+        this.ref = opts.ref;
+        this.missingDeps = opts.missingDeps;
+    }
+}
+/**
+ * `completeStory` refused because the calling session's ULID does not match
+ * the `claimed_by` field on the `in-progress/` manifest. Only the session
+ * that claimed the story may complete it.
+ *
+ * Story 4.1 AC4.
+ */
+export class WrongClaimantError extends DomainError {
+    ref;
+    expectedSessionUlid;
+    actualSessionUlid;
+    constructor(opts) {
+        super(`complete-story refused: '${opts.ref}' was claimed by session '${opts.actualSessionUlid}' ` +
+            `but the caller's session is '${opts.expectedSessionUlid}'. ` +
+            `Only the claiming session may complete a story.`);
+        this.ref = opts.ref;
+        this.expectedSessionUlid = opts.expectedSessionUlid;
+        this.actualSessionUlid = opts.actualSessionUlid;
+    }
+}
+/**
  * `readPersona` was asked for a role whose persona file does not
  * exist under `<target-repo>/team/<role>/PERSONA.md`. (Story 2.3)
  */

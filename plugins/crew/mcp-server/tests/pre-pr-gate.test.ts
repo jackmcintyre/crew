@@ -29,7 +29,7 @@ async function runGate(caseDir: string, storyKey: string) {
     "python3",
     [SHIP_PY, "pre-pr-gate", storyKey, "--spec-path", specPath],
     {
-      env: { ...process.env, CREW_SHIP_RUNS_DIR: runsDir },
+      env: { ...process.env, CREW_SHIP_RUNS_DIR: runsDir, CREW_SHIP_SKIP_CWD_CHECK: "1" },
       reject: false,
     },
   );
@@ -54,7 +54,7 @@ describe("ship.py pre-pr-gate (Story 1.8 AC4)", () => {
     const r = await execa(
       "python3",
       [SHIP_PY, "pre-pr-gate", "case-i-missing", "--spec-path", specPath],
-      { env: { ...process.env, CREW_SHIP_RUNS_DIR: emptyRunsDir }, reject: false },
+      { env: { ...process.env, CREW_SHIP_RUNS_DIR: emptyRunsDir, CREW_SHIP_SKIP_CWD_CHECK: "1" }, reject: false },
     );
     expect(r.exitCode).toBe(EXIT_USER_SURFACE_UNVERIFIED);
     expect(r.stderr).toMatch(/Missing user-surface verification/);
@@ -89,7 +89,7 @@ describe("ship.py pre-pr-gate (Story 1.8 AC4)", () => {
     const r = await execa(
       "python3",
       [SHIP_PY, "pre-pr-gate", "case-iii-no-surface", "--spec-path", specPath],
-      { env: { ...process.env, CREW_SHIP_RUNS_DIR: emptyRunsDir }, reject: false },
+      { env: { ...process.env, CREW_SHIP_RUNS_DIR: emptyRunsDir, CREW_SHIP_SKIP_CWD_CHECK: "1" }, reject: false },
     );
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout);
@@ -135,7 +135,7 @@ describe("ship.py record-verification (Story 1.8 Task 4.3)", () => {
         "--data",
         data,
       ],
-      { env: { ...process.env, CREW_SHIP_RUNS_DIR: runsDir }, reject: false },
+      { env: { ...process.env, CREW_SHIP_RUNS_DIR: runsDir, CREW_SHIP_SKIP_CWD_CHECK: "1" }, reject: false },
     );
     expect(r.exitCode).toBe(2);
     expect(r.stderr).toContain("MalformedVerificationEvent");

@@ -2,22 +2,30 @@ import { z } from "zod";
 /**
  * Zod schema for execution manifests.
  *
- * **Producer:** `scan-sources.ts` is the only writer that creates manifests.
+ * **Producer:** `scan-sources.ts` creates manifests; Story 4.1 adds two more:
  *   - New source stories → `to-do/<ref>.yaml` with `status: "to-do"`.
  *   - Discipline violations → `blocked/<ref>.yaml` with `status: "blocked"`
  *     and the `blocked_by` / `discipline_violations` fields populated
  *     (Story 3.5 Task 6.2).
+ *   - `claimStory` writes `"in-progress"` on the `to-do → in-progress`
+ *     transition (Story 4.1 FR17).
+ *   - `completeStory` writes `"done"` on the `in-progress → done` transition
+ *     (Story 4.1 FR19).
  *
  * **Consumer:** Every future reader MUST go through `parseExecutionManifest`
  * rather than calling `ExecutionManifestSchema.parse` directly.
  *
- * **Status vocabulary:** This schema accepts `"to-do"` and `"blocked"`.
- * Future stories that need to parse `in-progress/` or `done/` manifests
- * should extend this schema rather than add a separate one.
+ * **Status vocabulary (Story 4.1 widening):** This schema accepts `"to-do"`,
+ * `"blocked"`, `"in-progress"`, and `"done"`. Previous stories asserted that
+ * `"in-progress"` was rejected — those assertions MUST be flipped to assert
+ * acceptance. The widening is additive: existing `to-do/` and `blocked/`
+ * manifests parse unchanged.
  *
  * **Strict mode:** `.strict()` is intentional — unknown keys are rejected so
  * additive future fields force a coordinated schema bump rather than silent
- * acceptance via Zod's default `strip` mode.
+ * acceptance via Zod's default `strip` mode. Story 4.1 added `claimed_by` and
+ * widened the `status` enum; a `yaml.stringify(parseExecutionManifest(...))`
+ * round-trip of an `in-progress/` or `done/` manifest preserves all fields.
  *
  * Field order mirrors the intended on-disk YAML field order so that a
  * `yaml.stringify(schema.parse(obj))` round-trip produces stable output.
@@ -27,6 +35,8 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     status: z.ZodEnum<{
         "to-do": "to-do";
         blocked: "blocked";
+        "in-progress": "in-progress";
+        done: "done";
     }>;
     adapter: z.ZodString;
     source_path: z.ZodString;
@@ -49,6 +59,7 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
         field: z.ZodString;
         detail: z.ZodString;
     }, z.core.$strip>>>;
+    claimed_by: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
 /**
