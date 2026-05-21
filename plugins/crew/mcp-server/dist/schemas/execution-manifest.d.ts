@@ -1,38 +1,33 @@
 import { z } from "zod";
 /**
- * Zod schema for an execution manifest at
- * `<target-repo>/.crew/state/to-do/<ref>.yaml`.
+ * Zod schema for execution manifests.
  *
- * **Producer:** Task 2.6 (`tools/scan-sources.ts`) is the only writer that
- * creates new `to-do/` manifests. Future stories (Story 4.x claim tool,
- * Story 3.6 discard flow) update in-place fields.
+ * **Producer:** `scan-sources.ts` is the only writer that creates manifests.
+ *   - New source stories → `to-do/<ref>.yaml` with `status: "to-do"`.
+ *   - Discipline violations → `blocked/<ref>.yaml` with `status: "blocked"`
+ *     and the `blocked_by` / `discipline_violations` fields populated
+ *     (Story 3.5 Task 6.2).
  *
- * **Consumer:** Every future reader (Story 3.5 discipline validator,
- * Story 4.x claim tool, Story 3.6 discard flow) MUST go through
- * `parseExecutionManifest` — the canonical reader — rather than calling
- * `ExecutionManifestSchema.parse` directly. This ensures the typed
- * `MalformedExecutionManifestError` surfaces consistently.
+ * **Consumer:** Every future reader MUST go through `parseExecutionManifest`
+ * rather than calling `ExecutionManifestSchema.parse` directly.
  *
- * **Status vocabulary:** This schema pins `status` to the `"to-do"` literal.
- * It represents the *to-do shape* only. Future stories that need to parse
- * `in-progress/`, `blocked/`, or `done/` manifests will either:
- *  (a) discriminate on the file's parent directory (since `STATE_NAMES` in
- *      `state/manifest-state-machine.ts` is the source of truth), or
- *  (b) add a sibling schema with widened `status`.
- * Both options are left open deliberately — do NOT widen this schema to cover
- * all state-machine states. (Story 1.6 AC/State machine ownership.)
+ * **Status vocabulary:** This schema accepts `"to-do"` and `"blocked"`.
+ * Future stories that need to parse `in-progress/` or `done/` manifests
+ * should extend this schema rather than add a separate one.
  *
  * **Strict mode:** `.strict()` is intentional — unknown keys are rejected so
  * additive future fields force a coordinated schema bump rather than silent
- * acceptance via Zod's default `strip` mode. The cost is one extra edit per
- * new field; the benefit is no silent-drop round-trip bugs.
+ * acceptance via Zod's default `strip` mode.
  *
  * Field order mirrors the intended on-disk YAML field order so that a
  * `yaml.stringify(schema.parse(obj))` round-trip produces stable output.
  */
 export declare const ExecutionManifestSchema: z.ZodObject<{
     ref: z.ZodString;
-    status: z.ZodLiteral<"to-do">;
+    status: z.ZodEnum<{
+        "to-do": "to-do";
+        blocked: "blocked";
+    }>;
     adapter: z.ZodString;
     source_path: z.ZodString;
     source_hash: z.ZodString;
@@ -48,6 +43,12 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     narrative: z.ZodString;
     implementation_notes: z.ZodOptional<z.ZodString>;
     withdrawn: z.ZodDefault<z.ZodBoolean>;
+    blocked_by: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"planning-discipline">, z.ZodLiteral<"source-drift">, z.ZodString]>>;
+    discipline_violations: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        code: z.ZodString;
+        field: z.ZodString;
+        detail: z.ZodString;
+    }, z.core.$strip>>>;
 }, z.core.$strict>;
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
 /**

@@ -5,6 +5,7 @@ tools_allow:
   - recordYield
   - heartbeat
   - writeNativeStory
+  - validatePlannerBacklog
 gh_allow:
   - pr-view
 gh_allow_args: {}

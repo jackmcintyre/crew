@@ -130,6 +130,21 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
 
    Once Story 3.3 lands, this step will instead return the full status block (`crew vX.Y.Z`, target repo, adapter, standards, cycle). This README will be updated in the same change.
 
+## Planning-discipline enforcement
+
+Story 3.5 introduced automatic planning-discipline validation at two points in the backlog lifecycle:
+
+**At authoring time (`/crew:plan` — native adapter only):** The planner subagent calls `validatePlannerBacklog` before writing any story. If a story violates a discipline rule, the planner refuses to write and surfaces the violation to the operator. The four refusal codes are:
+
+- `missing-integration-ac` — a state-mutating story has no integration-tagged AC. Fix: add a `(integration)`-tagged AC that exercises the changed code path end-to-end.
+- `implicit-depends-on` — a story references another story's ref in its narrative or ACs but omits it from `depends_on`. Fix: add the ref to `depends_on`, or rephrase to remove the cross-story reference.
+- `missing-ship-gate` — no story in the backlog is flagged as the release gate. Fix: designate one story (`ship_gate: true`) or author a dedicated ship-gate story that `depends_on` every other story.
+- `state-mutating-without-integration-ac` — scan-time mirror of `missing-integration-ac` (forward-compat).
+
+**At scan time (`/crew:scan` — BMad and native adapters):** If a source story violates a discipline rule, `scan-sources` writes its manifest to `.crew/state/blocked/<ref>.yaml` (not `to-do/`) with `status: blocked`, `blocked_by: planning-discipline`, and a `discipline_violations:` block naming the rule. The `/crew:scan` output prints a `blocked:` line naming the affected refs.
+
+**Operator remediation:** Edit the source story to satisfy the violated rule, then re-run `/crew:scan`. The next scan detects the changed `source_hash` and re-evaluates the story against the discipline rules. If it now passes, the blocked manifest is deleted and a new `to-do/` manifest is written automatically — the story is promoted and ready for the dev loop to claim. If the story is still violating, the blocked manifest is rewritten with the updated hash and latest violations. If the source is unchanged since the last scan, the blocked manifest is left untouched (no spurious mtime updates).
+
 ## Build artefacts
 
 `plugins/crew/mcp-server/dist/` is **committed to git by design** (Story 1.9). `/plugin install` copies the working tree as-is and does not run a build step, so the compiled MCP server must already be present in the tree.

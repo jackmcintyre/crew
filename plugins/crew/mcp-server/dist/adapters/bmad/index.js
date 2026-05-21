@@ -2,6 +2,7 @@ import { promises as fs, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import { AmbiguousBmadRefError, MalformedBmadStoryError, UnknownBmadRefError, } from "../../errors.js";
+import { validateStoryAgainstDiscipline } from "../../validators/planning-discipline.js";
 import { parseBmadStory } from "./parse-bmad-story.js";
 import { mapBmadStatusToExecution, reconcileStatus, } from "./map-bmad-status.js";
 /**
@@ -255,16 +256,18 @@ export const BmadAdapter = {
     },
     adapterConfigSchema: z.object({ stories_root: z.string() }),
     /**
-     * Pass-through discipline validator — returns the input story unchanged.
+     * Validate a BMad `SourceStory` against planning-discipline rules.
+     * Delegates to the pure `validateStoryAgainstDiscipline` function (Story 3.5).
      *
-     * Real BMad discipline validation lands in Story 3.5. This pass-through
-     * keeps `BmadAdapter` type-conformant against Story 3.1's expanded
-     * interface.
+     * Per-story only — ship-gate (backlog-level) is not enforced at scan-time
+     * in v1 per the story spec (Task 3.2). BMad-authored backlogs rely on the
+     * planner for ship-gate discipline; the scan-time path catches
+     * missing-integration-AC (the dominant bugfix-1 failure mode).
      *
-     * @see _bmad-output/planning-artifacts/epics/epic-3-backlog-layer-planning-adapters-story-manifests-and-the-planning-conversation.md § Story 3.5
+     * @see _bmad-output/implementation-artifacts/3-5-planning-discipline-validation-at-authoring-and-scan-time.md § Task 3
      */
     validateAgainstDiscipline(story) {
-        return story;
+        return validateStoryAgainstDiscipline(story);
     },
 };
 // Re-exports — the test suite and downstream consumers import these via

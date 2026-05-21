@@ -13,7 +13,7 @@ import { STATE_NAMES, type StateName } from "../state/manifest-state-machine.js"
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 
 /**
- * Result returned by `scanSources`. All four ref arrays are disjoint.
+ * Result returned by `scanSources`. All five ref arrays are disjoint.
  *
  * - `createdRefs`: manifests that did not exist before this scan (AC1 path).
  * - `updatedRefs`: manifests still in `to-do/` whose `source_hash` was
@@ -23,8 +23,14 @@ import { resolveWorkspace } from "../state/workspace-resolver.js";
  * - `skippedRefs`: refs the adapter listed but the tool deliberately did NOT
  *   touch. `reason: "not-in-to-do"` means the manifest already exists in
  *   another state dir (in-progress, blocked, done) — the dev loop owns it
- *   there. `reason: "discipline-violation"` is reserved for Story 3.5; v1
- *   never produces it (all adapters' `validateAgainstDiscipline` is pass-through).
+ *   there, or a prior scan already blocked it. `reason: "discipline-violation"`
+ *   means this scan just created a new blocked manifest for the first time.
+ * - `blockedRefs`: refs that failed discipline in THIS scan and had a manifest
+ *   written to `blocked/` for the first time (Story 3.5 Task 6.3). Overlaps
+ *   with `skippedRefs[reason: "discipline-violation"]` by design — `skippedRefs`
+ *   is the legacy seam, `blockedRefs` is the new operator-facing surface. On
+ *   the second scan after a story is blocked, it appears in skippedRefs with
+ *   `reason: "not-in-to-do"` (blocked manifests are owned state, not touched).
  */
 export interface ScanResult {
   targetRepoRoot: string;
@@ -37,6 +43,8 @@ export interface ScanResult {
     reason: "not-in-to-do" | "discipline-violation";
     detail?: string;
   }>;
+  /** Story 3.5: refs that failed planning-discipline and were written to blocked/. */
+  blockedRefs: string[];
 }
 
 /**
@@ -54,15 +62,35 @@ export function renderScanResult(result: ScanResult): string {
     `unchanged: ${result.unchangedRefs.length} ref(s)${result.unchangedRefs.length > 0 ? " — " + result.unchangedRefs.join(", ") : ""}`,
   ];
 
-  if (result.skippedRefs.length > 0) {
+  // Omit discipline-violation refs from the skipped line when they are already
+  // named in the blocked line — they're the same refs and printing both causes
+  // confusion about whether they're separate problems.
+  const blockedRefSet = new Set(result.blockedRefs ?? []);
+  const skippedForDisplay = result.skippedRefs.filter(
+    (s) => !(s.reason === "discipline-violation" && blockedRefSet.has(s.ref)),
+  );
+  if (skippedForDisplay.length > 0) {
     lines.push(
-      `skipped:   ${result.skippedRefs.length} ref(s) — ` +
-        result.skippedRefs
+      `skipped:   ${skippedForDisplay.length} ref(s) — ` +
+        skippedForDisplay
           .map((s) => `${s.ref} (${s.reason}${s.detail ? ": " + s.detail : ""})`)
           .join(", "),
     );
   } else {
     lines.push(`skipped:   0 ref(s)`);
+  }
+
+  // Story 3.5 Task 6.3: blocked refs line (operator-facing surface).
+  // A blocked ref here is the operator's cue to fix the source story
+  // (add an integration AC, declare missing depends_on, etc.) and re-run /crew:scan.
+  if ((result.blockedRefs ?? []).length > 0) {
+    lines.push(
+      `blocked:   ${result.blockedRefs.length} ref(s) — ` +
+        result.blockedRefs.join(", ") +
+        ` (planning-discipline violation — fix the source story and re-run /crew:scan)`,
+    );
+  } else {
+    lines.push(`blocked:   0 ref(s)`);
   }
 
   return lines.join("\n");
@@ -176,26 +204,57 @@ export async function scanSources(opts: { targetRepoRoot: string }): Promise<Sca
     updatedRefs: [],
     unchangedRefs: [],
     skippedRefs: [],
+    blockedRefs: [],
   };
 
   const stateRoot = path.join(targetRepoRoot, ".crew", "state");
 
-  // Step 3 + 4 + 5: For each story, validate discipline, check presence map,
-  // then branch on create/update/unchanged/skip.
-  for (const story of sourceStories) {
-    // Step 3: validateAgainstDiscipline (Story 3.5 seam — v1 is pass-through).
-    const disciplineResult = activeAdapter.validateAgainstDiscipline(story);
-    if ("kind" in disciplineResult && disciplineResult.kind === "discipline-violation") {
-      const firstViolation = disciplineResult.violations[0];
-      result.skippedRefs.push({
-        ref: story.ref,
-        reason: "discipline-violation",
-        detail: firstViolation?.detail,
-      });
-      continue;
+  // Startup guard: resolve any refs that appear in both to-do/ and blocked/
+  // simultaneously. This can occur if a previous blocked→to-do promotion wrote
+  // the to-do manifest successfully but the subsequent unlink of the blocked
+  // manifest failed (non-atomic write sequence). When both exist, to-do/ wins —
+  // delete the stale blocked/ manifest and log a warning so the operator is
+  // aware of the recovery. This guard prevents the inconsistency from persisting
+  // across subsequent scans.
+  {
+    const toDoDir = path.join(stateRoot, "to-do");
+    const blockedDir = path.join(stateRoot, "blocked");
+    let toDoFiles: string[] = [];
+    let blockedFiles: string[] = [];
+    try {
+      toDoFiles = await fs.readdir(toDoDir);
+    } catch {
+      // Directory may not exist yet on a fresh repo — not an error.
     }
+    try {
+      blockedFiles = await fs.readdir(blockedDir);
+    } catch {
+      // Directory may not exist yet on a fresh repo — not an error.
+    }
+    const toDoRefs = new Set(toDoFiles.filter((f) => f.endsWith(".yaml")).map((f) => f.slice(0, -5)));
+    for (const blockedFile of blockedFiles) {
+      if (!blockedFile.endsWith(".yaml")) continue;
+      const ref = blockedFile.slice(0, -5);
+      if (toDoRefs.has(ref)) {
+        console.warn(
+          `[scanSources] Ref ${ref} exists in both to-do/ and blocked/ — recovering by removing stale blocked/ manifest (to-do/ wins).`,
+        );
+        await fs.unlink(path.join(blockedDir, blockedFile));
+      }
+    }
+  }
 
-    // Step 4: Check which state dir this ref's manifest lives in, if any.
+  // Step 3 + 4 + 5: For each story, check presence map, validate discipline,
+  // then branch on create/blocked-create/update/unchanged/skip.
+  //
+  // IMPORTANT: The presence check happens FIRST (before discipline). This
+  // preserves the "scan does not touch claimed work" invariant for ALL state
+  // dirs including `blocked/`. A story already in blocked/ (from a prior scan)
+  // is treated as claimed and skipped with reason "not-in-to-do", exactly like
+  // stories in in-progress/ or done/. Only if no manifest exists anywhere does
+  // the discipline check run and potentially write to blocked/.
+  for (const story of sourceStories) {
+    // Step 3: Check which state dir this ref's manifest lives in, if any.
     let currentState: StateName | null = null;
     for (const stateName of STATE_NAMES) {
       const absPath = path.join(stateRoot, stateName, `${story.ref}.yaml`);
@@ -206,11 +265,149 @@ export async function scanSources(opts: { targetRepoRoot: string }): Promise<Sca
       }
     }
 
-    // Step 5: Branch on presence.
+    // Step 4: Handle manifests that exist outside to-do/.
+    //
+    // - in-progress/ or done/: the dev loop owns it — skip unconditionally.
+    // - blocked/: re-run the discipline validator. If the source story has been
+    //   fixed (validator now passes), promote to to-do/ and delete the blocked
+    //   manifest. If it still fails, rewrite the blocked manifest to record the
+    //   latest source_hash and updated violations. This is the remediation flow
+    //   described in README-install.md § Planning-discipline enforcement.
+    if (currentState === "in-progress" || currentState === "done") {
+      result.skippedRefs.push({
+        ref: story.ref,
+        reason: "not-in-to-do",
+      });
+      continue;
+    }
+
+    if (currentState === "blocked") {
+      // Read the existing blocked manifest to check whether the source has changed.
+      const absBlockedPath = path.join(stateRoot, "blocked", `${story.ref}.yaml`);
+      const rawBlocked = await fs.readFile(absBlockedPath, "utf8");
+      const parsedBlocked = yamlParse(rawBlocked) as Record<string, unknown>;
+      const existingBlockedHash = parsedBlocked["source_hash"] as string | undefined;
+
+      if (existingBlockedHash === story.source_hash) {
+        // Source unchanged — no need to re-evaluate. Skip quietly.
+        result.skippedRefs.push({ ref: story.ref, reason: "not-in-to-do" });
+        continue;
+      }
+
+      // Source hash changed (operator edited the story) — re-run discipline.
+      const disciplineResult = activeAdapter.validateAgainstDiscipline(story);
+      if (!("kind" in disciplineResult) || disciplineResult.kind !== "discipline-violation") {
+        // Story now passes discipline — promote from blocked/ to to-do/.
+        // NOTE: This sequence is non-atomic: the to-do/ manifest is written
+        // first, then the blocked/ manifest is deleted. If the unlink fails
+        // (e.g. a mid-flight crash or permission error), both manifests will
+        // exist simultaneously. The startup guard above detects and recovers
+        // this state on the next scan (to-do/ wins, blocked/ is deleted).
+        const absToDoPathNew = path.join(stateRoot, "to-do", `${story.ref}.yaml`);
+        const manifest = composeManifest(story, activeAdapterName, targetRepoRoot);
+        const yamlText = yamlStringify(manifest, { lineWidth: 0 });
+        await writeManagedFile({
+          absPath: absToDoPathNew,
+          contents: yamlText,
+          targetRepoRoot,
+          mcpToolContext: { toolName: "scanSources", role: "operator" },
+        });
+        await fs.unlink(absBlockedPath);
+        result.createdRefs.push(story.ref);
+      } else {
+        // Still failing — rewrite the blocked manifest with updated hash and violations.
+        const blockedManifestRaw = stripUndefined({
+          ref: story.ref,
+          status: "blocked" as const,
+          adapter: activeAdapterName,
+          source_path: repoRelativePath(story.raw_path, targetRepoRoot),
+          source_hash: story.source_hash,
+          depends_on: story.depends_on,
+          acceptance_criteria: story.acceptance_criteria,
+          title: story.title,
+          narrative: story.narrative,
+          implementation_notes: story.implementation_notes,
+          withdrawn: false,
+          blocked_by: "planning-discipline" as const,
+          discipline_violations: disciplineResult.violations.map((v) => ({
+            code: v.code,
+            field: v.field,
+            detail: v.detail,
+          })),
+        });
+        const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
+        const yamlText = yamlStringify(blockedManifest, { lineWidth: 0 });
+        await writeManagedFile({
+          absPath: absBlockedPath,
+          contents: yamlText,
+          targetRepoRoot,
+          mcpToolContext: { toolName: "scanSources", role: "operator" },
+        });
+        const firstViolation = disciplineResult.violations[0];
+        result.skippedRefs.push({
+          ref: story.ref,
+          reason: "discipline-violation",
+          detail: firstViolation?.detail,
+        });
+        result.blockedRefs.push(story.ref);
+      }
+      continue;
+    }
+
+    // Step 5: validateAgainstDiscipline (Story 3.5 — real enforcement).
+    // Only runs when no manifest exists anywhere (currentState === null) or
+    // when the manifest is already in to-do/ (currentState === "to-do").
+    // For the to-do case, discipline is a no-op (the story already passed
+    // discipline at first scan). For the null case, this is the gate.
+    if (currentState === null) {
+      const disciplineResult = activeAdapter.validateAgainstDiscipline(story);
+      if ("kind" in disciplineResult && disciplineResult.kind === "discipline-violation") {
+        const firstViolation = disciplineResult.violations[0];
+        result.skippedRefs.push({
+          ref: story.ref,
+          reason: "discipline-violation",
+          detail: firstViolation?.detail,
+        });
+
+        // Write a blocked manifest into blocked/ (Task 6.1).
+        const blockedManifestRaw = stripUndefined({
+          ref: story.ref,
+          status: "blocked" as const,
+          adapter: activeAdapterName,
+          source_path: repoRelativePath(story.raw_path, targetRepoRoot),
+          source_hash: story.source_hash,
+          depends_on: story.depends_on,
+          acceptance_criteria: story.acceptance_criteria,
+          title: story.title,
+          narrative: story.narrative,
+          implementation_notes: story.implementation_notes,
+          withdrawn: false,
+          blocked_by: "planning-discipline" as const,
+          discipline_violations: disciplineResult.violations.map((v) => ({
+            code: v.code,
+            field: v.field,
+            detail: v.detail,
+          })),
+        });
+        const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
+        const absBlockedPath = path.join(stateRoot, "blocked", `${story.ref}.yaml`);
+        const yamlText = yamlStringify(blockedManifest, { lineWidth: 0 });
+        await writeManagedFile({
+          absPath: absBlockedPath,
+          contents: yamlText,
+          targetRepoRoot,
+          mcpToolContext: { toolName: "scanSources", role: "operator" },
+        });
+        result.blockedRefs.push(story.ref);
+        continue;
+      }
+    }
+
+    // Step 6: Branch on to-do presence.
     const absToDoPath = path.join(stateRoot, "to-do", `${story.ref}.yaml`);
 
     if (currentState === null) {
-      // CREATE path (AC1): no manifest exists anywhere.
+      // CREATE path (AC1): no manifest exists anywhere and discipline passed.
       const manifest = composeManifest(story, activeAdapterName, targetRepoRoot);
       const yamlText = yamlStringify(manifest, { lineWidth: 0 });
       await writeManagedFile({
@@ -258,14 +455,9 @@ export async function scanSources(opts: { targetRepoRoot: string }): Promise<Sca
         // Hash matches → no-op (AC2 idempotency).
         result.unchangedRefs.push(story.ref);
       }
-    } else {
-      // SKIP path (AC3 negative): manifest is in in-progress, blocked, or done.
-      // The dev loop owns these; scan-sources must not touch them.
-      result.skippedRefs.push({
-        ref: story.ref,
-        reason: "not-in-to-do",
-      });
     }
+    // Note: the else branch for currentState not null and not "to-do" is handled
+    // in Step 4 above (before discipline check) — those refs are already skipped.
   }
 
   return result;
