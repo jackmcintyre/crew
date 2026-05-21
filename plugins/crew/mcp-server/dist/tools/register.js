@@ -1,8 +1,11 @@
 import { z } from "zod";
 import { DomainError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
+import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { claimStory } from "./claim-story.js";
 import { completeStory } from "./complete-story.js";
+import { listClaimableTodos } from "./list-claimable-todos.js";
+import { mintSessionUlid } from "./mint-session-ulid.js";
 import { getStatus, renderStatus } from "./get-status.js";
 import { getTeamSnapshot, renderTeamSnapshot } from "./get-team-snapshot.js";
 import { instantiatePersona } from "./instantiate-persona.js";
@@ -494,6 +497,109 @@ export function registerAllTools(server) {
                                 text: JSON.stringify({ error: err.name, message: err.message }),
                             },
                         ],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 4.2 — mintSessionUlid: pure ULID minting for the /crew:start skill.
+    // The skill MUST NOT ask the LLM to generate a ULID — this tool delegates
+    // minting to the `ulid` npm package so the result is deterministic.
+    // The dev subagent's permissions/generalist-dev.yaml MUST NOT include this
+    // tool — the subagent does not mint ULIDs.
+    server.registerTool({
+        name: "mintSessionUlid",
+        description: "Mint a fresh session ULID for a /crew:start invocation. Pure — no IO. " +
+            "Called once per /crew:start invocation; the returned ULID is re-used for " +
+            "every claimStory call in that session. Story 4.2.",
+        inputSchema: {
+            type: "object",
+            properties: {},
+        },
+        handler: async (_args) => {
+            const result = mintSessionUlid();
+            return {
+                content: [{ type: "text", text: JSON.stringify(result) }],
+            };
+        },
+    });
+    // Story 4.2 — listClaimableTodos: enumerate claimable to-do manifests for
+    // the /crew:start skill's pre-scan pass. Returns sorted (alphabetical ref)
+    // candidates with dep-readiness computed server-side. The dev subagent's
+    // permissions/generalist-dev.yaml MUST NOT include this tool — it is
+    // /crew:start-only.
+    server.registerTool({
+        name: "listClaimableTodos",
+        description: "Enumerate claimable to-do manifests for the /crew:start claim-spawn loop. " +
+            "Returns { todos: ClaimableCandidate[], inProgressCount: number } where todos " +
+            "are filtered by isClaimable, sorted alphabetically by ref, and annotated with " +
+            "depsReady (true iff all depends_on refs are in done/). Story 4.2.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+            },
+            required: ["targetRepoRoot"],
+        },
+        handler: async (args) => {
+            const parsed = z.object({ targetRepoRoot: z.string().min(1) }).parse(args);
+            try {
+                const result = await listClaimableTodos({ targetRepoRoot: parsed.targetRepoRoot });
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 4.2 — buildPersonaSpawnPrompt: assemble the system prompt for a
+    // dev-subagent spawn. Reads the persona file once per call; the /crew:start
+    // skill calls this once per spawn. Centralises assembly so a future
+    // persona-format change updates one place. The dev subagent's
+    // permissions/generalist-dev.yaml MUST NOT include this tool — the subagent
+    // does not assemble its own prompt; the orchestrator does.
+    server.registerTool({
+        name: "buildPersonaSpawnPrompt",
+        description: "Assemble the system-prompt text for a dev-subagent spawn. Reads " +
+            "<targetRepoRoot>/team/<role>/PERSONA.md exactly once per call, concatenates " +
+            "the five required sections (Domain, Mandate, Out of mandate, Prompt, Knowledge) " +
+            "plus a Locked phrases sentinel block. Returns { systemPrompt: string }. " +
+            "Propagates PersonaFileNotFoundError if the team persona is absent. Story 4.2.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                role: { type: "string" },
+            },
+            required: ["targetRepoRoot", "role"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                role: z.string().min(1),
+            })
+                .parse(args);
+            try {
+                const result = await buildPersonaSpawnPrompt(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
                         isError: true,
                     };
                 }

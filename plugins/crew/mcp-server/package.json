@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:watch": "tsc -p tsconfig.json --watch",
-    "test": "vitest run"
+    "test": "NODE_OPTIONS=--max-old-space-size=8192 vitest run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

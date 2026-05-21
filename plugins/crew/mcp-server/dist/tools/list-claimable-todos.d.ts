@@ -1,0 +1,48 @@
+/**
+ * `listClaimableTodos` MCP tool — Story 4.2 Task 3.
+ *
+ * Enumerates `.crew/state/to-do/<ref>.yaml` files, parses each via
+ * `parseExecutionManifest`, filters by `isClaimable`, and emits a sorted
+ * (alphabetical ref order) projection used by the `/crew:start` skill.
+ *
+ * The return shape also includes `inProgressCount` so the skill can decide
+ * the queue-drained condition without a separate filesystem call.
+ *
+ * Per-candidate `depsReady` is computed by statting
+ * `<targetRepoRoot>/.crew/state/done/<dep>.yaml` for each dep in
+ * `depends_on`. If all present, `depsReady: true`.
+ *
+ * No write side-effects. Propagates `MalformedExecutionManifestError` verbatim.
+ *
+ * Architecture §MCP Tool Naming — camelCase verb-noun: `listClaimableTodos`.
+ * Story 4.2 Task 3.1–3.5.
+ */
+export interface ClaimableCandidate {
+    /** Story ref, e.g. `"native:01HZ..."` or `"bmad:1.1"`. */
+    ref: string;
+    /** Human-readable title from the manifest. */
+    title: string;
+    /** Dependency refs from the manifest. */
+    depends_on: readonly string[];
+    /**
+     * True iff all `depends_on` refs are present in `<targetRepoRoot>/.crew/state/done/`.
+     * False if any dep is missing. The `/crew:start` skill claims only refs where
+     * `depsReady: true` on a given pass.
+     */
+    depsReady: boolean;
+}
+export interface ListClaimableTodosResult {
+    todos: ClaimableCandidate[];
+    /** Count of `.yaml` files currently in `<targetRepoRoot>/.crew/state/in-progress/`. */
+    inProgressCount: number;
+}
+export interface ListClaimableTodosOptions {
+    targetRepoRoot: string;
+}
+/**
+ * List all claimable candidates from `<targetRepoRoot>/.crew/state/to-do/`
+ * in stable alphabetical ref order, along with the count of in-progress manifests.
+ *
+ * @throws {MalformedExecutionManifestError} When any manifest fails schema validation.
+ */
+export declare function listClaimableTodos(opts: ListClaimableTodosOptions): Promise<ListClaimableTodosResult>;
