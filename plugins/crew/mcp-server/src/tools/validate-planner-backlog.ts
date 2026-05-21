@@ -16,6 +16,7 @@
  * @see _bmad-output/implementation-artifacts/3-5-planning-discipline-validation-at-authoring-and-scan-time.md § Task 5
  */
 
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 import { z } from "zod";
 import type { DisciplineViolation, SourceStory } from "../adapters/adapter.js";
@@ -145,15 +146,30 @@ export async function validatePlannerBacklog(
   let existingStories: SourceStory[] = [];
   try {
     existingStories = await workspace.activeAdapter.listSourceStories();
-  } catch {
-    // Non-fatal: if we can't list existing stories, proceed with the pending
-    // batch only. The ship-gate check is best-effort at authoring time.
-    existingStories = [];
+  } catch (err) {
+    const errMessage = err instanceof Error ? err.message : String(err);
+    console.error(`[validatePlannerBacklog] Could not list existing stories: ${errMessage}`);
+    return {
+      ok: false,
+      violations: [
+        {
+          kind: "discipline-violation" as const,
+          ref: `backlog:${createHash("sha256").update(targetRepoRoot).digest("hex").slice(0, 8)}`,
+          violations: [
+            {
+              code: "missing-ship-gate" as const,
+              field: "backlog",
+              detail: `Could not list existing stories: ${errMessage}`,
+            },
+          ],
+        },
+      ],
+    };
   }
 
   const backlogViolations = validateBacklogAgainstDiscipline(pendingStories, {
     existingStories,
-    backlogPseudoRef: `backlog:${path.basename(targetRepoRoot)}`,
+    backlogPseudoRef: `backlog:${createHash("sha256").update(targetRepoRoot).digest("hex").slice(0, 8)}`,
   });
 
   allViolations.push(...backlogViolations);

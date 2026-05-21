@@ -143,7 +143,7 @@ Story 3.5 introduced automatic planning-discipline validation at two points in t
 
 **At scan time (`/crew:scan` — BMad and native adapters):** If a source story violates a discipline rule, `scan-sources` writes its manifest to `.crew/state/blocked/<ref>.yaml` (not `to-do/`) with `status: blocked`, `blocked_by: planning-discipline`, and a `discipline_violations:` block naming the rule. The `/crew:scan` output prints a `blocked:` line naming the affected refs.
 
-**Operator remediation:** Edit the source story to satisfy the violated rule, then re-run `/crew:scan`. The next scan re-evaluates the story; if it passes, a new `to-do/` manifest is written (the blocked manifest is not automatically removed — the next scan sees no manifest in `blocked/` at that state-check, so creates a fresh `to-do/` manifest). If the story is still violating, the blocked manifest stays.
+**Operator remediation:** Edit the source story to satisfy the violated rule, then re-run `/crew:scan`. The next scan detects the changed `source_hash` and re-evaluates the story against the discipline rules. If it now passes, the blocked manifest is deleted and a new `to-do/` manifest is written automatically — the story is promoted and ready for the dev loop to claim. If the story is still violating, the blocked manifest is rewritten with the updated hash and latest violations. If the source is unchanged since the last scan, the blocked manifest is left untouched (no spurious mtime updates).
 
 ## Build artefacts
 

@@ -35,11 +35,15 @@ export const STATE_MUTATING_TOKEN_RE =
   /\b(mutates?|writes?|persists?|commits?)\s+(state|manifest|status|backlog)\b/i;
 
 /**
- * Ref pattern: identifiers of the form `<adapter>:<id>` embedded in prose.
+ * Factory that returns a fresh ref-pattern regex each call.
+ * A fresh instance is required because `/g` flag carries `lastIndex` state —
+ * reusing a module-level instance across calls causes intermittent misses.
  * Detects cross-story references like `native:01JX9000000000000000000001`
  * or `bmad:1.3`.
  */
-const IMPLICIT_REF_RE = /\b(native|bmad):[A-Za-z0-9.\-:_]+\b/g;
+function makeImplicitRefRe(): RegExp {
+  return /\b(native|bmad):[A-Za-z0-9.\-:_]+\b/g;
+}
 
 /**
  * Convert a simple glob pattern to a regex for full-token matching against
@@ -164,9 +168,8 @@ export function validateStoryAgainstDiscipline(
 
   const foundRefs = new Set<string>();
   let match: RegExpExecArray | null;
-  // Reset lastIndex for global regex.
-  IMPLICIT_REF_RE.lastIndex = 0;
-  while ((match = IMPLICIT_REF_RE.exec(allTexts)) !== null) {
+  const implicitRefRe = makeImplicitRefRe();
+  while ((match = implicitRefRe.exec(allTexts)) !== null) {
     foundRefs.add(match[0]);
   }
 

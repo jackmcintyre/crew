@@ -314,7 +314,7 @@ describe("AC4 (Story 3.5) — scan-sources blocked manifest on discipline violat
     await expect(fs.stat(toDoPath)).rejects.toThrow();
   });
 
-  it("AC4 — two-pass idempotency: second scan does NOT rewrite the blocked manifest", async () => {
+  it("AC4 — two-pass idempotency: second scan does NOT rewrite the blocked manifest when source is unchanged", async () => {
     // First scan — creates the blocked manifest.
     await scanSources({ targetRepoRoot: disciplineScratch });
 
@@ -325,16 +325,60 @@ describe("AC4 (Story 3.5) — scan-sources blocked manifest on discipline violat
     await fs.utimes(blockedPath, past, past);
     const mtimeBefore = (await fs.stat(blockedPath)).mtimeMs;
 
-    // Second scan — must NOT touch the already-blocked manifest.
+    // Second scan — source unchanged, so must NOT touch the blocked manifest.
     const result2 = await scanSources({ targetRepoRoot: disciplineScratch });
 
-    // blockedRefs should be empty (manifest already existed — invariant: scan does not touch claimed work).
+    // blockedRefs should be empty (source unchanged — no re-evaluation triggered).
     expect(result2.blockedRefs).not.toContain("bmad:2.1");
-    // The ref should still be skipped (reason: not-in-to-do — existing manifest in blocked/).
+    // The ref should be skipped (reason: not-in-to-do — hash-unchanged short-circuit).
     expect(result2.skippedRefs.some((s) => s.ref === "bmad:2.1" && s.reason === "not-in-to-do")).toBe(true);
 
     // Mtime must be unchanged — idempotency load-bearing assertion.
     const mtimeAfter = (await fs.stat(blockedPath)).mtimeMs;
     expect(mtimeAfter).toBe(mtimeBefore);
+  });
+
+  it("AC4 — fix-then-rescan: fixing blocked story deletes blocked manifest and writes to-do/ manifest", async () => {
+    // First scan — creates the blocked manifest.
+    await scanSources({ targetRepoRoot: disciplineScratch });
+
+    const blockedPath = path.join(disciplineScratch, ".crew", "state", "blocked", "bmad:2.1.yaml");
+    const toDoPath = path.join(disciplineScratch, ".crew", "state", "to-do", "bmad:2.1.yaml");
+
+    // Verify the blocked manifest exists and to-do/ does not.
+    await expect(fs.stat(blockedPath)).resolves.toBeTruthy();
+    await expect(fs.stat(toDoPath)).rejects.toThrow();
+
+    // Fix the source story by inserting an integration-tagged AC into the
+    // ## Acceptance Criteria section (before the ## Dev Notes section).
+    const storyPath = path.join(
+      disciplineScratch,
+      "_bmad-output",
+      "planning-artifacts",
+      "stories",
+      "2-1-state-mutating-no-integration.md",
+    );
+    const original = await fs.readFile(storyPath, "utf8");
+    // Insert before "## Dev Notes" to stay within the Acceptance Criteria section.
+    const fixed = original.replace(
+      "## Dev Notes",
+      "**AC2 (integration):**\n**Given** the tool runs,\n**When** the manifest is written,\n**Then** the blocked/ manifest is created and verifiable end-to-end.\n\n## Dev Notes",
+    );
+    await fs.writeFile(storyPath, fixed, "utf8");
+
+    // Second scan — validator re-runs (source hash changed), story now passes.
+    const result2 = await scanSources({ targetRepoRoot: disciplineScratch });
+
+    // Story should now be in createdRefs (promoted to to-do/).
+    expect(result2.createdRefs).toContain("bmad:2.1");
+    expect(result2.blockedRefs).not.toContain("bmad:2.1");
+    expect(result2.skippedRefs.some((s) => s.ref === "bmad:2.1")).toBe(false);
+
+    // Blocked manifest must be deleted; to-do/ manifest must now exist.
+    await expect(fs.stat(blockedPath)).rejects.toThrow();
+    const raw = await fs.readFile(toDoPath, "utf8");
+    const manifest = yamlParse(raw) as Record<string, unknown>;
+    expect(manifest["status"]).toBe("to-do");
+    expect(manifest["ref"]).toBe("bmad:2.1");
   });
 });

@@ -7,6 +7,7 @@ tools_allow:
   - Edit
   - Task
   - writeNativeStory
+  - validatePlannerBacklog
   - heartbeat
 gh_allow:
   - pr-view
