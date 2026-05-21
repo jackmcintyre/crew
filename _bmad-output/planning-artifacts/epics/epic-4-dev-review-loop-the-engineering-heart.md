@@ -2,6 +2,17 @@
 
 A primed backlog drains end-to-end with PRs raised, reviewed, labelled, and auto-merged or paused.
 
+## Carry-forward from Epic 3 retro (2026-05-21)
+
+These items were captured during the Epic 3 retrospective. When authoring Epic 4 stories, fold them in as ACs on existing stories where they fit, or spin them out as small standalone stories. None blocks Epic 4 kickoff.
+
+- **[High] `detectInProgressHandEdit` wiring** — already added to Story 4.1 below (closes Story 3.7 AC3 / FR14a).
+- **[Medium] Spec amendment tracking.** Story 3.5 needed a mid-flight spec amendment that landed only on local disk because `_bmad-output/implementation-artifacts/` is gitignored. Either un-ignore that directory (with implications for run-state / scratch artefacts), or move spec amendments to a tracked path. Likely needs its own story. May fit better in Epic 6 (calibration / standards evolution) than Epic 4 — revisit at planning time.
+- **[Low] Surface I/O warnings in `validatePlannerBacklog`.** Add an `io_warnings?: string[]` field to the structured return. Today when `listSourceStories` throws and the pending batch already contains a ship-gate, the tool returns `{ok: true}` and the I/O error reaches `console.error` only. Real product-correctness gap on a rare path.
+- **[Low] Native-source-only dedup in planner inventory display.** When a `.crew/native-stories/<ULID>.md` already has a manifest, the planner lists it twice. Cosmetic but visible during planning.
+- **[Low] Move ref-format validation upstream into the planning-discipline gate.** Today malformed `depends_on` refs fail at the writer layer (Story 3.4) rather than at planning-discipline (Story 3.5). Layering improvement.
+- **[Low] Friendlier `git rev-parse failed` message on no-HEAD scratch repos.** When operator-smoke uses a fresh `git init` scratch repo, the planner emits a scary-looking error. Doesn't break anything; polish for smoke sessions.
+
 ## Story 4.1: `claim-story`, dependency check, and `complete-story` MCP tools
 
 As a plugin maintainer,
@@ -20,7 +31,9 @@ So that the dev loop has a trusted state-transition surface.
 
 **Given** a story claimed by a different session, **When** `complete-story` is called, **Then** it returns a typed `WrongClaimantError`.
 
-**AC5 (integration):** vitest covers all four branches against a fixture; chaos test asserts no manifest observed in two state dirs across 1,000 concurrent claim attempts.
+**Given** a story whose `in-progress/` manifest has been hand-edited since claim, **When** `claim-story` (or any state-mutating MCP tool on the in-progress layer) is called for that ref, **Then** it invokes `detectInProgressHandEdit` from Story 3.7 on entry and refuses to proceed by propagating the typed `InProgressHandEditError` to the caller. _(FR14a, closes Story 3.7 AC3)_
+
+**AC6 (integration):** vitest covers all five branches against a fixture; chaos test asserts no manifest observed in two state dirs across 1,000 concurrent claim attempts.
 
 ## Story 4.2: `/start` skill and per-story dev subagent spawn
 

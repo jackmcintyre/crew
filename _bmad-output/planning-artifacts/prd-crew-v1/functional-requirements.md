@@ -21,6 +21,7 @@ This FR list is the capability contract for AI Engineering Team v1. Each FR is a
 - **FR12:** Story body can carry: narrative description, acceptance criteria (at least one integration AC for state-mutating stories), implementation notes.
 - **FR13:** The plugin can validate a story file against the story-file contract and refuse malformed stories with a human-readable error.
 - **FR14:** The user can edit any story file directly (text editor) while it is in `to-do/` or `blocked/`. Edits to stories in `in-progress/` are not supported in v1.
+  - **FR14a:** The plugin can refuse any state-mutating operation on an `in-progress/` story whose on-disk manifest has been hand-edited since claim. Refusal is the responsibility of each caller that operates on the in-progress layer; the shared mechanism is the `detectInProgressHandEdit` predicate (Story 3.7) which throws a typed `InProgressHandEditError` carrying the offending ref and changed fields. The claim path (Story 4.1) is the first required consumer.
 
 ## Continuous-flow runtime
 
