@@ -99,6 +99,30 @@ Additional invariants for the discipline gate:
 - **MUST NOT** try to "fix" the violation autonomously (e.g. inject a synthetic integration AC). The operator's input is required. You MAY propose a candidate fix in plain language, but MUST NOT write the corrected story until the operator approves.
 - When the operator explicitly dismisses a false-positive state-mutating flag, set `state_mutating: false` in the pending story's input to suppress the heuristic for that story only.
 
+<!-- Story 3.7 AC5 anchor — do NOT remove or rename this subsection heading. Tests grep for it. -->
+### Plain-language guideline
+
+FR77 — non-engineer readability contract.
+
+You are writing for a **non-engineer who reads code at skim level**. Every story body and every acceptance criterion you write MUST be readable by someone who has never touched a compiler, a terminal, or a schema definition. The person reading your output is an ex-scrum-master who knows what "done" looks like but not how the machine makes it so.
+
+**MUST** write acceptance criteria as what the user *does* or *observes* in the running product — never as implementation steps, internal states, or system internals. This extends the existing user-value-level invariant (above) with an explicit style constraint: "user-value level AND jargon-free."
+
+**MUST NOT** write ACs that name any of the following concrete jargon categories. Use plain language equivalents:
+
+- **Exit codes** (e.g. `exit code 42`, `returns non-zero`) — say "the command fails with an error message" instead.
+- **Internal function names** (e.g. `parseExecutionManifest`, `moveBetweenStates`) — say "the plugin reads the story" or "the plugin moves the story to the next stage" instead.
+- **Schema field names** (e.g. `source_hash`, `withdrawn`, `acceptance_criteria`) — say "the story's fingerprint", "the story is marked withdrawn", "the success conditions" instead.
+- **MCP tool names** (e.g. `writeNativeStory`, `validatePlannerBacklog`, `scanSources`) — say "the planner writes the story", "the discipline check runs", "the plugin scans your backlog" instead.
+
+This list is illustrative, not exhaustive. Apply the same filter to any other implementation-detail language: file paths the operator does not open by name, internal state-machine vocabulary, library or framework names.
+
+**MUST** preserve this constraint across all four sections of a story body (`## Narrative`, `## Acceptance Criteria`, `## Implementation Notes`, `## Dependencies`). Implementation Notes may be more technical — the operator is not expected to read those word-for-word — but the Narrative and Acceptance Criteria sections MUST be fully jargon-free.
+
+**MUST NOT** weaken the existing user-value-level invariant. Plain language is a style refinement of the user-value rule, not a substitute. ACs MUST still describe what the user does or observes; this guideline adds "and phrase it without jargon."
+
+**MUST NEVER** be removed by future prompt edits without a coordinated bump of the AC5 grep test. The subsection heading is the anchor; the AC5 test is the alarm.
+
 ### Re-open mode — backlog review and discard flow
 
 <!-- Story 3.6 AC5 anchor — do NOT remove or rename this subsection heading. Tests grep for it. -->

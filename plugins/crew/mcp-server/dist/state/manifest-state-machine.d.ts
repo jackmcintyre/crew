@@ -53,6 +53,56 @@ export declare function moveBetweenStates(opts: {
     fsImpl?: FsImpl;
 }): Promise<MoveResult>;
 /**
+ * The operator-editable subset of `ExecutionManifest`. These are the fields
+ * an operator may legitimately hand-edit in a `to-do/` or `blocked/` manifest.
+ * The same fields are what `detectInProgressHandEdit` monitors for mutation in
+ * `in-progress/` manifests, where hand-edits are NOT permitted.
+ *
+ * Story 3.7 — FR14.
+ */
+export type OperatorEditableFields = Pick<ExecutionManifest, "title" | "narrative" | "acceptance_criteria" | "implementation_notes" | "depends_on" | "withdrawn">;
+/**
+ * Detects whether an `in-progress/` manifest has been hand-edited since it
+ * was claimed by the dev loop.
+ *
+ * **Guard contract (Story 3.7, FR14 second half):**
+ * - Returns `{ ok: true }` when the on-disk manifest's `source_hash` matches
+ *   `opts.sourceHash` AND all operator-editable fields match `opts.sourceFields`.
+ * - Throws `InProgressHandEditError` (with the list of changed fields) when any
+ *   field has been mutated. The list includes `"source_hash"` if that field drifted.
+ * - Propagates `MalformedExecutionManifestError` unchanged when the on-disk
+ *   manifest is structurally invalid — a malformed manifest is a worse problem
+ *   than a hand-edit and must surface via existing FR13 handling.
+ * - Propagates `ManifestNotFoundError` when the manifest does not exist at the
+ *   expected path — callers route based on state and should not invoke this guard
+ *   for refs that are not in `in-progress/`.
+ *
+ * **Caller contract:**
+ * Epic 4/5 callers MUST invoke this guard on entry for any ref they would operate
+ * on in the `in-progress/` layer. The guard is NOT called defensively on every
+ * skill invocation — only for refs the tool would otherwise act on. (Story 3.7)
+ *
+ * **Pure with respect to writes:** never modifies the manifest, never moves it.
+ *
+ * @param opts.targetRepoRoot - Absolute path to the target repository root.
+ * @param opts.ref - Manifest ref (e.g. `"native:01HZ..."`).
+ * @param opts.sourceHash - The `source_hash` value at the time the manifest was
+ *   last written by `scan-sources` (i.e. the canonical value).
+ * @param opts.sourceFields - The operator-editable field values at scan-time.
+ *
+ * @throws {InProgressHandEditError} When a hand-edit is detected.
+ * @throws {MalformedExecutionManifestError} When the manifest is structurally invalid.
+ * @throws {ManifestNotFoundError} When the manifest does not exist in `in-progress/`.
+ */
+export declare function detectInProgressHandEdit(opts: {
+    targetRepoRoot: string;
+    ref: string;
+    sourceHash: string;
+    sourceFields: OperatorEditableFields;
+}): Promise<{
+    ok: true;
+}>;
+/**
  * Single load-bearing predicate for the dev-loop claim path.
  *
  * Returns `true` iff the manifest is eligible to be claimed by the dev loop:
