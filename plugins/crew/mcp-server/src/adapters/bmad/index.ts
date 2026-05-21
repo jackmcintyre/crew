@@ -26,9 +26,9 @@ import {
  * `detect()` is stateless: it answers against an explicit `targetRepo`
  * argument and the default `stories_root`. The other interface methods
  * require a bound `(targetRepo, storiesRoot)` context, which the
- * runtime sets via {@link configureBmadAdapter} (called by
- * `getActiveAdapter()` once it lands in Story 3.1). Tests bypass the
- * registry and call `configureBmadAdapter` directly.
+ * runtime sets via {@link configureBmadAdapter}, invoked from `resolveWorkspace`
+ * once the workspace config has been resolved (Story 3.3b). Tests bypass
+ * `resolveWorkspace` and call `configureBmadAdapter` directly.
  *
  * @see plugins/crew/docs/spikes/bmad-format.md
  */

@@ -9,7 +9,12 @@ export interface Workspace {
     targetRepoRoot: string;
     /** Mirrors `adapter` from `.crew/config.yaml`. */
     activeAdapterName: string;
-    /** The registered `PlanningAdapter` instance for `activeAdapterName`. */
+    /**
+     * The registered `PlanningAdapter` instance for `activeAdapterName`.
+     * The adapter's per-invocation context (e.g. BMad's `(targetRepo, storiesRoot)` binding)
+     * has already been applied; callers may invoke adapter methods immediately without
+     * calling any `configure` helper.
+     */
     activeAdapter: PlanningAdapter;
     /** Validated by the adapter's own schema. Opaque to the caller. */
     adapterConfig: unknown;
