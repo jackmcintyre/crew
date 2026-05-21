@@ -42,9 +42,11 @@ during the Story 2.7 ship-story smoke gate.
 > **Use this only when switching branches**, not for daily editing (see Daily dev
 > loop above).
 
-> **One-command alternative:** `pnpm --dir plugins/crew dev:install` (shell command,
-> not a TUI slash-command) replaces the three steps below with a single call and
-> a Claude Code restart. See [`docs/dev-loop.md`](dev-loop.md) for details.
+> **Recommended alternative for worktree branches:** launch Claude Code with
+> `claude --plugin-dir <worktree>/plugins/crew` instead of doing the three-step
+> uninstall/install dance below. See [`docs/dev-loop.md`](dev-loop.md) for the
+> rationale (the old `pnpm dev:install` symlink approach is deprecated as of
+> Epic 3 retro, 2026-05-21).
 
 Paste these three commands into the Claude Code TUI **in order**:
 

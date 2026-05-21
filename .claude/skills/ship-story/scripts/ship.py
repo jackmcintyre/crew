@@ -84,6 +84,30 @@ _DEFAULT_RUNS_DIR = REPO / ".claude/skills/ship-story/.runs"
 def runs_dir() -> Path:
     return Path(os.environ.get("CREW_SHIP_RUNS_DIR", str(_DEFAULT_RUNS_DIR)))
 
+
+def _cwd_sanity_check() -> None:
+    """Refuse to run if cwd is inside a `.worktrees/` checkout.
+
+    `_canonical_repo` already strips `.worktrees/<key>` from REPO so writes
+    land in the right place, but the orchestrator's Bash cwd persisting
+    inside a worktree means subsequent shell commands (gh, git push, manual
+    file edits) target the wrong tree. Hard-fail here forces the operator
+    to `cd` back to the main repo before proceeding. (Epic 3 retro,
+    2026-05-21 — bit Stories 3.4 and 3.6.)
+
+    Tests can opt out via CREW_SHIP_SKIP_CWD_CHECK=1.
+    """
+    if os.environ.get("CREW_SHIP_SKIP_CWD_CHECK") == "1":
+        return
+    cwd = Path.cwd().resolve()
+    if ".worktrees" in cwd.parts:
+        sys.stderr.write(
+            f"ship.py: cwd is inside .worktrees/ ({cwd}). "
+            f"Run from the main repo root ({REPO}) instead. "
+            f"See Epic 3 retro for context.\n"
+        )
+        sys.exit(2)
+
 # Exit code mnemonic for the pre-PR user-surface gate.
 EXIT_USER_SURFACE_UNVERIFIED = 42
 
@@ -303,29 +327,22 @@ def cmd_resolve(args) -> None:
 # ---------------------------------------------------------------- worktree
 
 
-def _run_dev_install(checkout_root: Path) -> dict:
-    """Re-point the Claude Code plugin cache at `checkout_root`'s `plugins/crew/`.
+def _plugin_dir_hint(checkout_root: Path) -> dict:
+    """Tell the operator how to load this checkout's plugin into Claude Code.
 
-    Silently skipped if the dev-install script doesn't exist (e.g. before
-    Story 1.11 has merged to main, or on repos that never installed it).
-    Surfaces a warning on non-zero exit but never raises — the caller's
-    primary operation (worktree create / cleanup) is what must succeed.
+    Story 1.11 shipped a `pnpm dev:install` script that symlinks the worktree's
+    `plugins/crew/` into `~/.claude/plugins/cache/`. In practice that symlink
+    fights Claude Code's plugin healer — the healer expects a directory-copy
+    install, sees the symlink as corruption, and wipes the cache entry on
+    startup. Epic 3 retro (2026-05-21) replaced the symlink approach with
+    Anthropic's blessed dev workflow: `claude --plugin-dir <path>`, which
+    loads the plugin for the session and survives restarts.
     """
-    script = checkout_root / "plugins" / "crew" / "scripts" / "dev-install.sh"
-    if not script.exists():
-        return {"ran": False, "reason": "dev-install script not present"}
-    rc = subprocess.run(
-        ["pnpm", "--dir", "plugins/crew", "dev:install"],
-        cwd=checkout_root, capture_output=True, text=True,
-    )
-    if rc.returncode != 0:
-        return {
-            "ran": True,
-            "ok": False,
-            "exit": rc.returncode,
-            "stderr": rc.stderr.strip()[-400:],
-        }
-    return {"ran": True, "ok": True, "target": str(checkout_root / "plugins" / "crew")}
+    plugin_path = checkout_root / "plugins" / "crew"
+    return {
+        "invocation": f"claude --plugin-dir {plugin_path}",
+        "plugin_dir": str(plugin_path),
+    }
 
 
 def cmd_worktree(args) -> None:
@@ -349,8 +366,8 @@ def cmd_worktree(args) -> None:
         ["git", "worktree", "add", str(worktree), "-b", branch, "origin/main"],
         cwd=REPO,
     )
-    dev_install = _run_dev_install(worktree)
-    print(json.dumps({"worktree": str(worktree), "branch": branch, "dev_install": dev_install}))
+    plugin_dir = _plugin_dir_hint(worktree)
+    print(json.dumps({"worktree": str(worktree), "branch": branch, "plugin_dir": plugin_dir}))
 
 
 # ---------------------------------------------------------------- status
@@ -602,9 +619,10 @@ def cmd_cleanup(args) -> None:
             removed.append(f.name)
     summary["tmp_removed"] = removed
 
-    # 6b. re-point Claude Code plugin cache at main (the worktree we were pointing
-    # at is gone). Defensive: silently skipped if dev-install isn't present.
-    summary["dev_install"] = _run_dev_install(REPO)
+    # 6b. tell the operator how to point Claude Code back at main now that the
+    # worktree is gone. See `_plugin_dir_hint` for the rationale on why we no
+    # longer auto-mutate `~/.claude/plugins/cache/` (Epic 3 retro, 2026-05-21).
+    summary["plugin_dir"] = _plugin_dir_hint(REPO)
 
     # 7. record event (run log persists — audit trail outlives the worktree)
     log = run_log(key)
@@ -983,6 +1001,7 @@ def cmd_record_verification(args) -> None:
 
 
 def main() -> None:
+    _cwd_sanity_check()
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
 

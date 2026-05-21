@@ -36,6 +36,27 @@ An AC is `user-surface` if and only if it references at least one of:
 ACs that name only internal functions, schemas, MCP tools, or implementation
 files are **NOT** `user-surface`.
 
+### Don't tag an AC `user-surface` if its chat surface depends on a deferred caller
+
+If an AC promises operator-observable behaviour (a chat refusal, a TUI toast,
+a slash-command output) but the v1 implementation ships only a predicate /
+helper that has no v1 caller, the user-surface promise is paper-only. The
+pre-PR smoke gate will accept automated unit-test evidence on the predicate,
+but the AC's stated contract — "the next skill invocation flags the edit
+and refuses to proceed" — cannot actually be observed by an operator until
+a caller wires the predicate up.
+
+Two safer shapes:
+
+- **Ship the caller in the same story.** The AC's chat surface is then real
+  on day one of the merge.
+- **Split into a substrate predicate-story now and a separate user-surface
+  wiring-story later.** Don't tag the predicate-only story `user-surface`.
+
+Story 3.7's AC3 shipped under neither shape — the predicate landed, the
+caller didn't, the gate accepted automated evidence. Worked once; not a
+pattern to repeat. (Epic 3 retro, 2026-05-21.)
+
 ## Tag convention
 
 In the story-spec Markdown, every AC item is one of:
