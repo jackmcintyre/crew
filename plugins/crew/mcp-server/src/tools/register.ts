@@ -2,6 +2,8 @@ import { z } from "zod";
 import { DomainError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import type { AiEngineeringTeamServer } from "../server.js";
+import { claimStory } from "./claim-story.js";
+import { completeStory } from "./complete-story.js";
 import { getStatus, renderStatus } from "./get-status.js";
 import { getTeamSnapshot, renderTeamSnapshot } from "./get-team-snapshot.js";
 import { instantiatePersona } from "./instantiate-persona.js";
@@ -423,6 +425,98 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         if (err instanceof DomainError) {
           return {
             content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.1 — claimStory: atomic claim (FR17), dependency check (FR18), hand-edit guard (FR14a).
+  server.registerTool({
+    name: "claimStory",
+    description:
+      "Atomically claim a story for dev work (FR17) — moves manifest from to-do/ to in-progress/, stamps claimed_by with the caller's session ULID, refuses if any depends_on ref is not in done/ (FR18) or if the in-progress manifest has been hand-edited (FR14a). Story 4.1.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        ref: { type: "string" },
+        sessionUlid: { type: "string" },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "ref", "sessionUlid"],
+    },
+    handler: async (args) => {
+      try {
+        const parsed = z
+          .object({
+            targetRepoRoot: z.string().min(1),
+            ref: z.string().min(1),
+            sessionUlid: z.string().min(1),
+            role: z.string().optional(),
+          })
+          .parse(args);
+        const result = await claimStory(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.1 — completeStory: atomic complete (FR19), claimant check (AC4), hand-edit guard (FR14a).
+  server.registerTool({
+    name: "completeStory",
+    description:
+      "Atomically complete a claimed story (FR19) — moves manifest from in-progress/ to done/, preserves claimed_by, refuses if the caller's session ULID does not match the manifest's claimed_by (WrongClaimantError) or if the in-progress manifest has been hand-edited (FR14a). Story 4.1.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        ref: { type: "string" },
+        sessionUlid: { type: "string" },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "ref", "sessionUlid"],
+    },
+    handler: async (args) => {
+      try {
+        const parsed = z
+          .object({
+            targetRepoRoot: z.string().min(1),
+            ref: z.string().min(1),
+            sessionUlid: z.string().min(1),
+            role: z.string().optional(),
+          })
+          .parse(args);
+        const result = await completeStory(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
             isError: true,
           };
         }

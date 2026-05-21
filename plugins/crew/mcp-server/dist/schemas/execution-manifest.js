@@ -3,22 +3,30 @@ import { MalformedExecutionManifestError } from "../errors.js";
 /**
  * Zod schema for execution manifests.
  *
- * **Producer:** `scan-sources.ts` is the only writer that creates manifests.
+ * **Producer:** `scan-sources.ts` creates manifests; Story 4.1 adds two more:
  *   - New source stories → `to-do/<ref>.yaml` with `status: "to-do"`.
  *   - Discipline violations → `blocked/<ref>.yaml` with `status: "blocked"`
  *     and the `blocked_by` / `discipline_violations` fields populated
  *     (Story 3.5 Task 6.2).
+ *   - `claimStory` writes `"in-progress"` on the `to-do → in-progress`
+ *     transition (Story 4.1 FR17).
+ *   - `completeStory` writes `"done"` on the `in-progress → done` transition
+ *     (Story 4.1 FR19).
  *
  * **Consumer:** Every future reader MUST go through `parseExecutionManifest`
  * rather than calling `ExecutionManifestSchema.parse` directly.
  *
- * **Status vocabulary:** This schema accepts `"to-do"` and `"blocked"`.
- * Future stories that need to parse `in-progress/` or `done/` manifests
- * should extend this schema rather than add a separate one.
+ * **Status vocabulary (Story 4.1 widening):** This schema accepts `"to-do"`,
+ * `"blocked"`, `"in-progress"`, and `"done"`. Previous stories asserted that
+ * `"in-progress"` was rejected — those assertions MUST be flipped to assert
+ * acceptance. The widening is additive: existing `to-do/` and `blocked/`
+ * manifests parse unchanged.
  *
  * **Strict mode:** `.strict()` is intentional — unknown keys are rejected so
  * additive future fields force a coordinated schema bump rather than silent
- * acceptance via Zod's default `strip` mode.
+ * acceptance via Zod's default `strip` mode. Story 4.1 added `claimed_by` and
+ * widened the `status` enum; a `yaml.stringify(parseExecutionManifest(...))`
+ * round-trip of an `in-progress/` or `done/` manifest preserves all fields.
  *
  * Field order mirrors the intended on-disk YAML field order so that a
  * `yaml.stringify(schema.parse(obj))` round-trip produces stable output.
@@ -32,10 +40,15 @@ export const ExecutionManifestSchema = z
      */
     ref: z.string().min(1),
     /**
-     * Manifest status. `"to-do"` for normal scan-sources output;
-     * `"blocked"` for discipline-violation blocked manifests (Story 3.5 Task 6.2).
+     * Manifest status.
+     * - `"to-do"` — normal scan-sources output (scan-sources).
+     * - `"blocked"` — discipline-violation blocked manifests (Story 3.5 Task 6.2).
+     * - `"in-progress"` — written by `claimStory` on `to-do → in-progress`
+     *   transition (Story 4.1 FR17).
+     * - `"done"` — written by `completeStory` on `in-progress → done`
+     *   transition (Story 4.1 FR19).
      */
-    status: z.enum(["to-do", "blocked"]),
+    status: z.enum(["to-do", "blocked", "in-progress", "done"]),
     /**
      * Name of the active adapter at scan time (e.g. `"bmad"`). Stored so
      * a manifest is self-describing even if `.crew/config.yaml` later changes
@@ -115,6 +128,19 @@ export const ExecutionManifestSchema = z
         detail: z.string().min(1),
     }))
         .optional(),
+    /**
+     * ULID of the session that claimed this story via `claimStory`.
+     * Present iff `status === "in-progress" || status === "done"`.
+     *
+     * The tools enforce this invariant on write; Zod does NOT enforce a
+     * cross-field refinement here because doing so would block scan-sources
+     * rewrites of `to-do/` manifests that legitimately do not carry
+     * `claimed_by`. A story in `in-progress/` without `claimed_by` is
+     * treated as malformed by `completeStory` (WrongClaimantError).
+     *
+     * Added in Story 4.1 (FR17).
+     */
+    claimed_by: z.string().min(1).optional(),
 })
     .strict();
 /**

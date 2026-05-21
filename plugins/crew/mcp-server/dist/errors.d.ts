@@ -457,6 +457,39 @@ export declare class InProgressHandEditError extends DomainError {
     });
 }
 /**
+ * `claimStory` refused because one or more `depends_on` refs are not yet in
+ * `done/`. The calling session must wait for the listed dependencies to
+ * complete before the ref can be claimed.
+ *
+ * FR18 — dependency check at claim time (Story 4.1).
+ * Message format mirrors `GitCommitMessageMalformedError`'s `<tool-name> refused: <reason>`.
+ */
+export declare class DependenciesNotReadyError extends DomainError {
+    readonly ref: string;
+    readonly missingDeps: readonly string[];
+    constructor(opts: {
+        ref: string;
+        missingDeps: readonly string[];
+    });
+}
+/**
+ * `completeStory` refused because the calling session's ULID does not match
+ * the `claimed_by` field on the `in-progress/` manifest. Only the session
+ * that claimed the story may complete it.
+ *
+ * Story 4.1 AC4.
+ */
+export declare class WrongClaimantError extends DomainError {
+    readonly ref: string;
+    readonly expectedSessionUlid: string;
+    readonly actualSessionUlid: string;
+    constructor(opts: {
+        ref: string;
+        expectedSessionUlid: string;
+        actualSessionUlid: string;
+    });
+}
+/**
  * `readPersona` was asked for a role whose persona file does not
  * exist under `<target-repo>/team/<role>/PERSONA.md`. (Story 2.3)
  */
