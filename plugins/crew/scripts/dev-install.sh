@@ -1,7 +1,20 @@
 #!/bin/sh
-# plugins/crew/scripts/dev-install.sh — make the active worktree's plugin tree
-# authoritative for the next Claude Code session by replacing the install-cache
-# directory with a symlink that points at the source tree.
+# plugins/crew/scripts/dev-install.sh — DEPRECATED as of Epic 3 retro (2026-05-21).
+#
+# The symlink approach this script implements fights Claude Code's plugin
+# healer: the healer expects a directory-copy install, sees a symlink in the
+# cache, treats it as corruption, and wipes the entry on startup. In practice
+# the symlink survives only the current session. Prefer the blessed dev
+# workflow:
+#
+#     claude --plugin-dir <path-to-worktree>/plugins/crew
+#
+# That loads the plugin for the session, bypasses the marketplace cache, and
+# survives restarts. See plugins/crew/docs/dev-loop.md.
+#
+# This script is retained for any consumer that still wants the symlink
+# approach (e.g. testing that the cache shape is correct) but is no longer
+# called by `ship.py` during worktree creation or cleanup.
 #
 # Story 1.11. Chosen mechanism: hybrid symlink — see
 # plugins/crew/docs/spikes/dev-install-decision.md.
@@ -151,6 +164,9 @@ fi
 # ── step 6: success ──────────────────────────────────────────────────────────
 
 printf 'dev:install ok → %s (source: %s)\n' "$target" "$source_dir"
+printf '⚠ DEPRECATED: this symlink will be wiped by Claude Code on next restart.\n'
+printf '  Prefer: claude --plugin-dir %s\n' "$source_dir"
+printf '  Background: plugins/crew/docs/dev-loop.md\n'
 
 # ── optional step 7: kill daemon ─────────────────────────────────────────────
 
