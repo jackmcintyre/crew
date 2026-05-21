@@ -481,6 +481,182 @@ describe("AC4(d) — hand-edit refusal: claimStory throws InProgressHandEditErro
 // Behavioural invariants
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// AC2 — Persona read exactly once per spawn; no cross-spawn caching
+// ---------------------------------------------------------------------------
+
+describe("AC2 — buildPersonaSpawnPrompt called exactly once per spawn (no caching)", () => {
+  it("calls buildPrompt exactly once for each story in a multi-story session", async () => {
+    // AC2: "on a subsequent claim within the same /crew:start session,
+    // buildPersonaSpawnPrompt is invoked again so a persona edit between
+    // stories is picked up at the next spawn."
+    const refs = [
+      "native:01HZABC0000000000000000001",
+      "native:01HZABC0000000000000000002",
+      "native:01HZABC0000000000000000003",
+    ];
+    const candidates = refs.map((ref) => makeFakeCandidate(ref));
+
+    const buildPromptCallArgs: Array<{ targetRepoRoot: string; role: string }> = [];
+
+    await runStartLoop({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      deps: {
+        listTodos: makeFakeListTodos(candidates, 0),
+        claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
+        buildPrompt: async (opts) => {
+          buildPromptCallArgs.push({ targetRepoRoot: opts.targetRepoRoot, role: opts.role });
+          return { systemPrompt: `# Persona snapshot for call ${buildPromptCallArgs.length}` };
+        },
+        taskSpawn: async () => {},
+      },
+    });
+
+    // Exactly three calls — one per story spawn, never cached.
+    expect(buildPromptCallArgs.length).toBe(3);
+
+    // Each call used role: "generalist-dev".
+    for (const callArgs of buildPromptCallArgs) {
+      expect(callArgs.role).toBe("generalist-dev");
+    }
+  });
+
+  it("each spawn receives a freshly-assembled prompt (not the same cached string)", async () => {
+    // AC2: "a persona edit between stories MUST be picked up at the next spawn".
+    // Simulate a persona that changes between spawn calls to prove no caching.
+    const refs = [
+      "native:01HZABC0000000000000000001",
+      "native:01HZABC0000000000000000002",
+    ];
+    const candidates = refs.map((ref) => makeFakeCandidate(ref));
+
+    let promptVersion = 0;
+    const promptsIssuedToSpawn: string[] = [];
+
+    await runStartLoop({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      deps: {
+        listTodos: makeFakeListTodos(candidates, 0),
+        claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
+        buildPrompt: async () => {
+          promptVersion++;
+          // Return a different systemPrompt each call, simulating a persona edit.
+          return { systemPrompt: `# Persona v${promptVersion}` };
+        },
+        taskSpawn: async (args) => {
+          promptsIssuedToSpawn.push(args.systemPrompt);
+        },
+      },
+    });
+
+    // Two spawns, two distinct prompts — no caching between spawns.
+    expect(promptsIssuedToSpawn.length).toBe(2);
+    expect(promptsIssuedToSpawn[0]).toBe("# Persona v1");
+    expect(promptsIssuedToSpawn[1]).toBe("# Persona v2");
+    expect(promptsIssuedToSpawn[0]).not.toBe(promptsIssuedToSpawn[1]);
+  });
+
+  it("does not call buildPrompt on single-story that errors during claim (no spawn)", async () => {
+    // AC2 guard: if claim fails, buildPrompt must NOT be called (no spawn).
+    const ref = "native:01HZABC0000000000000000001";
+    const candidates: ClaimableCandidate[] = [makeFakeCandidate(ref)];
+    let buildPromptCalled = false;
+
+    await runStartLoop({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      deps: {
+        listTodos: makeFakeListTodos(candidates, 0),
+        claim: async () => { throw new Error("SomeClaimError: claim failed"); },
+        buildPrompt: async () => {
+          buildPromptCalled = true;
+          return { systemPrompt: "# Should not be called" };
+        },
+        taskSpawn: async () => {},
+      },
+    });
+
+    expect(buildPromptCalled).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 — Exact chat-surface output lines (verbatim assertions)
+// ---------------------------------------------------------------------------
+
+describe("AC1 — exact chat-surface output lines", () => {
+  it("prints 'spawning generalist-dev subagent (clean context)' verbatim", async () => {
+    // AC1(b): "prints ... 'spawning generalist-dev subagent (clean context)'"
+    const ref = "native:01HZABC0000000000000000001";
+    const candidates: ClaimableCandidate[] = [makeFakeCandidate(ref)];
+
+    const result = await runStartLoop({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      deps: {
+        listTodos: makeFakeListTodos(candidates, 0),
+        claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
+        taskSpawn: async () => {},
+      },
+    });
+
+    // Exact verbatim check — not just startsWith.
+    expect(result.chatLog).toContain("spawning generalist-dev subagent (clean context)");
+  });
+
+  it("prints 'claiming <ref> — <title>' verbatim for each story", async () => {
+    // AC1(b): "prints a per-claim line of shape 'claiming <ref> — <title>'"
+    const ref = "native:01HZABC0000000000000000001";
+    const candidates: ClaimableCandidate[] = [makeFakeCandidate(ref)];
+
+    const result = await runStartLoop({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      deps: {
+        listTodos: makeFakeListTodos(candidates, 0),
+        claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
+        taskSpawn: async () => {},
+      },
+    });
+
+    // Exact verbatim match: "claiming <ref> — <title>"
+    expect(result.chatLog).toContain(`claiming ${ref} — Story ${ref}`);
+  });
+
+  it("degrades to <title-unavailable> when title is absent", async () => {
+    // AC1 + Behavioural contract: "if absent / unreadable, degrade to
+    // 'claiming <ref> — <title-unavailable>' rather than failing the loop."
+    const ref = "native:01HZABC0000000000000000001";
+    const candidateNoTitle: ClaimableCandidate = {
+      ref,
+      title: undefined as unknown as string, // simulate absent title
+      depends_on: [],
+      depsReady: true,
+    };
+
+    const result = await runStartLoop({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      deps: {
+        listTodos: async () => ({ todos: [candidateNoTitle], inProgressCount: 0 }),
+        claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
+        taskSpawn: async () => {},
+      },
+    });
+
+    expect(result.chatLog).toContain(`claiming ${ref} — <title-unavailable>`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Behavioural invariants
+// ---------------------------------------------------------------------------
+
 describe("Behavioural invariants", () => {
   it("does not call buildPrompt on the queue-drained path", async () => {
     let buildPromptCalled = false;
