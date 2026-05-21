@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { adapters as registryAdapters } from "../adapters/registry.js";
 import { configureBmadAdapter } from "../adapters/bmad/index.js";
+import { configureNativeAdapter } from "../adapters/native/index.js";
 import { AmbiguousAdapterError, InvalidWorkspaceConfigError, NoAdapterMatchedError, } from "../errors.js";
 import { PluginSettingsSchema, WorkspaceConfigSchema, } from "../schemas/workspace-config.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
@@ -134,6 +135,10 @@ export async function resolveWorkspace(opts) {
             targetRepo: targetRepoRoot,
             storiesRoot: bmadConfig.stories_root ?? "_bmad-output/planning-artifacts/stories",
         });
+    }
+    // Native adapter has no per-repo config in v1; binding is trivial.
+    if (activeAdapter.name === "native") {
+        configureNativeAdapter({ targetRepo: targetRepoRoot });
     }
     return {
         targetRepoRoot,

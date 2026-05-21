@@ -11,6 +11,7 @@ import { readCustomRole } from "./read-custom-role.js";
 import { readPersona } from "./read-persona.js";
 import { readRepoSignals } from "./read-repo-signals.js";
 import { scanSources, renderScanResult } from "./scan-sources.js";
+import { writeNativeStory } from "./write-native-story.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -231,6 +232,58 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       return {
         content: [{ type: "text" as const, text: renderTeamSnapshot(snapshot) }],
       };
+    },
+  });
+
+  // Story 3.4 — writeNativeStory: write a new native-story file under
+  // `<targetRepoRoot>/.crew/native-stories/<ULID>.md`. Invoked by the
+  // planner subagent (spawned by /crew:plan) in native-adapter workspaces.
+  // The tool refuses with WrongAdapterError if the active adapter is not
+  // 'native', providing a runtime guard for the BMad-branch Behavioural
+  // contract clause.
+  server.registerTool({
+    name: "writeNativeStory",
+    description:
+      "Write a new native-adapter story file under <targetRepoRoot>/.crew/native-stories/<ULID>.md. " +
+      "Refuses with WrongAdapterError if the active adapter is not 'native'. " +
+      "Used by the planner subagent spawned by /crew:plan (Story 3.4).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        title: { type: "string" },
+        narrative: { type: "string" },
+        acceptance_criteria: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string" },
+              kind: { type: "string", enum: ["integration", "unit"] },
+            },
+            required: ["text", "kind"],
+          },
+        },
+        implementation_notes: { type: "string" },
+        depends_on: { type: "array", items: { type: "string" } },
+      },
+      required: ["targetRepoRoot", "title", "narrative", "acceptance_criteria", "depends_on"],
+    },
+    handler: async (args) => {
+      try {
+        const result = await writeNativeStory(args);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
     },
   });
 
