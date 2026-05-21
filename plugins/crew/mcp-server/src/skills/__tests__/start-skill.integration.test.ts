@@ -642,7 +642,7 @@ describe("AC1 — exact chat-surface output lines", () => {
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
       deps: {
-        listTodos: async () => ({ todos: [candidateNoTitle], inProgressCount: 0 }),
+        listTodos: makeFakeListTodos([candidateNoTitle], 0),
         claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
         buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
         taskSpawn: async () => {},
