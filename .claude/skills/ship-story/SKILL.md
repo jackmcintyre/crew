@@ -92,7 +92,7 @@ $SH record <story_key> resolved
 $SH worktree <story_key>
 ```
 
-Fails closed if path exists, branch exists, or origin/main can't be fetched. Returns JSON with `worktree` path and `branch`. All subsequent file/test/git ops happen inside the worktree.
+Fails closed if path exists, branch exists, or origin/main can't be fetched. Returns JSON with `worktree` path, `branch`, and a `dev_install` block. As part of this step, `ship.py` invokes `pnpm --dir plugins/crew dev:install` against the new worktree so the Claude Code plugin cache is re-pointed at the worktree's `plugins/crew/` — any user-surface AC verified during the story (Step 8.5) flows through the worktree's code without a manual install step. The dev-install call is defensive: silently skipped if `plugins/crew/scripts/dev-install.sh` is not present in the worktree (Story 1.11 ships this script; pre-1.11 worktrees just get a `"reason": "not present"` block). On dev-install failure, the worktree is still created and the orchestrator surfaces the warning. All subsequent file/test/git ops happen inside the worktree.
 
 ```bash
 $SH record <story_key> worktree_ready --data '{"path":"..."}'
@@ -365,7 +365,7 @@ This step is **not** auto-run at the end of Step 11 — merge timing is unbounde
    ```bash
    $SH cleanup <story_key>
    ```
-   This atomically does: verify PR is merged via `gh pr view`, status → `done`, fast-forward local `main`, `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, `git push origin --delete story/<story_key>` (best-effort — silent if GitHub already auto-deleted), tidy `/tmp/ship-<story_key>.*`, append `cleaned` event to the run log.
+   This atomically does: verify PR is merged via `gh pr view`, status → `done`, fast-forward local `main`, `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, `git push origin --delete story/<story_key>` (best-effort — silent if GitHub already auto-deleted), tidy `/tmp/ship-<story_key>.*`, re-point the Claude Code plugin cache back at main via `pnpm --dir plugins/crew dev:install` (defensive: silently skipped if the script is missing), append `cleaned` event to the run log.
 
 3. **Report.** One line per story cleaned, plus any of the halt codes below.
 

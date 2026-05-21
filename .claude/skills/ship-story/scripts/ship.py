@@ -284,6 +284,31 @@ def cmd_resolve(args) -> None:
 # ---------------------------------------------------------------- worktree
 
 
+def _run_dev_install(checkout_root: Path) -> dict:
+    """Re-point the Claude Code plugin cache at `checkout_root`'s `plugins/crew/`.
+
+    Silently skipped if the dev-install script doesn't exist (e.g. before
+    Story 1.11 has merged to main, or on repos that never installed it).
+    Surfaces a warning on non-zero exit but never raises — the caller's
+    primary operation (worktree create / cleanup) is what must succeed.
+    """
+    script = checkout_root / "plugins" / "crew" / "scripts" / "dev-install.sh"
+    if not script.exists():
+        return {"ran": False, "reason": "dev-install script not present"}
+    rc = subprocess.run(
+        ["pnpm", "--dir", "plugins/crew", "dev:install"],
+        cwd=checkout_root, capture_output=True, text=True,
+    )
+    if rc.returncode != 0:
+        return {
+            "ran": True,
+            "ok": False,
+            "exit": rc.returncode,
+            "stderr": rc.stderr.strip()[-400:],
+        }
+    return {"ran": True, "ok": True, "target": str(checkout_root / "plugins" / "crew")}
+
+
 def cmd_worktree(args) -> None:
     worktrees_dir = REPO / ".worktrees"
     worktrees_dir.mkdir(parents=True, exist_ok=True)
@@ -305,7 +330,8 @@ def cmd_worktree(args) -> None:
         ["git", "worktree", "add", str(worktree), "-b", branch, "origin/main"],
         cwd=REPO,
     )
-    print(json.dumps({"worktree": str(worktree), "branch": branch}))
+    dev_install = _run_dev_install(worktree)
+    print(json.dumps({"worktree": str(worktree), "branch": branch, "dev_install": dev_install}))
 
 
 # ---------------------------------------------------------------- status
@@ -556,6 +582,10 @@ def cmd_cleanup(args) -> None:
             f.unlink()
             removed.append(f.name)
     summary["tmp_removed"] = removed
+
+    # 6b. re-point Claude Code plugin cache at main (the worktree we were pointing
+    # at is gone). Defensive: silently skipped if dev-install isn't present.
+    summary["dev_install"] = _run_dev_install(REPO)
 
     # 7. record event (run log persists — audit trail outlives the worktree)
     log = run_log(key)
