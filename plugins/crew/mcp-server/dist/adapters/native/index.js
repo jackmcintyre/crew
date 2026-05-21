@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
+import { validateStoryAgainstDiscipline } from "../../validators/planning-discipline.js";
 import { parseNativeStory } from "./parse-native-story.js";
 /**
  * Native planning adapter — v1 implementation (Story 3.4).
@@ -142,13 +143,15 @@ export const NativeAdapter = {
     /** Reject unknown keys; accept empty object. */
     adapterConfigSchema: z.object({}).strict(),
     /**
-     * Pass-through discipline validator — returns the input story unchanged.
-     * Real enforcement lands in Story 3.5.
+     * Validate a native `SourceStory` against planning-discipline rules.
+     * Delegates to the pure `validateStoryAgainstDiscipline` function (Story 3.5).
      *
-     * @see _bmad-output/planning-artifacts/epics/epic-3-backlog-layer-planning-adapters-story-manifests-and-the-planning-conversation.md § Story 3.5
+     * Per-story only — ship-gate (backlog-level) is enforced by `validatePlannerBacklog`.
+     *
+     * @see _bmad-output/implementation-artifacts/3-5-planning-discipline-validation-at-authoring-and-scan-time.md § Task 2
      */
     validateAgainstDiscipline(story) {
-        return story;
+        return validateStoryAgainstDiscipline(story);
     },
 };
 export { parseNativeStory };

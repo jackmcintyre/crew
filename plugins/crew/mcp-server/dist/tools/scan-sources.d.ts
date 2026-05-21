@@ -1,5 +1,5 @@
 /**
- * Result returned by `scanSources`. All four ref arrays are disjoint.
+ * Result returned by `scanSources`. All five ref arrays are disjoint.
  *
  * - `createdRefs`: manifests that did not exist before this scan (AC1 path).
  * - `updatedRefs`: manifests still in `to-do/` whose `source_hash` was
@@ -9,8 +9,14 @@
  * - `skippedRefs`: refs the adapter listed but the tool deliberately did NOT
  *   touch. `reason: "not-in-to-do"` means the manifest already exists in
  *   another state dir (in-progress, blocked, done) — the dev loop owns it
- *   there. `reason: "discipline-violation"` is reserved for Story 3.5; v1
- *   never produces it (all adapters' `validateAgainstDiscipline` is pass-through).
+ *   there, or a prior scan already blocked it. `reason: "discipline-violation"`
+ *   means this scan just created a new blocked manifest for the first time.
+ * - `blockedRefs`: refs that failed discipline in THIS scan and had a manifest
+ *   written to `blocked/` for the first time (Story 3.5 Task 6.3). Overlaps
+ *   with `skippedRefs[reason: "discipline-violation"]` by design — `skippedRefs`
+ *   is the legacy seam, `blockedRefs` is the new operator-facing surface. On
+ *   the second scan after a story is blocked, it appears in skippedRefs with
+ *   `reason: "not-in-to-do"` (blocked manifests are owned state, not touched).
  */
 export interface ScanResult {
     targetRepoRoot: string;
@@ -23,6 +29,8 @@ export interface ScanResult {
         reason: "not-in-to-do" | "discipline-violation";
         detail?: string;
     }>;
+    /** Story 3.5: refs that failed planning-discipline and were written to blocked/. */
+    blockedRefs: string[];
 }
 /**
  * Render a `ScanResult` as a human-readable text summary.

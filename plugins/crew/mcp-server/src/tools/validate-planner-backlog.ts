@@ -1,0 +1,166 @@
+/**
+ * `validatePlannerBacklog` MCP tool (Story 3.5 Task 5).
+ *
+ * The planner subagent MUST call this tool before every `writeNativeStory`
+ * invocation and before emitting the locked handoff phrase. The tool runs
+ * all planning-discipline checks against the pending story batch and returns
+ * a structured pass/fail result.
+ *
+ * Contract:
+ *   - Returns `{ ok: true }` on full pass.
+ *   - Returns `{ ok: false; violations: DisciplineViolation[] }` on any failure.
+ *   - NEVER throws on discipline failure; throws only on wrong adapter,
+ *     malformed input, or empty `pendingStories`.
+ *   - Does NOT write any file. Write is `writeNativeStory`'s job.
+ *
+ * @see _bmad-output/implementation-artifacts/3-5-planning-discipline-validation-at-authoring-and-scan-time.md § Task 5
+ */
+
+import * as path from "node:path";
+import { z } from "zod";
+import type { DisciplineViolation, SourceStory } from "../adapters/adapter.js";
+import { WrongAdapterError } from "../errors.js";
+import { resolveWorkspace } from "../state/workspace-resolver.js";
+import {
+  validateBacklogAgainstDiscipline,
+  validateStoryAgainstDiscipline,
+} from "../validators/planning-discipline.js";
+
+// ---------------------------------------------------------------------------
+// Input schema
+// ---------------------------------------------------------------------------
+
+export const PendingStoryInputSchema = z.object({
+  title: z.string().min(1),
+  narrative: z.string().min(1),
+  acceptance_criteria: z
+    .array(
+      z.object({
+        text: z.string().min(1),
+        kind: z.enum(["integration", "unit"]),
+      }),
+    )
+    .min(1),
+  implementation_notes: z.string().optional(),
+  depends_on: z.array(z.string()),
+  ship_gate: z.boolean(),
+  /**
+   * `"auto"` — run the heuristic (default).
+   * `true` — force state-mutating treatment (operator-declared exception).
+   * `false` — suppress heuristic (operator dismissed a false positive).
+   */
+  state_mutating: z.union([z.boolean(), z.literal("auto")]),
+});
+
+export type PendingStoryInput = z.infer<typeof PendingStoryInputSchema>;
+
+export const ValidatePlannerBacklogInputSchema = z.object({
+  targetRepoRoot: z.string().min(1),
+  pendingStories: z.array(PendingStoryInputSchema).min(1, {
+    message:
+      "pendingStories must contain at least one story. Calling with an empty batch is a caller bug.",
+  }),
+});
+
+export type ValidatePlannerBacklogInput = z.infer<typeof ValidatePlannerBacklogInputSchema>;
+
+// ---------------------------------------------------------------------------
+// Output types
+// ---------------------------------------------------------------------------
+
+export type ValidatePlannerBacklogOutput =
+  | { ok: true }
+  | { ok: false; violations: DisciplineViolation[] };
+
+// ---------------------------------------------------------------------------
+// Synthesise SourceStory from PendingStoryInput
+// ---------------------------------------------------------------------------
+
+function pendingToSourceStory(pending: PendingStoryInput, index: number): SourceStory {
+  return {
+    ref: `native:pending-${index}`,
+    title: pending.title,
+    narrative: pending.narrative,
+    acceptance_criteria: pending.acceptance_criteria,
+    depends_on: pending.depends_on,
+    implementation_notes: pending.implementation_notes,
+    raw_path: "",
+    raw_frontmatter: { ship_gate: pending.ship_gate },
+    source_hash: "",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Main implementation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a batch of pending stories against planning-discipline rules.
+ *
+ * The planner subagent calls this before every `writeNativeStory` and before
+ * emitting the locked handoff phrase.
+ */
+export async function validatePlannerBacklog(
+  rawInput: unknown,
+): Promise<ValidatePlannerBacklogOutput> {
+  const input = ValidatePlannerBacklogInputSchema.parse(rawInput);
+  const targetRepoRoot = path.resolve(input.targetRepoRoot);
+
+  // Guard: native-only tool.
+  const workspace = await resolveWorkspace({ targetRepoRoot });
+  if (workspace.activeAdapterName !== "native") {
+    throw new WrongAdapterError({
+      expectedAdapter: "native",
+      actualAdapter: workspace.activeAdapterName,
+      targetRepoRoot,
+    });
+  }
+
+  const allViolations: DisciplineViolation[] = [];
+
+  // Synthesise SourceStory objects from pending inputs.
+  const pendingStories: SourceStory[] = input.pendingStories.map((p, i) =>
+    pendingToSourceStory(p, i),
+  );
+
+  // Per-story discipline checks.
+  for (let i = 0; i < input.pendingStories.length; i++) {
+    const pending = input.pendingStories[i]!;
+    const story = pendingStories[i]!;
+
+    const stateMutatingOverride =
+      pending.state_mutating === "auto" ? undefined : pending.state_mutating;
+
+    const result = validateStoryAgainstDiscipline(story, {
+      stateMutating: stateMutatingOverride,
+    });
+
+    if ("kind" in result && result.kind === "discipline-violation") {
+      allViolations.push(result);
+    }
+  }
+
+  // Backlog-level ship-gate check.
+  // Read already-on-disk native stories to include in the ship-gate search.
+  let existingStories: SourceStory[] = [];
+  try {
+    existingStories = await workspace.activeAdapter.listSourceStories();
+  } catch {
+    // Non-fatal: if we can't list existing stories, proceed with the pending
+    // batch only. The ship-gate check is best-effort at authoring time.
+    existingStories = [];
+  }
+
+  const backlogViolations = validateBacklogAgainstDiscipline(pendingStories, {
+    existingStories,
+    backlogPseudoRef: `backlog:${path.basename(targetRepoRoot)}`,
+  });
+
+  allViolations.push(...backlogViolations);
+
+  if (allViolations.length === 0) {
+    return { ok: true };
+  }
+
+  return { ok: false, violations: allViolations };
+}

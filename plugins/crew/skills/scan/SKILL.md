@@ -17,7 +17,7 @@ A target repo with `.crew/config.yaml` resolved (auto-detected on first run by t
 # Steps
 
 1. Invoke the `scanSources` MCP tool with `targetRepoRoot` set to the current workspace root.
-2. Print the tool's text response verbatim (it is already a structured summary of created / updated / unchanged / skipped refs).
+2. Print the tool's text response verbatim — including the `blocked:` line introduced in Story 3.5. Do NOT paraphrase, filter, or omit any line of the output. A `blocked:` line naming one or more refs is the operator's cue to fix the source story (add a missing integration AC, declare an implicit dependency, etc.) and re-run `/crew:scan` — the blocked manifest will be re-evaluated on the next scan.
 
 # Failure modes
 

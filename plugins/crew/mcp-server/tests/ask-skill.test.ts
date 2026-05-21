@@ -521,8 +521,8 @@ describe("AC4(e) — tool registration unchanged at 8 tools (Task 6.8)", () => {
       expect(toolNames).toContain(name);
     }
 
-    // Story 3.2 added scanSources (9); Story 3.4 added writeNativeStory (10).
-    expect(result.tools.length).toBe(10);
+    // Story 3.2 added scanSources (9); Story 3.4 added writeNativeStory (10); Story 3.5 added validatePlannerBacklog (11).
+    expect(result.tools.length).toBe(11);
 
     // /crew:ask registers no new MCP tool.
     expect(toolNames).not.toContain("ask");

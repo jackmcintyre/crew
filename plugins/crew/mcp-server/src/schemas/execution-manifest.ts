@@ -2,32 +2,24 @@ import { z } from "zod";
 import { MalformedExecutionManifestError } from "../errors.js";
 
 /**
- * Zod schema for an execution manifest at
- * `<target-repo>/.crew/state/to-do/<ref>.yaml`.
+ * Zod schema for execution manifests.
  *
- * **Producer:** Task 2.6 (`tools/scan-sources.ts`) is the only writer that
- * creates new `to-do/` manifests. Future stories (Story 4.x claim tool,
- * Story 3.6 discard flow) update in-place fields.
+ * **Producer:** `scan-sources.ts` is the only writer that creates manifests.
+ *   - New source stories → `to-do/<ref>.yaml` with `status: "to-do"`.
+ *   - Discipline violations → `blocked/<ref>.yaml` with `status: "blocked"`
+ *     and the `blocked_by` / `discipline_violations` fields populated
+ *     (Story 3.5 Task 6.2).
  *
- * **Consumer:** Every future reader (Story 3.5 discipline validator,
- * Story 4.x claim tool, Story 3.6 discard flow) MUST go through
- * `parseExecutionManifest` — the canonical reader — rather than calling
- * `ExecutionManifestSchema.parse` directly. This ensures the typed
- * `MalformedExecutionManifestError` surfaces consistently.
+ * **Consumer:** Every future reader MUST go through `parseExecutionManifest`
+ * rather than calling `ExecutionManifestSchema.parse` directly.
  *
- * **Status vocabulary:** This schema pins `status` to the `"to-do"` literal.
- * It represents the *to-do shape* only. Future stories that need to parse
- * `in-progress/`, `blocked/`, or `done/` manifests will either:
- *  (a) discriminate on the file's parent directory (since `STATE_NAMES` in
- *      `state/manifest-state-machine.ts` is the source of truth), or
- *  (b) add a sibling schema with widened `status`.
- * Both options are left open deliberately — do NOT widen this schema to cover
- * all state-machine states. (Story 1.6 AC/State machine ownership.)
+ * **Status vocabulary:** This schema accepts `"to-do"` and `"blocked"`.
+ * Future stories that need to parse `in-progress/` or `done/` manifests
+ * should extend this schema rather than add a separate one.
  *
  * **Strict mode:** `.strict()` is intentional — unknown keys are rejected so
  * additive future fields force a coordinated schema bump rather than silent
- * acceptance via Zod's default `strip` mode. The cost is one extra edit per
- * new field; the benefit is no silent-drop round-trip bugs.
+ * acceptance via Zod's default `strip` mode.
  *
  * Field order mirrors the intended on-disk YAML field order so that a
  * `yaml.stringify(schema.parse(obj))` round-trip produces stable output.
@@ -42,10 +34,10 @@ export const ExecutionManifestSchema = z
     ref: z.string().min(1),
 
     /**
-     * Always `"to-do"` for manifests written by `scan-sources`.
-     * See schema TSDoc above for the status-vocabulary note.
+     * Manifest status. `"to-do"` for normal scan-sources output;
+     * `"blocked"` for discipline-violation blocked manifests (Story 3.5 Task 6.2).
      */
-    status: z.literal("to-do"),
+    status: z.enum(["to-do", "blocked"]),
 
     /**
      * Name of the active adapter at scan time (e.g. `"bmad"`). Stored so
@@ -111,6 +103,35 @@ export const ExecutionManifestSchema = z
      * `scan-sources` does NOT overwrite an existing `true` value.
      */
     withdrawn: z.boolean().default(false),
+
+    /**
+     * When set, names the reason the manifest was placed in `blocked/`
+     * instead of `to-do/`. Only populated for blocked manifests.
+     * Forward-compat: a string fallback is included for future block reasons
+     * beyond `"planning-discipline"` and `"source-drift"`.
+     *
+     * Added in Story 3.5 Task 6.2.
+     */
+    blocked_by: z
+      .union([z.literal("planning-discipline"), z.literal("source-drift"), z.string()])
+      .optional(),
+
+    /**
+     * Structured violation list for manifests blocked by `planning-discipline`.
+     * Shape matches `DisciplineViolationReason` from `adapters/adapter.ts`.
+     * Absent on all non-blocked manifests.
+     *
+     * Added in Story 3.5 Task 6.2.
+     */
+    discipline_violations: z
+      .array(
+        z.object({
+          code: z.string().min(1),
+          field: z.string().min(1),
+          detail: z.string().min(1),
+        }),
+      )
+      .optional(),
   })
   .strict();
 

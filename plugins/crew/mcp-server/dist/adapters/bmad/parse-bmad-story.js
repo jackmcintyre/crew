@@ -103,11 +103,37 @@ export function parseBmadStory(absPath, fileContents) {
     const implementation_notes = implSection
         ? implSection.bodyLines.join("\n").trim() || undefined
         : undefined;
+    // Ship-gate detection (Story 3.5 Task 4.1).
+    // BMad stories can be tagged as ship-gate via a `tags:` frontmatter line
+    // (if present) or a YAML block before the H1. In practice, BMad story files
+    // in v1 do not include YAML front-matter blocks; the "tags" field is typically
+    // embedded as a Status-style line. We look for any `Tags:` or `tags:` line
+    // containing the literal substring "ship-gate" (case-insensitive) in the
+    // preamble before the first section heading.
+    //
+    // If no such tag is found, `ship_gate` is set to `undefined` — ship-gate
+    // detection for BMad stories is operator-driven in v1. A future story may
+    // light up full BMad-side ship-gate enforcement without re-touching this parser.
+    let shipGate;
+    for (let i = h1Idx + 1; i < lines.length; i++) {
+        const line = lines[i];
+        const m = /^[Tt]ags?:\s*(.+?)\s*$/.exec(line);
+        if (m) {
+            const tagsRaw = m[1].toLowerCase();
+            if (tagsRaw.includes("ship-gate")) {
+                shipGate = true;
+            }
+            break;
+        }
+        if (/^##\s/.test(line))
+            break;
+    }
     const raw_frontmatter = {
         status: statusValue,
         title,
         id: `${epicFromName}.${storyFromName}`,
         filename_slug: slug,
+        ...(shipGate !== undefined ? { ship_gate: shipGate } : {}),
     };
     const source_hash = createHash("sha256").update(fileContents).digest("hex");
     return {

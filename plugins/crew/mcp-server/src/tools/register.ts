@@ -11,6 +11,7 @@ import { readCustomRole } from "./read-custom-role.js";
 import { readPersona } from "./read-persona.js";
 import { readRepoSignals } from "./read-repo-signals.js";
 import { scanSources, renderScanResult } from "./scan-sources.js";
+import { validatePlannerBacklog } from "./validate-planner-backlog.js";
 import { writeNativeStory } from "./write-native-story.js";
 
 /**
@@ -272,6 +273,75 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     handler: async (args) => {
       try {
         const result = await writeNativeStory(args);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 3.5 — validatePlannerBacklog: planning-discipline pre-write gate for
+  // the planner subagent. The planner MUST call this before every
+  // `writeNativeStory` invocation and before emitting the locked handoff phrase.
+  // Native-adapter workspaces only (throws WrongAdapterError for BMad).
+  server.registerTool({
+    name: "validatePlannerBacklog",
+    description:
+      "Validate a batch of pending native stories against planning-discipline rules before writing. " +
+      "Returns { ok: true } on pass or { ok: false; violations } on any failure. " +
+      "The planner MUST call this before every writeNativeStory and before emitting the handoff phrase. " +
+      "Throws WrongAdapterError if the active adapter is not 'native' (Story 3.5).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        pendingStories: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              narrative: { type: "string" },
+              acceptance_criteria: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    text: { type: "string" },
+                    kind: { type: "string", enum: ["integration", "unit"] },
+                  },
+                  required: ["text", "kind"],
+                },
+              },
+              implementation_notes: { type: "string" },
+              depends_on: { type: "array", items: { type: "string" } },
+              ship_gate: { type: "boolean" },
+              state_mutating: { type: ["boolean", "string"] },
+            },
+            required: [
+              "title",
+              "narrative",
+              "acceptance_criteria",
+              "depends_on",
+              "ship_gate",
+              "state_mutating",
+            ],
+          },
+        },
+      },
+      required: ["targetRepoRoot", "pendingStories"],
+    },
+    handler: async (args) => {
+      try {
+        const result = await validatePlannerBacklog(args);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
