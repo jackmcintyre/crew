@@ -84,6 +84,7 @@ export async function validatePlannerBacklog(rawInput) {
             expectedAdapter: "native",
             actualAdapter: workspace.activeAdapterName,
             targetRepoRoot,
+            toolName: "validatePlannerBacklog",
         });
     }
     const allViolations = [];

@@ -1,0 +1,12 @@
+ref: "bmad:1.1"
+status: to-do
+adapter: bmad
+source_path: _bmad-output/planning-artifacts/stories/1-1-sample-done-story.md
+source_hash: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+depends_on: []
+acceptance_criteria:
+  - text: Given the feature is deployed, when a user accesses it, then it works correctly.
+    kind: integration
+title: Sample done story
+narrative: As a user, I want the sample feature so that I can use it.
+withdrawn: false

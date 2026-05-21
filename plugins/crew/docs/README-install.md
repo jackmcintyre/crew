@@ -145,6 +145,16 @@ Story 3.5 introduced automatic planning-discipline validation at two points in t
 
 **Operator remediation:** Edit the source story to satisfy the violated rule, then re-run `/crew:scan`. The next scan detects the changed `source_hash` and re-evaluates the story against the discipline rules. If it now passes, the blocked manifest is deleted and a new `to-do/` manifest is written automatically — the story is promoted and ready for the dev loop to claim. If the story is still violating, the blocked manifest is rewritten with the updated hash and latest violations. If the source is unchanged since the last scan, the blocked manifest is left untouched (no spurious mtime updates).
 
+## Discarding a feature (FR78)
+
+Story 3.6 introduces a first-class discard flow accessible from `/crew:plan` on its second and subsequent invocations (re-open mode). Two branches:
+
+**Native adapter — revert/deprecate story:** When you choose `discard` against a `native:<ULID>` ref, the planner authors a new story with the title prefix `revert/deprecate: ` followed by the original story's title. This new story enters the backlog as a fresh `to-do/` manifest on the next `/crew:scan`. The original native story file and its execution manifest are never deleted — they remain on disk for traceability.
+
+**External-adapter (BMad) — manifest withdrawal:** When you choose `discard` against a `bmad:<source-id>` ref (or any non-native ref), the plugin calls the `markWithdrawn` MCP tool, which flips `withdrawn: true` in the execution manifest in-place (same state directory, same filename). The plugin then surfaces a reminder: `"Manifest marked withdrawn. Close the source story in <adapter-name> manually — the plugin cannot edit the source tool's tree."` Closing the source story in BMad (or whichever external tool owns it) is your responsibility.
+
+**Confirming a withdrawal landed:** Inspect the manifest under `.crew/state/<state>/<ref>.yaml` and check for the `withdrawn: true` field. Once set, the dev loop's claim path skips the manifest automatically — it will never be picked up for implementation unless you hand-edit the field back.
+
 ## Build artefacts
 
 `plugins/crew/mcp-server/dist/` is **committed to git by design** (Story 1.9). `/plugin install` copies the working tree as-is and does not run a build step, so the compiled MCP server must already be present in the tree.

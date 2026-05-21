@@ -85,6 +85,7 @@ export async function writeNativeStory(rawInput) {
             expectedAdapter: "native",
             actualAdapter: workspace.activeAdapterName,
             targetRepoRoot,
+            toolName: "writeNativeStory",
         });
     }
     // Generate a fresh ULID.

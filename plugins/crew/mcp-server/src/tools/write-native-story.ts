@@ -105,6 +105,7 @@ export async function writeNativeStory(
       expectedAdapter: "native",
       actualAdapter: workspace.activeAdapterName,
       targetRepoRoot,
+      toolName: "writeNativeStory",
     });
   }
 

@@ -410,19 +410,26 @@ export declare class MalformedNativeStoryError extends DomainError {
     });
 }
 /**
- * The `writeNativeStory` MCP tool was invoked against a workspace whose
- * active adapter is not `"native"`. The tool refuses to write into a
- * non-native workspace. This is the runtime guard for the BMad-branch
- * Behavioural-contract clause in Story 3.4.
+ * An MCP tool was invoked against a workspace whose active adapter does not
+ * match the tool's requirement. Widened in Story 3.6 to carry `toolName` so
+ * the error message names the actual calling tool rather than always saying
+ * `writeNativeStory`. Both call-sites (writeNativeStory, markWithdrawn)
+ * pass their own `toolName`.
+ *
+ * Story 3.4: initial guard for `writeNativeStory`.
+ * Story 3.6: widened with `toolName`; `markWithdrawn` added as second call-site.
  */
 export declare class WrongAdapterError extends DomainError {
     readonly expectedAdapter: string;
     readonly actualAdapter: string;
     readonly targetRepoRoot: string;
+    readonly toolName: string;
     constructor(opts: {
         expectedAdapter: string;
         actualAdapter: string;
         targetRepoRoot: string;
+        /** Name of the MCP tool that raised this error. Defaults to "writeNativeStory" for backward compatibility. */
+        toolName?: string;
     });
 }
 /**

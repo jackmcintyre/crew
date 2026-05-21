@@ -503,23 +503,32 @@ export class MalformedNativeStoryError extends DomainError {
     }
 }
 /**
- * The `writeNativeStory` MCP tool was invoked against a workspace whose
- * active adapter is not `"native"`. The tool refuses to write into a
- * non-native workspace. This is the runtime guard for the BMad-branch
- * Behavioural-contract clause in Story 3.4.
+ * An MCP tool was invoked against a workspace whose active adapter does not
+ * match the tool's requirement. Widened in Story 3.6 to carry `toolName` so
+ * the error message names the actual calling tool rather than always saying
+ * `writeNativeStory`. Both call-sites (writeNativeStory, markWithdrawn)
+ * pass their own `toolName`.
+ *
+ * Story 3.4: initial guard for `writeNativeStory`.
+ * Story 3.6: widened with `toolName`; `markWithdrawn` added as second call-site.
  */
 export class WrongAdapterError extends DomainError {
     expectedAdapter;
     actualAdapter;
     targetRepoRoot;
+    toolName;
     constructor(opts) {
-        super(`writeNativeStory requires adapter '${opts.expectedAdapter}' but ` +
+        const toolName = opts.toolName ?? "writeNativeStory";
+        const remediation = toolName === "markWithdrawn"
+            ? `Use writeNativeStory to author a revert/deprecate story for native discards.`
+            : `For BMad workspaces, use /bmad-create-story instead. (Story 3.4)`;
+        super(`${toolName} requires adapter '${opts.expectedAdapter}' but ` +
             `the resolved adapter for '${opts.targetRepoRoot}' is '${opts.actualAdapter}'. ` +
-            `This tool only writes into native-adapter workspaces. ` +
-            `For BMad workspaces, use /bmad-create-story instead. (Story 3.4)`);
+            remediation);
         this.expectedAdapter = opts.expectedAdapter;
         this.actualAdapter = opts.actualAdapter;
         this.targetRepoRoot = opts.targetRepoRoot;
+        this.toolName = toolName;
     }
 }
 /**

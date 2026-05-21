@@ -114,6 +114,7 @@ export async function validatePlannerBacklog(
       expectedAdapter: "native",
       actualAdapter: workspace.activeAdapterName,
       targetRepoRoot,
+      toolName: "validatePlannerBacklog",
     });
   }
 

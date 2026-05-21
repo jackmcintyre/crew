@@ -5,6 +5,8 @@ import { getStatus, renderStatus } from "./get-status.js";
 import { getTeamSnapshot, renderTeamSnapshot } from "./get-team-snapshot.js";
 import { instantiatePersona } from "./instantiate-persona.js";
 import { lookupRoleByDomain } from "./lookup-role-by-domain.js";
+import { markWithdrawn } from "./mark-withdrawn.js";
+import { readBacklogInventory } from "./read-backlog-inventory.js";
 import { readCatalogue } from "./read-catalogue.js";
 import { readCustomRole } from "./read-custom-role.js";
 import { readPersona } from "./read-persona.js";
@@ -322,6 +324,76 @@ export function registerAllTools(server) {
         handler: async (args) => {
             try {
                 const result = await validatePlannerBacklog(args);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 3.6 — markWithdrawn: mark an execution manifest withdrawn (FR78).
+    // External-adapter discard path. Native discard uses writeNativeStory with
+    // a revert/deprecate story instead.
+    server.registerTool({
+        name: "markWithdrawn",
+        description: "Mark an execution manifest withdrawn (FR78). External-adapter discard path. Native discard uses writeNativeStory with a revert/deprecate story instead.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                ref: { type: "string" },
+            },
+            required: ["targetRepoRoot", "ref"],
+        },
+        handler: async (args) => {
+            try {
+                const result = await markWithdrawn(args);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 3.6 (HIGH-1 fix) — readBacklogInventory: build the backlog inventory
+    // server-side so the /crew:plan skill does not need to glob filesystem paths
+    // via the Read tool. Returns typed { mode, backlog_inventory } JSON consumed
+    // by the planner skill's <initial-context> block.
+    // MalformedExecutionManifestError (and other parseExecutionManifest errors)
+    // surface verbatim to the skill (not caught here).
+    server.registerTool({
+        name: "readBacklogInventory",
+        description: "Build the backlog inventory for the target repo server-side (Story 3.6). " +
+            "Returns { mode: 'first-run'|'re-open', backlog_inventory: [{ref, title, state, withdrawn}] }. " +
+            "Scans all four state directories and (on native) the native-stories dir. " +
+            "MalformedExecutionManifestError surfaces verbatim. " +
+            "Used by the /crew:plan skill to derive re-open mode and assemble <initial-context>.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+            },
+            required: ["targetRepoRoot"],
+        },
+        handler: async (args) => {
+            try {
+                const result = await readBacklogInventory(args);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };

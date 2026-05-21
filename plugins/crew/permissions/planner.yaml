@@ -6,6 +6,8 @@ tools_allow:
   - heartbeat
   - writeNativeStory
   - validatePlannerBacklog
+  - markWithdrawn
+  - readBacklogInventory
 gh_allow:
   - pr-view
 gh_allow_args: {}
