@@ -69,6 +69,7 @@ export async function markWithdrawn(rawInput) {
             expectedAdapter: "non-native",
             actualAdapter: workspace.activeAdapterName,
             targetRepoRoot,
+            toolName: "markWithdrawn",
         });
     }
     // Step 2: Scan the four state directories in canonical order for <ref>.yaml.

@@ -9,6 +9,7 @@ tools_allow:
   - writeNativeStory
   - validatePlannerBacklog
   - markWithdrawn
+  - readBacklogInventory
   - heartbeat
 gh_allow:
   - pr-view

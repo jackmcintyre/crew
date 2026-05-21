@@ -1,7 +1,7 @@
 ---
 name: crew:plan
 description: "Open a planning conversation. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills."
-allowed_tools: [Read, Task]
+allowed_tools: [Task, readBacklogInventory, getStatus]
 ---
 
 # /crew:plan
@@ -22,10 +22,9 @@ A target repo. `.crew/config.yaml` SHOULD be present (auto-detected on first inv
 
 3. **Branch on the resolved adapter name.**
 
-4. **`adapter: native` branch:** Before spawning the subagent, build the backlog inventory and determine mode:
-   - Scan `<targetRepoRoot>/.crew/state/to-do/`, `.crew/state/in-progress/`, `.crew/state/blocked/`, `.crew/state/done/` for `.yaml` manifest files. For each, read and parse it via the canonical reader to extract `ref`, `title`, `withdrawn`, and `status`. Build a `backlog_inventory` array of `{ ref, title, state, withdrawn }` objects. **If reading any `.yaml` throws `MalformedExecutionManifestError`, surface the error verbatim and stop — the operator must fix the malformed manifest before re-opening planning.**
-   - On the native branch only: also scan `<targetRepoRoot>/.crew/native-stories/` for `.md` files whose basename matches the ULID pattern (`[0-9A-Z]{26}.md`). For any ULID whose `native:<ULID>` ref does not already appear in the manifest inventory, add an entry with `state: "native-source-only"`, `withdrawn: false`, and `title` parsed from the file's first H1 line (or the filename if no H1 is found).
-   - Determine `mode`: if `backlog_inventory.length === 0`, `mode = "first-run"`; otherwise `mode = "re-open"`.
+4. **`adapter: native` branch:** Before spawning the subagent, call `readBacklogInventory({ targetRepoRoot })` to build the backlog inventory and determine mode:
+   - The tool scans all four state directories and the `.crew/native-stories/` directory server-side, returns typed `{ mode, backlog_inventory }` JSON. **If the call surfaces a `MalformedExecutionManifestError` (or any other typed error), surface it verbatim and stop — the operator must fix the malformed manifest before re-opening planning.**
+   - `mode` is `"first-run"` when the inventory is empty; `"re-open"` when at least one entry exists. `backlog_inventory` is an array of `{ ref, title, state, withdrawn }` objects.
    - spawn the planner subagent via Claude Code's `Task` tool against the catalogue prompt at `plugins/crew/catalogue/planner.md`. Assemble the `Task` system prompt as follows:
      - Read `readCatalogue({ role: "planner" })` and use its `Prompt` section verbatim as the system prompt.
      - Append an `<initial-context>` block containing:
@@ -38,7 +37,7 @@ A target repo. `.crew/config.yaml` SHOULD be present (auto-detected on first inv
    - **The four-step planning loop (`mode === "first-run"` or when operator chooses `add` from the re-open action menu).** The subagent drives this loop; the skill does not branch on the action choice.
    - **Exit condition (native branch):** the planner subagent emits the catalogue's terminal locked phrase: `Handoff to generalist-dev — story <story-id> ready to claim`. When that phrase appears, the skill exits and offers the operator a follow-up `/crew:scan` to materialise the new stories.
 
-5. **`adapter: bmad` branch:** Build the backlog inventory the same way as the native branch (Step 4 above, but skip the native-stories scan). Determine `mode`.
+5. **`adapter: bmad` branch:** Call `readBacklogInventory({ targetRepoRoot })` the same way as Step 4 (the tool skips the native-stories scan on BMad workspaces). On typed errors, surface verbatim and stop. Determine `mode` from the returned `mode` field.
    - **First-run (no manifests yet):** print the following fixed pointer block verbatim, then offer the `/crew:scan` follow-up:
 
      ```

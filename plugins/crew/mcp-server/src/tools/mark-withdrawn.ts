@@ -93,6 +93,7 @@ export async function markWithdrawn(
       expectedAdapter: "non-native",
       actualAdapter: workspace.activeAdapterName,
       targetRepoRoot,
+      toolName: "markWithdrawn",
     });
   }
 
