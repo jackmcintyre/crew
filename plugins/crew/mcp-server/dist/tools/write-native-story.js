@@ -3,7 +3,7 @@ import { ulid as generateUlid } from "ulid";
 import { z } from "zod";
 import { WrongAdapterError } from "../errors.js";
 import { parseNativeStory } from "../adapters/native/parse-native-story.js";
-import { writeManagedFile } from "../lib/managed-fs.js";
+import { atomicWriteFile } from "../lib/managed-fs.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 /**
  * Input schema for `writeNativeStory`. Mirrors the four-section native-story
@@ -98,13 +98,10 @@ export async function writeNativeStory(rawInput) {
     // body would not parse back cleanly. This ensures the file on disk always
     // conforms to the schema.
     parseNativeStory(absPath, body);
-    // Write via writeManagedFile — the `.crew/native-stories/` path is
-    // non-canonical (not agent-managed state), so no mcpToolContext is needed.
-    // writeManagedFile creates parent directories and uses fs.writeFile internally.
-    await writeManagedFile({
-        absPath,
-        contents: body,
-        targetRepoRoot,
-    });
+    // Write atomically via atomicWriteFile: writes to <absPath>.tmp first, then
+    // renames to <absPath> in a single fs.rename(2) syscall — atomic on the same
+    // filesystem (Task 4.5). The `.crew/native-stories/` path is non-canonical
+    // so no mcpToolContext is required.
+    await atomicWriteFile(absPath, body);
     return { ref, path: absPath };
 }

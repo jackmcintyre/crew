@@ -88,6 +88,26 @@ export function isCanonicalPath(absPath, targetRepoRoot) {
     return { canonical: false };
 }
 /**
+ * Atomically write `contents` to `absPath` using a `.tmp` sibling file
+ * followed by `fs.rename` (POSIX rename(2) — atomic on the same filesystem).
+ *
+ * The `.tmp` sibling is written first; if the write fails the final path is
+ * never touched. On success, `fs.rename` replaces `absPath` in a single
+ * syscall so readers never see a partial file.
+ *
+ * This is the ONLY file in `mcp-server/src/**` (alongside
+ * `state/manifest-state-machine.ts`) permitted to invoke `rename`.
+ * The static guard in `tests/canonical-fs-guard.test.ts` (AC5c) enforces
+ * this — `managed-fs.ts` is listed in both the write whitelist and the
+ * rename whitelist.
+ */
+export async function atomicWriteFile(absPath, contents) {
+    const tmpPath = `${absPath}.tmp`;
+    await fs.mkdir(path.dirname(absPath), { recursive: true });
+    await fs.writeFile(tmpPath, contents, "utf8");
+    await fs.rename(tmpPath, absPath);
+}
+/**
  * The ONLY entrypoint in the MCP server permitted to write a file
  * under a canonical-state path (FR81 / NFR16). When the target path
  * is non-canonical, the write passes through; when it is canonical,

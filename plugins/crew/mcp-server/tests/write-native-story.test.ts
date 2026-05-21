@@ -22,6 +22,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { stringify as yamlStringify, parse as yamlParse } from "yaml";
 import { writeNativeStory } from "../src/tools/write-native-story.js";
+import { atomicWriteFile } from "../src/lib/managed-fs.js";
 import { scanSources } from "../src/tools/scan-sources.js";
 import { parseNativeStory } from "../src/adapters/native/parse-native-story.js";
 import { parseExecutionManifest } from "../src/schemas/execution-manifest.js";
@@ -261,4 +262,65 @@ it("integration-tagged AC produces kind: 'integration' in the parsed SourceStory
   const contents = await fs.readFile(result.path, "utf8");
   const story = parseNativeStory(result.path, contents);
   expect(story.acceptance_criteria[0]!.kind).toBe("integration");
+});
+
+// ---------------------------------------------------------------------------
+// atomicWriteFile — Task 4.5 atomicity guarantee (Story 3.4 rework)
+// ---------------------------------------------------------------------------
+
+describe("atomicWriteFile — atomic write via .tmp + fs.rename", () => {
+  it("writes file content correctly and leaves no .tmp sibling behind on success", async () => {
+    const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "crew-atomic-ok-"));
+    try {
+      const absPath = path.join(targetDir, "output.md");
+      const tmpPath = `${absPath}.tmp`;
+
+      await atomicWriteFile(absPath, "hello atomic");
+
+      // Final file exists with correct content.
+      const written = await fs.readFile(absPath, "utf8");
+      expect(written).toBe("hello atomic");
+
+      // No .tmp sibling left behind.
+      await expect(fs.access(tmpPath)).rejects.toThrow();
+    } finally {
+      await fs.rm(targetDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not create or leave content at the final path when the .tmp write fails", async () => {
+    const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "crew-atomic-fail-"));
+    try {
+      // Make the target path itself a directory so that writing <path>.tmp
+      // succeeds but renaming <path>.tmp → <path> fails (EISDIR on the
+      // destination). This exercises the path where the final file is never
+      // touched even though the .tmp was created.
+      const absPath = path.join(targetDir, "collision");
+      await fs.mkdir(absPath, { recursive: true }); // absPath is a directory
+
+      // The rename will fail because absPath is a non-empty dir (EISDIR/ENOTEMPTY).
+      await expect(atomicWriteFile(absPath, "should-not-land")).rejects.toThrow();
+
+      // The directory at absPath still exists and is unchanged — no partial
+      // file was written there. (We can still stat it as a directory.)
+      const stat = await fs.stat(absPath);
+      expect(stat.isDirectory()).toBe(true);
+    } finally {
+      await fs.rm(targetDir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates parent directories automatically before writing", async () => {
+    const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "crew-atomic-mkdir-"));
+    try {
+      const absPath = path.join(targetDir, "deep", "nested", "file.md");
+
+      await atomicWriteFile(absPath, "nested content");
+
+      const written = await fs.readFile(absPath, "utf8");
+      expect(written).toBe("nested content");
+    } finally {
+      await fs.rm(targetDir, { recursive: true, force: true });
+    }
+  });
 });
