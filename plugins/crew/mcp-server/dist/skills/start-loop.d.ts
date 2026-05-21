@@ -30,6 +30,7 @@ import type { ListClaimableTodosResult } from "../tools/list-claimable-todos.js"
 export declare const QUEUE_DRAINED_LINE = "queue drained \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /crew:plan to add work.";
 export interface TaskSpawnArgs {
     systemPrompt: string;
+    subagentType: string;
     initialContext: {
         ref: string;
         title: string;

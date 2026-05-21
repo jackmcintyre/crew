@@ -34,6 +34,7 @@ export const QUEUE_DRAINED_LINE =
 
 export interface TaskSpawnArgs {
   systemPrompt: string;
+  subagentType: string;
   initialContext: {
     ref: string;
     title: string;
@@ -115,14 +116,15 @@ export async function runStartLoop(
       break;
     }
 
-    // If there are only inProgress items and no eligible todos, we need to
-    // wait or give up. In v1 there is no blocking wait, so if no eligible
-    // todos exist but inProgress > 0, we exit the iteration to avoid an
-    // infinite loop. The queue-drained line is NOT printed here — the
-    // in-progress stories are still running.
+    // If there are no eligible todos but inProgress > 0, the session cannot
+    // progress further (all remaining todos are deps-blocked on in-progress
+    // work). Terminate without printing the queue-drained anchor — the
+    // in-progress stories are still running, so the queue is NOT drained.
     if (eligible.length === 0) {
       // Deps-blocked with active in-progress work — cannot progress further this session.
-      chatLog.push(QUEUE_DRAINED_LINE);
+      chatLog.push(
+        "waiting on in-progress work — no claimable todos this pass. Stop here or wait for in-progress stories to complete.",
+      );
       break;
     }
 
@@ -153,9 +155,8 @@ async function processCandidate(
   chatLog.push(`claiming ${ref} — ${displayTitle}`);
 
   // Call claimStory. On any typed error, surface verbatim and continue.
-  let claimResult: ClaimResult;
   try {
-    claimResult = await deps.claim({
+    await deps.claim({
       targetRepoRoot,
       ref,
       sessionUlid,
@@ -194,6 +195,7 @@ async function processCandidate(
   try {
     await deps.taskSpawn({
       systemPrompt: promptResult.systemPrompt,
+      subagentType: "general-purpose",
       initialContext: {
         ref,
         title: displayTitle,
@@ -208,6 +210,4 @@ async function processCandidate(
     chatLog.push(`${name}: ${message}`);
     // Don't rethrow — subagent errors should not abort the loop.
   }
-
-  void claimResult; // Result not used further in v1 — absPath is for future use.
 }

@@ -53,7 +53,7 @@ One `/crew:start` invocation is one session. The session ULID is minted once at 
 
       iv. Print: `spawning generalist-dev subagent (clean context)`.
 
-      v. spawn the generalist-dev subagent via Claude Code's Task tool. Pass the assembled system prompt as the `prompt` field. Include an `<initial-context>` block in the task description containing:
+      v. spawn the generalist-dev subagent via Claude Code's Task tool. Pass the assembled system prompt as the `prompt` field and `"general-purpose"` as the `subagent_type` field. Include an `<initial-context>` block in the task description containing:
          - `ref`: the story ref just claimed.
          - `title`: the story title.
          - `sessionUlid`: the session ULID.
@@ -75,8 +75,6 @@ One `/crew:start` invocation is one session. The session ULID is minted once at 
 - **`DependenciesNotReadyError`**: Surface verbatim as `DependenciesNotReadyError: <message>`. The story's `depends_on` refs are not yet in `done/`. The pre-check filter should catch most of these; this error surfaces only on a race between the pre-check and the claim call. Continue to the next candidate.
 
 - **`WrongClaimantError`**: Surface verbatim as `WrongClaimantError: <message>`. A `completeStory` call was made by a session that did not claim the ref. This is a dev-subagent error surfaced by the sub-session; `/crew:start` logs it and continues.
-
-- **`NoAdapterMatchedError`** (from `getStatus`): Surface verbatim and stop. The workspace resolver found no matching adapter.
 
 - **`PersonaFileNotFoundError`** (from `buildPersonaSpawnPrompt`): The team copy of the `generalist-dev` persona is missing. Run `/crew:hire` or `/crew:skip-hiring` before `/crew:start` to create it.
 

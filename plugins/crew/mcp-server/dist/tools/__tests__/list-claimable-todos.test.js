@@ -12,7 +12,7 @@
  *
  * Approach: real filesystem ops against a tmpdir. No node:fs mocking.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";

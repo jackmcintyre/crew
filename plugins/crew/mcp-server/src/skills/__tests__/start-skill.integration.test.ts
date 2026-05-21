@@ -7,23 +7,59 @@
  *
  * Covers AC4 branches:
  *   (a) Happy multi-claim: three independent stories → three spawns in alphabetical order.
+ *       Uses REAL listClaimableTodos, claimStory, buildPersonaSpawnPrompt against tmpdir.
  *   (b) Queue drained: empty to-do/ and in-progress/ → verbatim queue-drained line, zero spawns.
  *   (c) Deps-not-ready surfacing: B.depends_on=[A]; A in to-do/, B in to-do/ →
  *       A claimed+spawned, B skipped silently (depsReady=false).
+ *       Uses REAL listClaimableTodos, claimStory, buildPersonaSpawnPrompt against tmpdir.
  *   (d) Hand-edit refusal surfacing: claimStory on a hand-edited ref surfaces
  *       InProgressHandEditError verbatim.
  *
- * The loop is driven via injection point (test seam) — no Claude Code harness required.
+ * For AC4(a) and AC4(c): real production modules are used with tmpdir fixtures.
+ * Only taskSpawn remains a recording fake (Claude Code's Task tool is unavailable in vitest).
+ *
+ * For AC4(b) and AC4(d): injected fakes (no filesystem required for those paths).
+ *
+ * Also covers the behavioural invariant for the "inProgressCount > 0, no eligible todos"
+ * branch — ensures QUEUE_DRAINED_LINE is NOT emitted when in-progress work is active.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { stringify as yamlStringify } from "yaml";
-import { DependenciesNotReadyError, InProgressHandEditError } from "../../errors.js";
+import { InProgressHandEditError } from "../../errors.js";
 import { runStartLoop, QUEUE_DRAINED_LINE, TaskSpawnArgs } from "../start-loop.js";
 import type { ListClaimableTodosResult, ClaimableCandidate } from "../../tools/list-claimable-todos.js";
+import { listClaimableTodos } from "../../tools/list-claimable-todos.js";
+import { claimStory } from "../../tools/claim-story.js";
+import { buildPersonaSpawnPrompt } from "../../tools/build-persona-spawn-prompt.js";
+import { atomicWriteFile } from "../../lib/managed-fs.js";
+
+// ---------------------------------------------------------------------------
+// Mock deriveSourceBaseline — needed by claimStory's hand-edit guard
+// claimStory calls it when checking if a ref is already in in-progress/.
+// For fresh claims (to-do/ → in-progress/), the guard is skipped because
+// the in-progress/ file does not yet exist. So we only need the mock to
+// return a safe baseline if it gets called on a pre-existing in-progress/ ref.
+// ---------------------------------------------------------------------------
+
+vi.mock("../../state/derive-source-baseline.js", () => ({
+  deriveSourceBaseline: vi.fn().mockResolvedValue({
+    sourceHash: "a".repeat(64),
+    sourceFields: {
+      title: "Test story",
+      narrative: "As a dev, I want to test.",
+      acceptance_criteria: [
+        { text: "Given something, when something, then it works.", kind: "integration" },
+      ],
+      implementation_notes: undefined,
+      depends_on: [],
+      withdrawn: false,
+    },
+  }),
+}));
 
 // ---------------------------------------------------------------------------
 // Types for the test spy
@@ -31,15 +67,119 @@ import type { ListClaimableTodosResult, ClaimableCandidate } from "../../tools/l
 
 interface SpawnRecord {
   systemPrompt: string;
+  subagentType: string;
   initialContext: TaskSpawnArgs["initialContext"];
 }
+
+// ---------------------------------------------------------------------------
+// Fixture constants
+// ---------------------------------------------------------------------------
+
+const SESSION_ULID = "01HZSESSION00000000000001";
+const SOURCE_HASH = "a".repeat(64);
+
+// A minimal but valid PERSONA.md fixture for generalist-dev.
+const FIXTURE_PERSONA_MD = `---
+role: generalist-dev
+domain: "feature implementation in a story scope"
+model_tier: sonnet
+tools_allow:
+  - Read
+  - Edit
+  - Bash
+  - Task
+gh_allow:
+  - pr-create
+  - pr-view
+locked_phrases:
+  handoff: "Handoff to reviewer — story <story-id> ready for review."
+  yield: "This sits in <role>'s domain — handing off"
+  verdict: "**Verdict: <SENTINEL>**"
+hired_at: "2026-01-01T00:00:00.000Z"
+catalogue_version: "0.1.0"
+---
+
+# Generalist Dev
+
+## Domain
+
+Implements one story at a time end-to-end.
+
+## Mandate
+
+- Claim a story, work it in an isolated worktree.
+
+## Out of mandate
+
+- Reviewing the PR — yield to generalist-reviewer.
+
+## Prompt
+
+You are the generalist dev.
+
+## Knowledge
+
+Accumulated knowledge goes here.
+`;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const SESSION_ULID = "01HZSESSION00000000000001";
-const FAKE_SYSTEM_PROMPT = "# Generalist Dev — Persona\n\n## Domain\n\nTest domain.";
+function makeManifestYaml(
+  ref: string,
+  opts: {
+    depends_on?: string[];
+    status?: string;
+    source_hash?: string;
+  } = {},
+): string {
+  const manifest: Record<string, unknown> = {
+    ref,
+    status: opts.status ?? "to-do",
+    adapter: "native",
+    source_path: `.crew/native-stories/${ref.replace("native:", "")}.md`,
+    source_hash: opts.source_hash ?? SOURCE_HASH,
+    depends_on: opts.depends_on ?? [],
+    acceptance_criteria: [
+      {
+        text: "Given the claim tool, when called with valid deps, then it works.",
+        kind: "integration",
+      },
+    ],
+    title: `Story ${ref}`,
+    narrative: "As a dev, I want to test claims.",
+    withdrawn: false,
+  };
+  return yamlStringify(manifest, { lineWidth: 0 });
+}
+
+async function makeStateDir(root: string): Promise<void> {
+  for (const state of ["to-do", "in-progress", "done", "blocked"]) {
+    await fs.mkdir(path.join(root, ".crew", "state", state), { recursive: true });
+  }
+}
+
+async function writeTodoManifest(root: string, ref: string, yaml: string): Promise<void> {
+  const p = path.join(root, ".crew", "state", "to-do", `${ref}.yaml`);
+  await atomicWriteFile(p, yaml);
+}
+
+async function writeDoneManifest(root: string, ref: string, yaml: string): Promise<void> {
+  const p = path.join(root, ".crew", "state", "done", `${ref}.yaml`);
+  await atomicWriteFile(p, yaml);
+}
+
+async function writeInProgressManifest(root: string, ref: string, yaml: string): Promise<void> {
+  const p = path.join(root, ".crew", "state", "in-progress", `${ref}.yaml`);
+  await atomicWriteFile(p, yaml);
+}
+
+async function writePersonaFile(root: string): Promise<void> {
+  const dir = path.join(root, "team", "generalist-dev");
+  await fs.mkdir(dir, { recursive: true });
+  await atomicWriteFile(path.join(dir, "PERSONA.md"), FIXTURE_PERSONA_MD);
+}
 
 function makeFakeCandidate(
   ref: string,
@@ -77,10 +217,7 @@ let tmpRoot: string;
 
 beforeEach(async () => {
   tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "crew-start-loop-"));
-  // Create state dirs.
-  for (const state of ["to-do", "in-progress", "done", "blocked"]) {
-    await fs.mkdir(path.join(tmpRoot, ".crew", "state", state), { recursive: true });
-  }
+  await makeStateDir(tmpRoot);
 });
 
 afterEach(async () => {
@@ -88,44 +225,60 @@ afterEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC4(a) — Happy multi-claim
+// AC4(a) — Happy multi-claim (REAL modules: listClaimableTodos, claimStory,
+//           buildPersonaSpawnPrompt; fake: taskSpawn)
 // ---------------------------------------------------------------------------
 
-describe("AC4(a) — happy multi-claim: three independent stories", () => {
-  it("issues three spawn invocations in alphabetical ref order", async () => {
+describe("AC4(a) — happy multi-claim: three independent stories (real production modules)", () => {
+  it("issues three spawn invocations in alphabetical ref order with real modules", async () => {
+    // Seed three independent to-do manifests.
     const refs = [
       "native:01HZABC0000000000000000003",
       "native:01HZABC0000000000000000001",
       "native:01HZABC0000000000000000002",
     ];
+    for (const ref of refs) {
+      await writeTodoManifest(tmpRoot, ref, makeManifestYaml(ref));
+    }
 
-    // listTodos returns sorted candidates (sorted by the tool).
-    const sortedCandidates = [...refs]
-      .sort()
-      .map((ref) => makeFakeCandidate(ref));
+    // Write the generalist-dev PERSONA.md so buildPersonaSpawnPrompt can read it.
+    await writePersonaFile(tmpRoot);
 
     const spawnRecords: SpawnRecord[] = [];
-    const claimCalls: Array<{ ref: string; sessionUlid: string }> = [];
-    let buildPromptCallCount = 0;
+    const claimCallRefs: string[] = [];
+    const claimCallUlids: string[] = [];
 
+    // Wire real production dependencies; only taskSpawn is a fake.
     const result = await runStartLoop({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
       deps: {
-        listTodos: makeFakeListTodos(sortedCandidates, 0),
+        listTodos: (opts) => listClaimableTodos(opts),
         claim: async (opts) => {
-          claimCalls.push({ ref: opts.ref, sessionUlid: opts.sessionUlid });
-          return { ref: opts.ref, absPath: `/fake/in-progress/${opts.ref}.yaml` };
+          claimCallRefs.push(opts.ref);
+          claimCallUlids.push(opts.sessionUlid);
+          return claimStory(opts);
         },
-        buildPrompt: async () => {
-          buildPromptCallCount++;
-          return { systemPrompt: FAKE_SYSTEM_PROMPT };
-        },
+        buildPrompt: (opts) => buildPersonaSpawnPrompt(opts),
         taskSpawn: async (args) => {
           spawnRecords.push({
             systemPrompt: args.systemPrompt,
+            subagentType: args.subagentType,
             initialContext: args.initialContext,
           });
+          // Simulate the subagent completing: remove the in-progress/ manifest
+          // and write a done/ manifest. This means the second loop pass sees
+          // inProgressCount: 0 and empty to-do/, triggering the QUEUE_DRAINED_LINE.
+          const inProgressPath = path.join(
+            tmpRoot, ".crew", "state", "in-progress", `${args.initialContext.ref}.yaml`,
+          );
+          try {
+            await fs.unlink(inProgressPath);
+          } catch {
+            // Ignore if already gone.
+          }
+          const doneYaml = makeManifestYaml(args.initialContext.ref, { status: "done" });
+          await writeDoneManifest(tmpRoot, args.initialContext.ref, doneYaml);
         },
       },
     });
@@ -135,19 +288,20 @@ describe("AC4(a) — happy multi-claim: three independent stories", () => {
     const spawnedRefs = spawnRecords.map((s) => s.initialContext.ref);
     expect(spawnedRefs).toEqual([...refs].sort());
 
-    // (ii) buildPrompt called three times — once per spawn.
-    expect(buildPromptCallCount).toBe(3);
-
-    // (iii) Each spawn received the assembled system prompt.
+    // (ii) buildPersonaSpawnPrompt was called three times (once per spawn):
+    // each systemPrompt starts with the persona H1.
     for (const record of spawnRecords) {
-      expect(record.systemPrompt).toBe(FAKE_SYSTEM_PROMPT);
+      expect(record.systemPrompt).toMatch(/^# Generalist Dev — Persona/);
+    }
+
+    // (iii) Each spawn was issued with subagent_type: "general-purpose".
+    for (const record of spawnRecords) {
+      expect(record.subagentType).toBe("general-purpose");
     }
 
     // (iv) claimStory called three times with the same sessionUlid.
-    expect(claimCalls.length).toBe(3);
-    for (const call of claimCalls) {
-      expect(call.sessionUlid).toBe(SESSION_ULID);
-    }
+    expect(claimCallRefs.length).toBe(3);
+    expect(claimCallUlids.every((u) => u === SESSION_ULID)).toBe(true);
 
     // (v) Session header is in chat log.
     expect(result.chatLog[0]).toBe(
@@ -160,7 +314,7 @@ describe("AC4(a) — happy multi-claim: three independent stories", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC4(b) — Queue drained
+// AC4(b) — Queue drained (injected fakes — no filesystem required)
 // ---------------------------------------------------------------------------
 
 describe("AC4(b) — queue drained: empty to-do/ and in-progress/", () => {
@@ -173,10 +327,11 @@ describe("AC4(b) — queue drained: empty to-do/ and in-progress/", () => {
       deps: {
         listTodos: async () => ({ todos: [], inProgressCount: 0 }),
         claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
-        buildPrompt: async () => ({ systemPrompt: FAKE_SYSTEM_PROMPT }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
         taskSpawn: async (args) => {
           spawnRecords.push({
             systemPrompt: args.systemPrompt,
+            subagentType: args.subagentType,
             initialContext: args.initialContext,
           });
         },
@@ -197,19 +352,23 @@ describe("AC4(b) — queue drained: empty to-do/ and in-progress/", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC4(c) — Deps-not-ready surfacing
+// AC4(c) — Deps-not-ready surfacing (REAL modules: listClaimableTodos,
+//           claimStory, buildPersonaSpawnPrompt; fake: taskSpawn)
 // ---------------------------------------------------------------------------
 
-describe("AC4(c) — deps-not-ready: B depends on A, both in to-do/", () => {
+describe("AC4(c) — deps-not-ready: B depends on A, both in to-do/ (real production modules)", () => {
   it("claims and spawns A; skips B silently (depsReady=false)", async () => {
     const refA = "native:01HZABC0000000000000000001";
     const refB = "native:01HZABC0000000000000000002";
 
-    // A is ready; B has unmet deps.
-    const candidates: ClaimableCandidate[] = [
-      makeFakeCandidate(refA, { depsReady: true, depends_on: [] }),
-      makeFakeCandidate(refB, { depsReady: false, depends_on: [refA] }),
-    ];
+    // A has no deps; B depends on A.
+    await writeTodoManifest(tmpRoot, refA, makeManifestYaml(refA, { depends_on: [] }));
+    await writeTodoManifest(tmpRoot, refB, makeManifestYaml(refB, { depends_on: [refA] }));
+
+    // A is NOT in done/ yet, so B's dep is unmet.
+    // A is in to-do/ and claimable.
+
+    await writePersonaFile(tmpRoot);
 
     const spawnRecords: SpawnRecord[] = [];
     const claimCalls: string[] = [];
@@ -218,17 +377,23 @@ describe("AC4(c) — deps-not-ready: B depends on A, both in to-do/", () => {
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
       deps: {
-        listTodos: makeFakeListTodos(candidates, 0),
+        listTodos: (opts) => listClaimableTodos(opts),
         claim: async (opts) => {
           claimCalls.push(opts.ref);
-          return { ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` };
+          return claimStory(opts);
         },
-        buildPrompt: async () => ({ systemPrompt: FAKE_SYSTEM_PROMPT }),
+        buildPrompt: (opts) => buildPersonaSpawnPrompt(opts),
         taskSpawn: async (args) => {
           spawnRecords.push({
             systemPrompt: args.systemPrompt,
+            subagentType: args.subagentType,
             initialContext: args.initialContext,
           });
+          // Do NOT write a done/ manifest here. We want to assert that B is
+          // NOT claimed on this same loop pass. A is in in-progress/ after
+          // claimStory moved it; B's dep (A) is not in done/ so B stays
+          // depsReady: false. The second loop pass will see inProgressCount > 1
+          // with no eligible todos and terminate via the "waiting" branch.
         },
       },
     });
@@ -237,7 +402,7 @@ describe("AC4(c) — deps-not-ready: B depends on A, both in to-do/", () => {
     expect(claimCalls).toContain(refA);
     expect(spawnRecords.some((s) => s.initialContext.ref === refA)).toBe(true);
 
-    // (ii) B is NOT claimed or spawned (depsReady=false filters it).
+    // (ii) B is NOT claimed or spawned (depsReady=false filters it in listClaimableTodos).
     expect(claimCalls).not.toContain(refB);
     expect(spawnRecords.some((s) => s.initialContext.ref === refB)).toBe(false);
 
@@ -250,7 +415,7 @@ describe("AC4(c) — deps-not-ready: B depends on A, both in to-do/", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC4(d) — Hand-edit refusal surfacing
+// AC4(d) — Hand-edit refusal surfacing (injected fakes)
 // ---------------------------------------------------------------------------
 
 describe("AC4(d) — hand-edit refusal: claimStory throws InProgressHandEditError", () => {
@@ -282,10 +447,11 @@ describe("AC4(d) — hand-edit refusal: claimStory throws InProgressHandEditErro
           }
           return { ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` };
         },
-        buildPrompt: async () => ({ systemPrompt: FAKE_SYSTEM_PROMPT }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
         taskSpawn: async (args) => {
           spawnRecords.push({
             systemPrompt: args.systemPrompt,
+            subagentType: args.subagentType,
             initialContext: args.initialContext,
           });
         },
@@ -324,7 +490,7 @@ describe("AC4(d) — hand-edit refusal: claimStory throws InProgressHandEditErro
       deps: {
         listTodos: makeFakeListTodos(candidates, 0),
         claim: async () => { throw handEditError; },
-        buildPrompt: async () => ({ systemPrompt: FAKE_SYSTEM_PROMPT }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
         taskSpawn: async () => {},
       },
     });
@@ -351,7 +517,7 @@ describe("Behavioural invariants", () => {
         claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
         buildPrompt: async () => {
           buildPromptCalled = true;
-          return { systemPrompt: FAKE_SYSTEM_PROMPT };
+          return { systemPrompt: "# Fake Persona" };
         },
         taskSpawn: async () => {},
       },
@@ -370,7 +536,7 @@ describe("Behavioural invariants", () => {
       deps: {
         listTodos: makeFakeListTodos(candidates, 0),
         claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
-        buildPrompt: async () => ({ systemPrompt: FAKE_SYSTEM_PROMPT }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
         taskSpawn: async () => {},
       },
     });
@@ -402,7 +568,7 @@ describe("Behavioural invariants", () => {
           sessionUlidsUsed.push(opts.sessionUlid);
           return { ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` };
         },
-        buildPrompt: async () => ({ systemPrompt: FAKE_SYSTEM_PROMPT }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
         taskSpawn: async () => {},
       },
     });
@@ -422,10 +588,11 @@ describe("Behavioural invariants", () => {
       deps: {
         listTodos: makeFakeListTodos(candidates, 0),
         claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
-        buildPrompt: async () => ({ systemPrompt: FAKE_SYSTEM_PROMPT }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
         taskSpawn: async (args) => {
           spawnRecords.push({
             systemPrompt: args.systemPrompt,
+            subagentType: args.subagentType,
             initialContext: args.initialContext,
           });
         },
@@ -439,5 +606,64 @@ describe("Behavioural invariants", () => {
     expect(ctx.sessionUlid).toBe(SESSION_ULID);
     expect(ctx.targetRepoRoot).toBe(tmpRoot);
     expect(ctx.manifestPath).toBe(`.crew/state/in-progress/${ref}.yaml`);
+  });
+
+  it("passes subagentType: 'general-purpose' on every spawn", async () => {
+    const ref = "native:01HZABC0000000000000000001";
+    const candidates: ClaimableCandidate[] = [makeFakeCandidate(ref)];
+    const spawnRecords: SpawnRecord[] = [];
+
+    await runStartLoop({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      deps: {
+        listTodos: makeFakeListTodos(candidates, 0),
+        claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
+        taskSpawn: async (args) => {
+          spawnRecords.push({
+            systemPrompt: args.systemPrompt,
+            subagentType: args.subagentType,
+            initialContext: args.initialContext,
+          });
+        },
+      },
+    });
+
+    expect(spawnRecords.length).toBe(1);
+    expect(spawnRecords[0]!.subagentType).toBe("general-purpose");
+  });
+
+  it("does NOT emit QUEUE_DRAINED_LINE when eligible todos is empty but in-progress > 0", async () => {
+    // High 2 regression test: when eligible.length === 0 && inProgressCount > 0,
+    // the verbatim queue-drained anchor must NOT be emitted.
+    // Seed: one in-progress manifest on disk (for realism), no to-do manifests.
+    const inProgressRef = "native:01HZABC0000000000000000001";
+    await writeInProgressManifest(
+      tmpRoot,
+      inProgressRef,
+      makeManifestYaml(inProgressRef, { status: "in-progress" }),
+    );
+
+    const result = await runStartLoop({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      deps: {
+        // Return: no todos, but inProgressCount > 0
+        listTodos: async () => ({ todos: [], inProgressCount: 1 }),
+        claim: async (opts) => ({ ref: opts.ref, absPath: `/fake/${opts.ref}.yaml` }),
+        buildPrompt: async () => ({ systemPrompt: "# Fake Persona" }),
+        taskSpawn: async () => {},
+      },
+    });
+
+    // The verbatim queue-drained anchor MUST NOT appear.
+    expect(result.chatLog).not.toContain(QUEUE_DRAINED_LINE);
+
+    // A different message should appear indicating we're waiting on in-progress work.
+    const waitingLine = result.chatLog.find((line) =>
+      line.includes("waiting on in-progress work"),
+    );
+    expect(waitingLine).toBeDefined();
   });
 });
