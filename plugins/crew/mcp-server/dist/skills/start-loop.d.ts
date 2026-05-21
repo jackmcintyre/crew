@@ -28,6 +28,8 @@
 import type { ListClaimableTodosResult } from "../tools/list-claimable-todos.js";
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
 export declare const QUEUE_DRAINED_LINE = "queue drained \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /crew:plan to add work.";
+/** Verbatim waiting-on-in-progress line — emitted when todos exist but all are deps-blocked on active in-progress work. Do not paraphrase. */
+export declare const WAITING_ON_IN_PROGRESS_LINE = "waiting on in-progress work \u2014 no claimable todos this pass. Stop here or wait for in-progress stories to complete.";
 export interface TaskSpawnArgs {
     systemPrompt: string;
     subagentType: string;

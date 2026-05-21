@@ -30,36 +30,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { stringify as yamlStringify } from "yaml";
 import { InProgressHandEditError } from "../../errors.js";
-import { runStartLoop, QUEUE_DRAINED_LINE, TaskSpawnArgs } from "../start-loop.js";
+import { runStartLoop, QUEUE_DRAINED_LINE, WAITING_ON_IN_PROGRESS_LINE, TaskSpawnArgs } from "../start-loop.js";
 import type { ListClaimableTodosResult, ClaimableCandidate } from "../../tools/list-claimable-todos.js";
 import { listClaimableTodos } from "../../tools/list-claimable-todos.js";
 import { claimStory } from "../../tools/claim-story.js";
 import { buildPersonaSpawnPrompt } from "../../tools/build-persona-spawn-prompt.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
-
-// ---------------------------------------------------------------------------
-// Mock deriveSourceBaseline — needed by claimStory's hand-edit guard
-// claimStory calls it when checking if a ref is already in in-progress/.
-// For fresh claims (to-do/ → in-progress/), the guard is skipped because
-// the in-progress/ file does not yet exist. So we only need the mock to
-// return a safe baseline if it gets called on a pre-existing in-progress/ ref.
-// ---------------------------------------------------------------------------
-
-vi.mock("../../state/derive-source-baseline.js", () => ({
-  deriveSourceBaseline: vi.fn().mockResolvedValue({
-    sourceHash: "a".repeat(64),
-    sourceFields: {
-      title: "Test story",
-      narrative: "As a dev, I want to test.",
-      acceptance_criteria: [
-        { text: "Given something, when something, then it works.", kind: "integration" },
-      ],
-      implementation_notes: undefined,
-      depends_on: [],
-      withdrawn: false,
-    },
-  }),
-}));
 
 // ---------------------------------------------------------------------------
 // Types for the test spy
@@ -660,10 +636,7 @@ describe("Behavioural invariants", () => {
     // The verbatim queue-drained anchor MUST NOT appear.
     expect(result.chatLog).not.toContain(QUEUE_DRAINED_LINE);
 
-    // A different message should appear indicating we're waiting on in-progress work.
-    const waitingLine = result.chatLog.find((line) =>
-      line.includes("waiting on in-progress work"),
-    );
-    expect(waitingLine).toBeDefined();
+    // The verbatim waiting-on-in-progress anchor MUST appear.
+    expect(result.chatLog).toContain(WAITING_ON_IN_PROGRESS_LINE);
   });
 });

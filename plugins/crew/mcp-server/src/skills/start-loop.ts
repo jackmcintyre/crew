@@ -32,6 +32,10 @@ import type { ClaimableCandidate, ListClaimableTodosResult } from "../tools/list
 export const QUEUE_DRAINED_LINE =
   "queue drained — to-do/ and in-progress/ are both empty. Stop here, or run /crew:plan to add work.";
 
+/** Verbatim waiting-on-in-progress line — emitted when todos exist but all are deps-blocked on active in-progress work. Do not paraphrase. */
+export const WAITING_ON_IN_PROGRESS_LINE =
+  "waiting on in-progress work — no claimable todos this pass. Stop here or wait for in-progress stories to complete.";
+
 export interface TaskSpawnArgs {
   systemPrompt: string;
   subagentType: string;
@@ -122,9 +126,7 @@ export async function runStartLoop(
     // in-progress stories are still running, so the queue is NOT drained.
     if (eligible.length === 0) {
       // Deps-blocked with active in-progress work — cannot progress further this session.
-      chatLog.push(
-        "waiting on in-progress work — no claimable todos this pass. Stop here or wait for in-progress stories to complete.",
-      );
+      chatLog.push(WAITING_ON_IN_PROGRESS_LINE);
       break;
     }
 
