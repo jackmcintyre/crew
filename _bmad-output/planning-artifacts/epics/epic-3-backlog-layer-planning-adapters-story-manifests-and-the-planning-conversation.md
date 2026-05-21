@@ -62,6 +62,24 @@ So that I can keep authoring in BMad and have the plugin execute against my BMad
 
 **AC4 (integration):** vitest runs the BMad fixture suite end-to-end and asserts normalised `SourceStory` shape, including AC kind tagging and `depends_on` resolution.
 
+## Story 3.3b: Adapter config seam — move `configureBmadAdapter` into `resolveWorkspace`
+
+As a plugin maintainer,
+I want adapter-specific context (e.g. BMad's `stories_root`) bound at workspace-resolution time rather than opportunistically inside each tool,
+So that every caller of `resolveWorkspace` gets a fully wired adapter without having to know the adapter's name or call its `configure` helper themselves.
+
+**Acceptance Criteria:**
+
+**Given** `resolveWorkspace` in `mcp-server/src/state/workspace-resolver.ts`, **When** it returns a `Workspace`, **Then** any adapter-specific context binding (currently the `configureBmadAdapter({ targetRepo, storiesRoot })` call) has already been performed, using `targetRepoRoot` and the resolved `adapterConfig`.
+
+**Given** `scan-sources.ts`, **When** I inspect the body of `scanSources()`, **Then** the `if (activeAdapterName === "bmad") { configureBmadAdapter(...) }` block is gone and the `configureBmadAdapter` import is removed; the tool relies on `resolveWorkspace` having wired the adapter.
+
+**Given** any other current or future tool that calls `resolveWorkspace` (e.g. `get-status.ts`), **When** it subsequently invokes adapter methods, **Then** it does not need to call `configureBmadAdapter` (or any per-adapter `configure` helper) itself.
+
+**Given** the BMad adapter's default `stories_root` fallback (`"_bmad-output/planning-artifacts/stories"`), **When** `adapterConfig.stories_root` is absent, **Then** `resolveWorkspace` applies the same default that `scan-sources` applied previously, so behaviour is unchanged.
+
+**AC5 (integration):** the existing vitest suite for `scan-sources` (and any workspace-resolver tests) passes unchanged; a focused test asserts that calling `resolveWorkspace` against a BMad-shaped fixture leaves `BmadAdapter` in a bound state (calling `listSourceStories()` does not throw the "no bound context" error).
+
 ## Story 3.4: Native adapter, planner subagent, and `/plan` skill
 
 As a plugin operator without a planning tool,

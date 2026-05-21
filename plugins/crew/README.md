@@ -12,8 +12,12 @@ Full first-run walkthrough (running the bundled example sprint, scanning sources
 
 ## Available skills
 
+- `/crew:plan` — open a planning conversation. On native repos, spawns the planner subagent to author stories under `.crew/native-stories/`; on BMad repos, points you at BMad's authoring skills.
 - `/crew:scan` — project your planning tool's source stories into per-story execution manifests under `.crew/state/to-do/`. Idempotent on re-run.
 - `/crew:status` — print the current plugin version, target repo, adapter, and standards-doc state.
+- `/crew:hire` — open a hiring conversation; the hiring manager reads your repo and proposes a starting team.
+- `/crew:team` — print a one-shot snapshot of your hired team.
+- `/crew:ask` — ask a single question to a hired role and get one answer.
 
 ## Standards doc
 

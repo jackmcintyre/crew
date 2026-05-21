@@ -7,7 +7,9 @@ import type { PlanningAdapter } from "./adapter.js";
  * Registration order is load-bearing: `getActiveAdapter()` in Branch B
  * (no-config detect path) reports ambiguity in registration order and
  * returns the sole match when exactly one adapter's `detect()` is true.
- * Story 3.4 will append `NativeAdapter` here.
+ * Story 3.4 appends `NativeAdapter` after `BmadAdapter`. Registration
+ * order is load-bearing — `AmbiguousAdapterError.matchingAdapters` reports
+ * in registration order (Story 3.4 § Architecture compliance).
  */
 export declare const adapters: PlanningAdapter[];
 export interface GetActiveAdapterOptions {

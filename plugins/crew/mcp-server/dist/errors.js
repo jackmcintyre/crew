@@ -481,6 +481,48 @@ export class PersonaAlreadyExistsError extends DomainError {
     }
 }
 /**
+ * A native-story file at `<target-repo>/.crew/native-stories/<ULID>.md`
+ * failed parser-side validation: missing H1, missing required section,
+ * zero parseable ACs, an AC block with no Given/When/Then, or a
+ * `## Dependencies` bullet that does not parse as a ref.
+ *
+ * Thrown by `parseNativeStory` (Story 3.4). The error message names the
+ * offending file path and section.
+ */
+export class MalformedNativeStoryError extends DomainError {
+    path;
+    section;
+    reason;
+    constructor(opts) {
+        super(`Native story at '${opts.path}' is malformed in section '${opts.section}': ${opts.reason}. ` +
+            `See _bmad-output/implementation-artifacts/3-4-native-adapter-planner-subagent-and-plan-skill.md ` +
+            `§ Task 2 for the required body shape. (Story 3.4)`);
+        this.path = opts.path;
+        this.section = opts.section;
+        this.reason = opts.reason;
+    }
+}
+/**
+ * The `writeNativeStory` MCP tool was invoked against a workspace whose
+ * active adapter is not `"native"`. The tool refuses to write into a
+ * non-native workspace. This is the runtime guard for the BMad-branch
+ * Behavioural-contract clause in Story 3.4.
+ */
+export class WrongAdapterError extends DomainError {
+    expectedAdapter;
+    actualAdapter;
+    targetRepoRoot;
+    constructor(opts) {
+        super(`writeNativeStory requires adapter '${opts.expectedAdapter}' but ` +
+            `the resolved adapter for '${opts.targetRepoRoot}' is '${opts.actualAdapter}'. ` +
+            `This tool only writes into native-adapter workspaces. ` +
+            `For BMad workspaces, use /bmad-create-story instead. (Story 3.4)`);
+        this.expectedAdapter = opts.expectedAdapter;
+        this.actualAdapter = opts.actualAdapter;
+        this.targetRepoRoot = opts.targetRepoRoot;
+    }
+}
+/**
  * `readPersona` was asked for a role whose persona file does not
  * exist under `<target-repo>/team/<role>/PERSONA.md`. (Story 2.3)
  */

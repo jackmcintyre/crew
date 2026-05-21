@@ -391,6 +391,41 @@ export declare class PersonaAlreadyExistsError extends DomainError {
     });
 }
 /**
+ * A native-story file at `<target-repo>/.crew/native-stories/<ULID>.md`
+ * failed parser-side validation: missing H1, missing required section,
+ * zero parseable ACs, an AC block with no Given/When/Then, or a
+ * `## Dependencies` bullet that does not parse as a ref.
+ *
+ * Thrown by `parseNativeStory` (Story 3.4). The error message names the
+ * offending file path and section.
+ */
+export declare class MalformedNativeStoryError extends DomainError {
+    readonly path: string;
+    readonly section: string;
+    readonly reason: string;
+    constructor(opts: {
+        path: string;
+        section: string;
+        reason: string;
+    });
+}
+/**
+ * The `writeNativeStory` MCP tool was invoked against a workspace whose
+ * active adapter is not `"native"`. The tool refuses to write into a
+ * non-native workspace. This is the runtime guard for the BMad-branch
+ * Behavioural-contract clause in Story 3.4.
+ */
+export declare class WrongAdapterError extends DomainError {
+    readonly expectedAdapter: string;
+    readonly actualAdapter: string;
+    readonly targetRepoRoot: string;
+    constructor(opts: {
+        expectedAdapter: string;
+        actualAdapter: string;
+        targetRepoRoot: string;
+    });
+}
+/**
  * `readPersona` was asked for a role whose persona file does not
  * exist under `<target-repo>/team/<role>/PERSONA.md`. (Story 2.3)
  */

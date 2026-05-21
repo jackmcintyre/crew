@@ -4,6 +4,7 @@ tools_allow:
   - lookupStandards
   - recordYield
   - heartbeat
+  - writeNativeStory
 gh_allow:
   - pr-view
 gh_allow_args: {}

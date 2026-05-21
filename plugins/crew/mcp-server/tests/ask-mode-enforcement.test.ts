@@ -457,8 +457,8 @@ describe("AC6(g) — tool registration unchanged at 8 tools (Story 2.8 registers
         expect(toolNames, `expected tool '${name}' to be registered`).toContain(name);
       }
 
-      // Story 3.2 added scanSources — count is now 9
-      expect(result.tools.length, "expected exactly 9 tools").toBe(9);
+      // Story 3.2 added scanSources (9); Story 3.4 added writeNativeStory (10).
+      expect(result.tools.length, "expected exactly 10 tools").toBe(10);
     } finally {
       await client.close();
       await server.close();

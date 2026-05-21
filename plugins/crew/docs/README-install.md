@@ -100,6 +100,18 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
 
    (`ls <target-repo>/docs/standards.md` returns the path — the file now exists.)
 
+   Available slash commands after install:
+
+   | Skill | Description |
+   |---|---|
+   | `/crew:status` | Print the current plugin version, target repo, adapter, and standards-doc state. |
+   | `/crew:hire` | Open a hiring conversation — the hiring manager reads your repo and proposes a starting team. |
+   | `/crew:skip-hiring` | Hire the default five-role roster directly without an interactive proposal. |
+   | `/crew:plan` | Open a planning conversation. On native repos, spawn the planner subagent to author stories; on BMad repos, point you at BMad's authoring skills. |
+   | `/crew:scan` | Scan the active adapter's source stories into `.crew/state/to-do/` execution manifests. Idempotent. |
+   | `/crew:team` | Print a one-shot snapshot of your hired team — roles, domains, recent knowledge entries, fire counts. |
+   | `/crew:ask` | Open a non-mutating side-session with a hired role — ask one question, get one answer. |
+
 6. **Run `/<plugin>:status` and see the current adapter state.**
 
    ```text

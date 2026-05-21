@@ -225,17 +225,21 @@ describe("static direct-gh-spawn guard (AC5b static)", () => {
 
 describe("static direct-rename guard (Story 1.6 AC6g)", () => {
   const RENAME_WRAPPER = path.join(SRC_DIR, "state", "manifest-state-machine.ts");
+  // managed-fs.ts is the designated fs-write layer and is also permitted to
+  // use fs.rename for atomic writes (atomicWriteFile — Task 4.5 / Story 3.4).
+  const MANAGED_FS = path.join(SRC_DIR, "lib", "managed-fs.ts");
   const allSources = walkTs(SRC_DIR);
 
   const BANNED_RENAME_BINDINGS = ["rename", "renameSync"];
 
-  it("no file under mcp-server/src/** (other than state/manifest-state-machine.ts) imports or invokes rename against a state-machine path", () => {
+  it("no file under mcp-server/src/** (other than state/manifest-state-machine.ts and lib/managed-fs.ts) imports or invokes rename against a state-machine path", () => {
     const importRegex =
       /import\s+(?:type\s+)?(?:\{([^}]*)\}|(\*\s+as\s+\w+)|(\w+))\s+from\s+["']([^"']+)["']/g;
     const offences: string[] = [];
 
     for (const file of allSources) {
       if (file === RENAME_WRAPPER) continue;
+      if (file === MANAGED_FS) continue;
       const body = readFileSync(file, "utf8");
 
       let match: RegExpExecArray | null;
