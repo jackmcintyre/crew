@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { adapters as registryAdapters } from "../adapters/registry.js";
+import { configureBmadAdapter } from "../adapters/bmad/index.js";
 import { AmbiguousAdapterError, InvalidWorkspaceConfigError, NoAdapterMatchedError, } from "../errors.js";
 import { PluginSettingsSchema, WorkspaceConfigSchema, } from "../schemas/workspace-config.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
@@ -122,6 +123,18 @@ export async function resolveWorkspace(opts) {
     // re-parse defensively in case future edits to the top-level schema
     // weaken that guarantee.
     const pluginSettings = PluginSettingsSchema.parse(config.plugin);
+    /**
+     * Per-adapter context binding. Today only BMad needs this; future adapters
+     * should add their own narrow branch here (or graduate to a
+     * `PlanningAdapter.configure?(workspace)` hook — see Dev Notes in Story 3.3b).
+     */
+    if (activeAdapter.name === "bmad") {
+        const bmadConfig = adapterParsed.data;
+        configureBmadAdapter({
+            targetRepo: targetRepoRoot,
+            storiesRoot: bmadConfig.stories_root ?? "_bmad-output/planning-artifacts/stories",
+        });
+    }
     return {
         targetRepoRoot,
         activeAdapterName: activeAdapter.name,

@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
-import { configureBmadAdapter } from "../adapters/bmad/index.js";
 import { MalformedExecutionManifestError } from "../errors.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { ExecutionManifestSchema, parseExecutionManifest, } from "../schemas/execution-manifest.js";
@@ -120,20 +119,6 @@ export async function scanSources(opts) {
     // Step 1: Resolve the workspace. Throws on misconfiguration.
     const workspace = await resolveWorkspace({ targetRepoRoot: opts.targetRepoRoot });
     const { activeAdapter, activeAdapterName, adapterConfig, targetRepoRoot } = workspace;
-    // Configure adapter context before calling any adapter methods.
-    // Story 3.1 wires `configureBmadAdapter` into `getActiveAdapter()` conceptually;
-    // in v1, the scan tool is the first caller that needs a configured adapter, so we
-    // set the context here using the adapterConfig resolved by the workspace resolver.
-    // For the BMad adapter, adapterConfig = { stories_root: "..." }. Future adapters
-    // that need similar per-invocation context should expose a similar `configure` call;
-    // or this block will extend to a type-safe dispatch table as more adapters land.
-    if (activeAdapterName === "bmad") {
-        const bmadConfig = adapterConfig;
-        configureBmadAdapter({
-            targetRepo: targetRepoRoot,
-            storiesRoot: bmadConfig.stories_root ?? "_bmad-output/planning-artifacts/stories",
-        });
-    }
     // Step 2: List source stories from the active adapter.
     const sourceStories = await activeAdapter.listSourceStories();
     const result = {

@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { adapters as registryAdapters } from "../adapters/registry.js";
 import type { PlanningAdapter } from "../adapters/adapter.js";
+import { configureBmadAdapter } from "../adapters/bmad/index.js";
 import {
   AmbiguousAdapterError,
   InvalidWorkspaceConfigError,
@@ -27,7 +28,12 @@ export interface Workspace {
   targetRepoRoot: string;
   /** Mirrors `adapter` from `.crew/config.yaml`. */
   activeAdapterName: string;
-  /** The registered `PlanningAdapter` instance for `activeAdapterName`. */
+  /**
+   * The registered `PlanningAdapter` instance for `activeAdapterName`.
+   * The adapter's per-invocation context (e.g. BMad's `(targetRepo, storiesRoot)` binding)
+   * has already been applied; callers may invoke adapter methods immediately without
+   * calling any `configure` helper.
+   */
   activeAdapter: PlanningAdapter;
   /** Validated by the adapter's own schema. Opaque to the caller. */
   adapterConfig: unknown;
@@ -166,6 +172,20 @@ export async function resolveWorkspace(opts: ResolveWorkspaceOptions): Promise<W
   // re-parse defensively in case future edits to the top-level schema
   // weaken that guarantee.
   const pluginSettings = PluginSettingsSchema.parse(config.plugin);
+
+  /**
+   * Per-adapter context binding. Today only BMad needs this; future adapters
+   * should add their own narrow branch here (or graduate to a
+   * `PlanningAdapter.configure?(workspace)` hook — see Dev Notes in Story 3.3b).
+   */
+  if (activeAdapter.name === "bmad") {
+    const bmadConfig = adapterParsed.data as { stories_root?: string };
+    configureBmadAdapter({
+      targetRepo: targetRepoRoot,
+      storiesRoot:
+        bmadConfig.stories_root ?? "_bmad-output/planning-artifacts/stories",
+    });
+  }
 
   return {
     targetRepoRoot,

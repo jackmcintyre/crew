@@ -13,6 +13,7 @@ import {
   NoAdapterMatchedError,
   NotImplementedError,
 } from "../src/errors.js";
+import { BmadAdapter, resetBmadAdapter } from "../src/adapters/bmad/index.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, "fixtures", "workspace-resolver");
@@ -173,5 +174,87 @@ describe("resolveWorkspace", () => {
 
     const configPath = path.join(tmp, ".crew", "config.yaml");
     await expect(fs.stat(configPath)).rejects.toThrow();
+  });
+
+  describe("AC5: BMad adapter binding", () => {
+    let bmadTmpDirs: string[] = [];
+
+    beforeEach(() => {
+      resetBmadAdapter();
+    });
+
+    afterEach(async () => {
+      resetBmadAdapter();
+      while (bmadTmpDirs.length) {
+        const d = bmadTmpDirs.pop()!;
+        try {
+          await fs.rm(d, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+
+    it("binds BmadAdapter context so listSourceStories() works without an explicit configureBmadAdapter call", async () => {
+      // Build a BMad-shaped tmp repo with one valid story file.
+      const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "wsres-bmad-binding-"));
+      bmadTmpDirs.push(tmp);
+
+      // Write .crew/config.yaml
+      const crewDir = path.join(tmp, ".crew");
+      await fs.mkdir(crewDir, { recursive: true });
+      await fs.writeFile(
+        path.join(crewDir, "config.yaml"),
+        "adapter: bmad\nadapter_config:\n  stories_root: _bmad-output/planning-artifacts/stories\nplugin: {}\n",
+        "utf8",
+      );
+
+      // Write a minimal BMad story file so listSourceStories() returns ≥1 result.
+      const storiesDir = path.join(tmp, "_bmad-output", "planning-artifacts", "stories");
+      await fs.mkdir(storiesDir, { recursive: true });
+      await fs.writeFile(
+        path.join(storiesDir, "9-9-fixture-story.md"),
+        [
+          "# Story 9.9: Fixture story",
+          "",
+          "Status: ready-for-dev",
+          "",
+          "## Story",
+          "",
+          "As a **fixture story**,",
+          "I want **to be scanned**,",
+          "so that **the binding test can assert listSourceStories() resolves**.",
+          "",
+          "## Acceptance Criteria",
+          "",
+          "**AC1 (integration):**",
+          "**Given** this fixture,",
+          "**When** listSourceStories is called,",
+          "**Then** a SourceStory is returned.",
+        ].join("\n"),
+        "utf8",
+      );
+
+      // Ensure the adapter is not yet bound (resetBmadAdapter called in beforeEach).
+      const ws = await resolveWorkspace({ targetRepoRoot: tmp, adapters: [BmadAdapter] });
+
+      expect(ws.activeAdapterName).toBe("bmad");
+
+      // Critical assertion (AC5): listSourceStories() must NOT throw "BmadAdapter has no bound context".
+      const stories = await ws.activeAdapter.listSourceStories();
+      expect(stories.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("applies the default stories_root fallback when adapterConfig.stories_root is absent", async () => {
+      // String-level assertion: the default literal must appear in workspace-resolver.ts.
+      const HERE = path.dirname(fileURLToPath(import.meta.url));
+      const resolverSrc = await fs.readFile(
+        path.join(HERE, "../src/state/workspace-resolver.ts"),
+        "utf8",
+      );
+      const matches = resolverSrc.match(/"_bmad-output\/planning-artifacts\/stories"/g);
+      expect(matches).not.toBeNull();
+      expect(matches!.length).toBe(1);
+    });
   });
 });
