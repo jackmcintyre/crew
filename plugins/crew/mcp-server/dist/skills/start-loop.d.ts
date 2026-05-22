@@ -1,5 +1,5 @@
 /**
- * `runStartLoop` — Story 4.2 Task 8.
+ * `runStartLoop` — Story 4.2 Task 8, updated in Story 4.3 Task 4.
  *
  * The claim-spawn-terminate loop that the `/crew:start` SKILL.md skill prose
  * maps to. This function is plain TypeScript — no `console.log`, no LLM-side
@@ -8,9 +8,9 @@
  * Code harness.
  *
  * **Test seam:** production callers wire `listTodos`, `claim`, `buildPrompt`,
- * and `taskSpawn` to the real MCP tools and the real Claude Code `Task` tool.
- * Integration tests pass fakes for each dependency so the loop body can be
- * driven deterministically without a running Claude Code process.
+ * and `taskSpawnWithTranscript` to the real MCP tools and the real Claude Code
+ * `Task` tool. Integration tests pass fakes for each dependency so the loop
+ * body can be driven deterministically without a running Claude Code process.
  *
  * **Behavioural contract (from Story 4.2 § Behavioural contract):**
  * - Prints the session header BEFORE any loop iteration.
@@ -23,9 +23,14 @@
  * - On each loop pass, skips refs where `depsReady: false` silently.
  * - Loops until both `todos` (depsReady=true) and `inProgressCount` are empty.
  *
- * Story 4.2 Task 8.1–8.4.
+ * Story 4.2 Task 8.1–8.4. Updated in Story 4.3 Task 4: `taskSpawn` (→ void)
+ * replaced with `taskSpawnWithTranscript` (→ { transcript: string });
+ * `processCandidate` delegates to `runDevReviewerCycle` for the inner
+ * dev → reviewer → rework loop; `readManifest` and `writeManifest` seams
+ * added to `RunStartLoopDeps` for manifest mutations within the inner cycle.
  */
 import type { ListClaimableTodosResult } from "../tools/list-claimable-todos.js";
+import type { TaskSpawnWithTranscriptArgs } from "./dev-reviewer-cycle.js";
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
 export declare const QUEUE_DRAINED_LINE = "queue drained \u2014 to-do/ and in-progress/ are both empty. Stop here, or run /crew:plan to add work.";
 /** Verbatim waiting-on-in-progress line — emitted when todos exist but all are deps-blocked on active in-progress work. Do not paraphrase. */
@@ -60,13 +65,19 @@ export interface RunStartLoopDeps {
         sessionUlid: string;
         role: string;
     }) => Promise<ClaimResult>;
-    /** Assembles the generalist-dev system prompt. One call per spawn. */
+    /** Assembles the system prompt for a role. One call per spawn. */
     buildPrompt: (opts: {
         targetRepoRoot: string;
         role: string;
     }) => Promise<BuildPromptResult>;
-    /** Invokes a subagent via the Task tool. Returns when the subagent terminates. */
-    taskSpawn: (args: TaskSpawnArgs) => Promise<void>;
+    /**
+     * Invokes a subagent via the Task tool and returns its final-output
+     * transcript. Replaces Story 4.2's `taskSpawn: () => Promise<void>`.
+     * The inner cycle needs the transcript to parse the handoff phrase.
+     */
+    taskSpawnWithTranscript: (args: TaskSpawnWithTranscriptArgs) => Promise<{
+        transcript: string;
+    }>;
 }
 export interface RunStartLoopOptions {
     targetRepoRoot: string;

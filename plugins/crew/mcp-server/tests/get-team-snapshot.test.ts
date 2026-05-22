@@ -637,8 +637,8 @@ describe("AC3(e) — tool registration (Task 7.9)", () => {
       expect(toolNames).toContain(name);
     }
 
-    // Eighteen total — Story 3.2 added scanSources (9); Story 3.4 added writeNativeStory (10); Story 3.5 added validatePlannerBacklog (11); Story 3.6 added markWithdrawn (12) and readBacklogInventory (13); Story 4.1 added claimStory (14) and completeStory (15); Story 4.2 added mintSessionUlid (16), listClaimableTodos (17), buildPersonaSpawnPrompt (18).
-    expect(result.tools.length).toBe(18);
+    // Nineteen total — Story 3.2 added scanSources (9); Story 3.4 added writeNativeStory (10); Story 3.5 added validatePlannerBacklog (11); Story 3.6 added markWithdrawn (12) and readBacklogInventory (13); Story 4.1 added claimStory (14) and completeStory (15); Story 4.2 added mintSessionUlid (16), listClaimableTodos (17), buildPersonaSpawnPrompt (18); Story 4.3 added runDevSession (19).
+    expect(result.tools.length).toBe(19);
 
     await client.close();
     await server.close();

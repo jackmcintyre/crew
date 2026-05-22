@@ -71,17 +71,30 @@ describe("AC5 — /crew:start SKILL.md content structure", () => {
     expect(frontmatter["name"]).toBe("crew:start");
   });
 
-  it("AC5(ii) — allowed_tools includes at minimum Task, buildPersonaSpawnPrompt, claimStory, getStatus", () => {
+  it("AC5(ii) — allowed_tools includes at minimum Task, buildPersonaSpawnPrompt, claimStory, getStatus (Story 4.2 backward-compat check)", () => {
+    // Note: Story 4.3 AC5(vii) supersedes this with a set-equality check.
+    // This test is retained for backward-compat documentation only.
+    // The set-equality check below will fail if unexpected tools are added.
     const allowedTools = frontmatter["allowed_tools"] as string[];
     expect(Array.isArray(allowedTools)).toBe(true);
+    // Post-4.3 the SKILL.md only calls getStatus, mintSessionUlid, runDevSession
+    // directly. The old tools are wrapped inside runDevSession.
+    // We only assert the set is non-empty here; the strict set check is in AC5(vii).
+    expect(allowedTools.length).toBeGreaterThan(0);
+  });
 
-    const required = ["Task", "buildPersonaSpawnPrompt", "claimStory", "getStatus"];
-    for (const tool of required) {
-      expect(
-        allowedTools,
-        `Expected allowed_tools to include '${tool}'`,
-      ).toContain(tool);
+  it("AC5(vii) — allowed_tools equals exactly {getStatus, mintSessionUlid, runDevSession} (Story 4.3)", () => {
+    const allowedTools = new Set(frontmatter["allowed_tools"] as string[]);
+    const expected = new Set(["getStatus", "mintSessionUlid", "runDevSession"]);
+
+    // Set equality: every expected tool is present and no unexpected tools exist.
+    for (const tool of expected) {
+      expect(allowedTools, `Expected allowed_tools to contain '${tool}'`).toContain(tool);
     }
+    for (const tool of allowedTools) {
+      expect(expected, `Unexpected tool '${tool}' in allowed_tools`).toContain(tool);
+    }
+    expect(allowedTools.size).toBe(expected.size);
   });
 
   it("AC5(iii) — body contains the verbatim spawn string", () => {
@@ -114,5 +127,16 @@ describe("AC5 — /crew:start SKILL.md content structure", () => {
       "4-2-start-skill-and-per-story-dev-subagent-spawn.md",
     );
     expect(raw).toContain("Behavioural contract");
+  });
+
+  it("AC5(v) — body contains # Inner cycle: dev → reviewer → rework section", () => {
+    expect(body).toMatch(/^#{1,2} Inner cycle: dev → reviewer → rework/m);
+    expect(body).toContain("spawn the generalist-reviewer subagent via Claude Code's Task tool");
+  });
+
+  it("AC5(vi) — # Failure modes section names HandoffGrammarDriftError and blocked_by: handoff-grammar", () => {
+    expect(body).toMatch(/^#+ Failure modes/m);
+    expect(body).toContain("HandoffGrammarDriftError");
+    expect(body).toContain("blocked_by: handoff-grammar");
   });
 });

@@ -20,6 +20,7 @@ import { readRepoSignals } from "./read-repo-signals.js";
 import { scanSources, renderScanResult } from "./scan-sources.js";
 import { validatePlannerBacklog } from "./validate-planner-backlog.js";
 import { writeNativeStory } from "./write-native-story.js";
+import { runDevSession } from "./run-dev-session.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -666,6 +667,54 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       } catch (err) {
         if (err instanceof DomainError) {
           return { content: [{ type: "text" as const, text: err.message }], isError: true };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.3 — runDevSession: single MCP-tool entry point for the entire
+  // /crew:start loop body (outer claim-loop + inner dev → reviewer → rework
+  // cycle). The skill prose is reduced to: getStatus → mintSessionUlid →
+  // runDevSession. buildPersonaSpawnPrompt is wrapped internally and is NOT
+  // listed in the skill's allowed_tools. Task-spawn is injected via the tool
+  // handler so the Claude Code harness can supply the real Task tool.
+  server.registerTool({
+    name: "runDevSession",
+    description:
+      "Run the full /crew:start session: outer claim-loop plus the inner dev → reviewer → rework cycle. " +
+      "Returns { chatLog: string[] } — print each entry to the operator in order. " +
+      "Internally wires listClaimableTodos, claimStory, buildPersonaSpawnPrompt, and the " +
+      "Claude Code Task tool (wrapped to capture transcripts). Story 4.3.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        sessionUlid: { type: "string" },
+      },
+      required: ["targetRepoRoot", "sessionUlid"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          sessionUlid: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await runDevSession({
+          targetRepoRoot: parsed.targetRepoRoot,
+          sessionUlid: parsed.sessionUlid,
+        });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
         }
         throw err;
       }

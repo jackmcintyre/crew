@@ -613,6 +613,29 @@ export class PersonaFileNotFoundError extends DomainError {
     }
 }
 /**
+ * Thrown when the dev subagent's final-output transcript does not contain
+ * the verbatim locked handoff phrase `Handoff to reviewer — story <story-id>
+ * ready for review.` on its last non-empty line. The in-progress manifest
+ * is stamped with `blocked_by: "handoff-grammar"` in-place (Story 5.1 will
+ * retrofit the atomic move to `blocked/`).
+ *
+ * Reserved for callers that prefer exception-style flow control over the
+ * tagged-union result from `parseHandoff`. The inner cycle uses the tagged
+ * union; this class is declared here for SKILL.md failure-modes documentation
+ * and for future callers.
+ *
+ * Added in Story 4.3.
+ */
+export class HandoffGrammarDriftError extends DomainError {
+    ref;
+    constructor(opts) {
+        super(`Dev subagent for story ${opts.ref} terminated without the verbatim locked handoff phrase. ` +
+            `The in-progress manifest has been stamped with blocked_by: "handoff-grammar". ` +
+            `Edit the manifest to clear blocked_by and re-run /crew:start.`);
+        this.ref = opts.ref;
+    }
+}
+/**
  * `parsePersonaFile` found a file on disk but it failed the parser —
  * YAML frontmatter syntax error, missing / unknown frontmatter key,
  * a required `##` section missing / out of canonical order, or the

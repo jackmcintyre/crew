@@ -1,5 +1,5 @@
 /**
- * `runStartLoop` — Story 4.2 Task 8.
+ * `runStartLoop` — Story 4.2 Task 8, updated in Story 4.3 Task 4.
  *
  * The claim-spawn-terminate loop that the `/crew:start` SKILL.md skill prose
  * maps to. This function is plain TypeScript — no `console.log`, no LLM-side
@@ -8,9 +8,9 @@
  * Code harness.
  *
  * **Test seam:** production callers wire `listTodos`, `claim`, `buildPrompt`,
- * and `taskSpawn` to the real MCP tools and the real Claude Code `Task` tool.
- * Integration tests pass fakes for each dependency so the loop body can be
- * driven deterministically without a running Claude Code process.
+ * and `taskSpawnWithTranscript` to the real MCP tools and the real Claude Code
+ * `Task` tool. Integration tests pass fakes for each dependency so the loop
+ * body can be driven deterministically without a running Claude Code process.
  *
  * **Behavioural contract (from Story 4.2 § Behavioural contract):**
  * - Prints the session header BEFORE any loop iteration.
@@ -23,8 +23,19 @@
  * - On each loop pass, skips refs where `depsReady: false` silently.
  * - Loops until both `todos` (depsReady=true) and `inProgressCount` are empty.
  *
- * Story 4.2 Task 8.1–8.4.
+ * Story 4.2 Task 8.1–8.4. Updated in Story 4.3 Task 4: `taskSpawn` (→ void)
+ * replaced with `taskSpawnWithTranscript` (→ { transcript: string });
+ * `processCandidate` delegates to `runDevReviewerCycle` for the inner
+ * dev → reviewer → rework loop; `readManifest` and `writeManifest` seams
+ * added to `RunStartLoopDeps` for manifest mutations within the inner cycle.
  */
+import * as path from "node:path";
+import { stringify as yamlStringify } from "yaml";
+import { runDevReviewerCycle } from "./dev-reviewer-cycle.js";
+import { parseExecutionManifest } from "../schemas/execution-manifest.js";
+import { atomicWriteFile } from "../lib/managed-fs.js";
+import { promises as fs } from "node:fs";
+import { parse as yamlParse } from "yaml";
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
 export const QUEUE_DRAINED_LINE = "queue drained — to-do/ and in-progress/ are both empty. Stop here, or run /crew:plan to add work.";
 /** Verbatim waiting-on-in-progress line — emitted when todos exist but all are deps-blocked on active in-progress work. Do not paraphrase. */
@@ -77,8 +88,9 @@ async function processCandidate(candidate, opts) {
     // Print claiming line BEFORE claim call.
     chatLog.push(`claiming ${ref} — ${displayTitle}`);
     // Call claimStory. On any typed error, surface verbatim and continue.
+    let claimResult;
     try {
-        await deps.claim({
+        claimResult = await deps.claim({
             targetRepoRoot,
             ref,
             sessionUlid,
@@ -91,44 +103,43 @@ async function processCandidate(candidate, opts) {
         chatLog.push(`${name}: ${message}`);
         return;
     }
-    // Claim succeeded — build the persona prompt (one read per spawn).
-    let promptResult;
-    try {
-        promptResult = await deps.buildPrompt({
-            targetRepoRoot,
-            role: "generalist-dev",
-        });
-    }
-    catch (err) {
-        const name = err instanceof Error ? err.constructor.name : "Error";
-        const message = err instanceof Error ? err.message : String(err);
-        chatLog.push(`${name}: ${message}`);
-        return;
-    }
     // Print spawning line BEFORE Task invocation.
     chatLog.push("spawning generalist-dev subagent (clean context)");
-    // Derive manifest path (relative).
-    const manifestPath = `.crew/state/in-progress/${ref}.yaml`;
-    // Invoke the Task tool. Awaiting means we wait for the subagent to finish
-    // before moving to the next candidate — per Story 4.2 spec ("When the Task
-    // spawn returns, continue the loop").
+    // Derive manifest path (absolute — needed by the inner cycle).
+    const manifestAbsPath = path.resolve(targetRepoRoot, ".crew", "state", "in-progress", `${ref}.yaml`);
+    // Build the inner-cycle deps from the outer deps.
+    const cycleDeps = {
+        buildPrompt: async (o) => deps.buildPrompt({ targetRepoRoot: o.targetRepoRoot, role: o.role }),
+        taskSpawnWithTranscript: deps.taskSpawnWithTranscript,
+        readManifest: async (absPath) => {
+            const raw = await fs.readFile(absPath, "utf8");
+            const parsed = yamlParse(raw);
+            return parseExecutionManifest(parsed, { absPath });
+        },
+        writeManifest: async (absPath, manifest, _opts) => {
+            const yaml = yamlStringify(manifest, { lineWidth: 0 });
+            await atomicWriteFile(absPath, yaml);
+        },
+    };
+    // Delegate to the inner dev → reviewer cycle.
     try {
-        await deps.taskSpawn({
-            systemPrompt: promptResult.systemPrompt,
-            subagentType: "general-purpose",
-            initialContext: {
-                ref,
-                title: displayTitle,
-                sessionUlid,
-                targetRepoRoot,
-                manifestPath,
-            },
+        const cycleResult = await runDevReviewerCycle({
+            targetRepoRoot,
+            sessionUlid,
+            ref,
+            title: displayTitle,
+            manifestPath: manifestAbsPath,
+            deps: cycleDeps,
         });
+        // Append the inner cycle's chat lines to the outer log.
+        chatLog.push(...cycleResult.chatLog);
     }
     catch (err) {
         const name = err instanceof Error ? err.constructor.name : "Error";
         const message = err instanceof Error ? err.message : String(err);
         chatLog.push(`${name}: ${message}`);
-        // Don't rethrow — subagent errors should not abort the loop.
+        // Don't rethrow — errors in the inner cycle should not abort the outer loop.
     }
+    // Suppress unused variable warning for claimResult (used implicitly).
+    void claimResult;
 }

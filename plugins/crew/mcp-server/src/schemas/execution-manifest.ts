@@ -121,12 +121,19 @@ export const ExecutionManifestSchema = z
      * When set, names the reason the manifest was placed in `blocked/`
      * instead of `to-do/`. Only populated for blocked manifests.
      * Forward-compat: a string fallback is included for future block reasons
-     * beyond `"planning-discipline"` and `"source-drift"`.
+     * beyond the recognised literals.
      *
-     * Added in Story 3.5 Task 6.2.
+     * Added in Story 3.5 Task 6.2. Extended in Story 4.3 with
+     * `"handoff-grammar"` and `"reviewer-grammar"`.
      */
     blocked_by: z
-      .union([z.literal("planning-discipline"), z.literal("source-drift"), z.string()])
+      .union([
+        z.literal("planning-discipline"),
+        z.literal("source-drift"),
+        z.literal("handoff-grammar"),
+        z.literal("reviewer-grammar"),
+        z.string(),
+      ])
       .optional(),
 
     /**
@@ -159,6 +166,15 @@ export const ExecutionManifestSchema = z
      * Added in Story 4.1 (FR17).
      */
     claimed_by: z.string().min(1).optional(),
+
+    /**
+     * Count of NEEDS CHANGES verdict rounds the dev/reviewer pair has run on
+     * this story. `undefined` ≡ `0`. Incremented in-place by Story 4.3's
+     * inner cycle on every NEEDS CHANGES verdict.
+     *
+     * Added in Story 4.3 (FR28).
+     */
+    rework_count: z.number().int().nonnegative().optional(),
   })
   .strict();
 
