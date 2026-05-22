@@ -19,7 +19,9 @@ import { readRepoSignals } from "./read-repo-signals.js";
 import { scanSources, renderScanResult } from "./scan-sources.js";
 import { validatePlannerBacklog } from "./validate-planner-backlog.js";
 import { writeNativeStory } from "./write-native-story.js";
-import { runDevSession } from "./run-dev-session.js";
+import { claimNextStory } from "./claim-next-story.js";
+import { processDevTranscript } from "./process-dev-transcript.js";
+import { processReviewerTranscript } from "./process-reviewer-transcript.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -644,18 +646,16 @@ export function registerAllTools(server) {
             }
         },
     });
-    // Story 4.3 — runDevSession: single MCP-tool entry point for the entire
-    // /crew:start loop body (outer claim-loop + inner dev → reviewer → rework
-    // cycle). The skill prose is reduced to: getStatus → mintSessionUlid →
-    // runDevSession. buildPersonaSpawnPrompt is wrapped internally and is NOT
-    // listed in the skill's allowed_tools. Task-spawn is injected via the tool
-    // handler so the Claude Code harness can supply the real Task tool.
+    // Story 4.3b — claimNextStory: single-iteration outer claim-loop step.
+    // The SKILL.md prose calls this in a loop until queue-drained or
+    // waiting-on-in-progress is returned.
     server.registerTool({
-        name: "runDevSession",
-        description: "Run the full /crew:start session: outer claim-loop plus the inner dev → reviewer → rework cycle. " +
-            "Returns { chatLog: string[] } — print each entry to the operator in order. " +
-            "Internally wires listClaimableTodos, claimStory, buildPersonaSpawnPrompt, and the " +
-            "Claude Code Task tool (wrapped to capture transcripts). Story 4.3.",
+        name: "claimNextStory",
+        description: "Claim the next ready story from the backlog for the current session. " +
+            "Returns { next: 'spawn-dev', ref, title, manifestPath, chatLog } when a story is claimed, " +
+            "{ next: 'queue-drained', chatLog } when both to-do/ and in-progress/ are empty, or " +
+            "{ next: 'waiting-on-in-progress', chatLog } when todos exist but all are deps-blocked. " +
+            "Story 4.3b.",
         inputSchema: {
             type: "object",
             properties: {
@@ -672,10 +672,99 @@ export function registerAllTools(server) {
             })
                 .parse(args);
             try {
-                const result = await runDevSession({
-                    targetRepoRoot: parsed.targetRepoRoot,
-                    sessionUlid: parsed.sessionUlid,
-                });
+                const result = await claimNextStory(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 4.3b — processDevTranscript: parse the dev subagent's final transcript.
+    // The SKILL.md prose calls this after capturing the dev Task tool's return value.
+    server.registerTool({
+        name: "processDevTranscript",
+        description: "Parse the dev subagent's final transcript for the verbatim handoff phrase. " +
+            "Returns { next: 'spawn-reviewer', reviewerPrompt, chatLog } on a valid handoff, or " +
+            "{ next: 'done-blocked-handoff-grammar', chatLog } on grammar drift (stamps blocked_by in the manifest). " +
+            "MUST be called with the verbatim full transcript — no summarisation. Story 4.3b.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+                ref: { type: "string" },
+                devTranscript: { type: "string" },
+            },
+            required: ["targetRepoRoot", "sessionUlid", "ref", "devTranscript"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                sessionUlid: z.string().min(1),
+                ref: z.string().min(1),
+                devTranscript: z.string(),
+            })
+                .parse(args);
+            try {
+                const result = await processDevTranscript(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 4.3b — processReviewerTranscript: parse the reviewer subagent's final transcript.
+    // The SKILL.md prose calls this after capturing the reviewer Task tool's return value.
+    server.registerTool({
+        name: "processReviewerTranscript",
+        description: "Parse the reviewer subagent's final transcript for the verdict sentinel. " +
+            "Returns { next: 'rework-dev', devPrompt, reworkIteration, chatLog } on NEEDS CHANGES (increments rework_count), " +
+            "{ next: 'done-ready-for-merge', chatLog } on READY FOR MERGE, " +
+            "{ next: 'done-blocked-reviewer-verdict', chatLog } on BLOCKED, or " +
+            "{ next: 'done-blocked-reviewer-grammar', chatLog } on grammar drift (stamps blocked_by). " +
+            "MUST be called with the verbatim full transcript — no summarisation. Story 4.3b.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+                ref: { type: "string" },
+                manifestPath: { type: "string" },
+                reviewerTranscript: { type: "string" },
+            },
+            required: ["targetRepoRoot", "sessionUlid", "ref", "manifestPath", "reviewerTranscript"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                sessionUlid: z.string().min(1),
+                ref: z.string().min(1),
+                manifestPath: z.string().min(1),
+                reviewerTranscript: z.string(),
+            })
+                .parse(args);
+            try {
+                const result = await processReviewerTranscript(parsed);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };

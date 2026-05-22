@@ -1,17 +1,20 @@
 /**
- * AC5 — SKILL.md content structure check — Story 4.2.
+ * AC6 — SKILL.md content structure check — Story 4.3b.
  *
  * Reads the on-disk `plugins/crew/skills/start/SKILL.md`, splits its YAML
- * front-matter, and asserts the deterministic structural anchors required by AC5:
+ * front-matter, and asserts the deterministic structural anchors required by AC6:
  *
- *   (i)   `name === "crew:start"` (exact).
- *   (ii)  `allowed_tools` is a superset of `["Task", "buildPersonaSpawnPrompt",
- *          "claimStory", "getStatus"]`.
- *   (iii) Body contains the verbatim AC5(iii) string.
- *   (iv)  Body contains the verbatim AC3 queue-drained line.
- *   (v)   Body's `# Failure modes` section names all four required typed errors.
+ *   (i)    `allowed_tools` is exactly {getStatus, mintSessionUlid, claimNextStory,
+ *           processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task}.
+ *   (ii)   Body contains the `# Inner cycle: dev → reviewer → rework` section.
+ *   (iii)  That section contains `invoke the Task tool with the devPrompt returned by buildPersonaSpawnPrompt`.
+ *   (iv)   That section contains `invoke the Task tool with the reviewerPrompt returned by processDevTranscript`.
+ *   (v)    That section contains `pass the captured devTranscript to processDevTranscript`.
+ *   (vi)   That section contains `pass the captured reviewerTranscript to processReviewerTranscript`.
+ *   (vii)  That section contains `MUST pass the transcript verbatim`.
+ *   (viii) The `# Failure modes` section names `HandoffGrammarDriftError`, `blocked_by: handoff-grammar`,
+ *          `ReviewerGrammarDriftError`, `blocked_by: reviewer-grammar`.
  *
- * This test is the structural anchor required by the spec brief — LLM outputs
- * are non-deterministic; a deterministic file-content check is mandatory.
+ * Story 4.3b Task 11.1.
  */
 export {};
