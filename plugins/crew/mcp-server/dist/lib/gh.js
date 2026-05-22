@@ -1,5 +1,6 @@
 import { execa as defaultExeca } from "execa";
 import { GhSubcommandDeniedError } from "../errors.js";
+import { assertNoNegativeFlags } from "./git.js";
 /**
  * Single entrypoint for `gh` invocations from the MCP server (NFR17 /
  * NFR12 / NFR16). Enforces the calling role's `gh_allow` before
@@ -37,6 +38,12 @@ export async function gh(opts) {
             specPath: permissions.sourcePath,
         });
     }
+    // Negative-capability refusal: refuse --no-verify, --force, and
+    // --force-with-lease (including --force-with-lease=<ref> variant)
+    // BEFORE any subprocess spawn. This check is additive over gh_allow
+    // (so denied subcommands still surface as GhSubcommandDeniedError).
+    // (Story 4.4 AC2 / NFR16 / Pattern §9)
+    assertNoNegativeFlags(args, role, "gh");
     // v1 gh_allow_args enforcement: exact-string match only.
     const allowedArgs = permissions.gh_allow_args[subcommand];
     if (allowedArgs && allowedArgs.length > 0) {

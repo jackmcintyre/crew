@@ -23,6 +23,7 @@ import { writeNativeStory } from "./write-native-story.js";
 import { claimNextStory } from "./claim-next-story.js";
 import { processDevTranscript } from "./process-dev-transcript.js";
 import { processReviewerTranscript } from "./process-reviewer-transcript.js";
+import { runDevTerminalAction } from "./run-dev-terminal-action.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -797,6 +798,68 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         .parse(args);
       try {
         const result = await processReviewerTranscript(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.4 — runDevTerminalAction: dev subagent terminal action (branch, commit, push, PR).
+  server.registerTool({
+    name: "runDevTerminalAction",
+    description:
+      "Dev subagent terminal action: creates a story branch, commits in conventional-commits format, " +
+      "pushes to origin, and opens a PR via gh pr create with a machine-readable body (story link, ACs " +
+      "checklist mirrored from the spec) followed by a free-form summary. " +
+      "Refuses --no-verify, --force, --force-with-lease unconditionally. " +
+      "Returns { ok: true, branch, commitSha, prUrl } on success. Story 4.4.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        ref: { type: "string" },
+        title: { type: "string" },
+        type: { type: "string" },
+        body: { type: "string" },
+        summary: { type: "string" },
+        manifestPath: { type: "string" },
+        sessionUlid: { type: "string" },
+      },
+      required: [
+        "targetRepoRoot",
+        "ref",
+        "title",
+        "type",
+        "body",
+        "summary",
+        "manifestPath",
+        "sessionUlid",
+      ],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          ref: z.string().min(1),
+          title: z.string().min(1),
+          type: z.string().min(1),
+          body: z.string(),
+          summary: z.string(),
+          manifestPath: z.string().min(1),
+          sessionUlid: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await runDevTerminalAction(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

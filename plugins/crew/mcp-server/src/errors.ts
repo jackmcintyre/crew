@@ -832,3 +832,135 @@ export class PersonaFileMalformedError extends DomainError {
     this.zodMessage = opts.zodMessage;
   }
 }
+
+/**
+ * An execa wrapper (`gh` or `git`) refused a call because the `args`
+ * array contained a flag that the dev role's permission spec forbids
+ * unconditionally (NFR16 / Pattern §9). Thrown BEFORE any subprocess
+ * spawn; an `execaImpl` spy confirms zero calls.
+ *
+ * Covered by Story 4.4 AC2 (negative-capability refusal).
+ */
+export class NegativeCapabilityDeniedError extends DomainError {
+  readonly attempted_flag: string;
+  readonly role: string;
+  readonly callSite: "gh" | "git";
+
+  constructor(opts: {
+    attempted_flag: string;
+    role: string;
+    callSite: "gh" | "git";
+  }) {
+    super(
+      `Role '${opts.role}' attempted a forbidden flag '${opts.attempted_flag}' ` +
+        `at the '${opts.callSite}' wrapper. This flag is refused unconditionally ` +
+        `before any subprocess spawn (NFR16 / Pattern §9 / Story 4.4 AC2).`,
+    );
+    this.attempted_flag = opts.attempted_flag;
+    this.role = opts.role;
+    this.callSite = opts.callSite;
+  }
+}
+
+/**
+ * `gitCreateBranch` refused to create a branch because the supplied
+ * branch name did not match the `^story/[a-z0-9-]+$` pattern.
+ * Thrown BEFORE any subprocess spawn. (Story 4.4 Task 2.1)
+ */
+export class GitBranchNameMalformedError extends DomainError {
+  readonly branchName: string;
+
+  constructor(opts: { branchName: string }) {
+    super(
+      `git checkout -b refused: branch name '${opts.branchName}' does not match ` +
+        `'^story/[a-z0-9-]+$'. Use buildBranchSlug() to produce a conforming name. ` +
+        `(Story 4.4 Task 2.1)`,
+    );
+    this.branchName = opts.branchName;
+  }
+}
+
+/**
+ * `gitPush` returned a non-zero exit code. The local branch and commit
+ * are left in place for operator-side recovery. Story 4.5 will classify
+ * this as a recoverable error. (Story 4.4 AC1e)
+ */
+export class GitPushFailedError extends DomainError {
+  readonly branchName: string;
+  readonly stderr: string;
+
+  constructor(opts: { branchName: string; stderr: string }) {
+    super(
+      `git push -u origin ${opts.branchName} failed. ` +
+        `stderr: ${opts.stderr || "(empty)"}. ` +
+        `The local branch is left in place for operator recovery. ` +
+        `(Story 4.4 AC1e)`,
+    );
+    this.branchName = opts.branchName;
+    this.stderr = opts.stderr;
+  }
+}
+
+/**
+ * `gh pr create` returned a non-zero exit code, or the stdout did not
+ * contain a valid PR URL (starts with `https://github.com/`). Story
+ * 4.5 will wrap this in the recoverable-error classifier. (Story 4.4
+ * AC1g, AC1i)
+ */
+export class GhPrCreateFailedError extends DomainError {
+  readonly stderr: string;
+  readonly diagnostic: string;
+
+  constructor(opts: { stderr: string; diagnostic: string }) {
+    super(
+      `gh pr create failed: ${opts.diagnostic}. ` +
+        `stderr: ${opts.stderr || "(empty)"}. ` +
+        `Story 4.5 will classify this as recoverable or terminal. ` +
+        `(Story 4.4 AC1i)`,
+    );
+    this.stderr = opts.stderr;
+    this.diagnostic = opts.diagnostic;
+  }
+}
+
+/**
+ * `runDevTerminalAction` received a `type` argument that is not in the
+ * conventional-commits type set. Thrown BEFORE any subprocess spawn.
+ * (Story 4.4 AC1b)
+ */
+export class ConventionalCommitTypeUnknownError extends DomainError {
+  readonly attempted_type: string;
+  readonly allowed_types: readonly string[];
+
+  constructor(opts: { attempted_type: string; allowed_types: readonly string[] }) {
+    super(
+      `Conventional-commits type '${opts.attempted_type}' is not recognised. ` +
+        `Allowed types: [${opts.allowed_types.join(", ")}]. ` +
+        `(Story 4.4 AC1b)`,
+    );
+    this.attempted_type = opts.attempted_type;
+    this.allowed_types = opts.allowed_types;
+  }
+}
+
+/**
+ * `buildBranchSlug` produced a slug that had no alphanumeric characters
+ * after the `story/` prefix (e.g. a title composed entirely of Unicode
+ * / punctuation). Thrown BEFORE any subprocess spawn. (Story 4.4
+ * Implementation strategy — Risks)
+ */
+export class BranchSlugUnrenderableError extends DomainError {
+  readonly ref: string;
+  readonly title: string;
+
+  constructor(opts: { ref: string; title: string }) {
+    super(
+      `Cannot compose a renderable branch slug from ref='${opts.ref}', ` +
+        `title='${opts.title}'. After applying slug rules, the title-slug ` +
+        `portion contained no alphanumeric characters. Use an ASCII-safe ` +
+        `title. (Story 4.4)`,
+    );
+    this.ref = opts.ref;
+    this.title = opts.title;
+  }
+}

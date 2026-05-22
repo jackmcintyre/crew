@@ -1,5 +1,10 @@
 import { execa as defaultExeca } from "execa";
-import { GitCommitMessageMalformedError } from "../errors.js";
+import {
+  GitCommitMessageMalformedError,
+  NegativeCapabilityDeniedError,
+  GitBranchNameMalformedError,
+  GitPushFailedError,
+} from "../errors.js";
 
 export interface GitCommitResult {
   commitSha: string;
@@ -23,7 +28,86 @@ export interface GitCommitResult {
  * `/^[a-z][a-z0-9-]*: [^\s].+$/`. Tool names that happen to be
  * camelCase in code are written kebab-cased here.
  */
-const COMMIT_MESSAGE_REGEX = /^[a-z][a-z0-9-]*: [^\s].+$/;
+const PLUGIN_INTERNAL_COMMIT_REGEX = /^[a-z][a-z0-9-]*: [^\s].+$/;
+
+/**
+ * Required shape for conventional-commits subject lines (Story 4.4).
+ * Format: `<type>(<ref>): <subject>` where type is one of the
+ * CONVENTIONAL_COMMIT_TYPES set. The ref is the story ref (kebab/digits).
+ * The subject is non-empty.
+ */
+export const CONVENTIONAL_COMMIT_TYPES = [
+  "feat",
+  "fix",
+  "refactor",
+  "test",
+  "docs",
+  "chore",
+  "build",
+  "ci",
+  "perf",
+  "style",
+  "revert",
+] as const;
+
+const CONVENTIONAL_COMMIT_SUBJECT_REGEX =
+  /^(feat|fix|refactor|test|docs|chore|build|ci|perf|style|revert)\([a-z0-9-]+\): [^\s].+$/;
+
+/**
+ * Branch name pattern: `story/<kebab-alphanumeric>`. The slug-builder
+ * in `pr-body.ts` always produces conforming names; this is a
+ * defence-in-depth check in `gitCreateBranch`. (Story 4.4 Task 2.1)
+ */
+const STORY_BRANCH_REGEX = /^story\/[a-z0-9-]+$/;
+
+// ---------------------------------------------------------------------------
+// Negative-capability refusal helper (Story 4.4 AC2 / NFR16 / Pattern §9)
+// ---------------------------------------------------------------------------
+
+/**
+ * The set of flags unconditionally refused by both the `git` and `gh`
+ * wrappers in v1. No caller-supplied escape hatch exists in v1.
+ *
+ * - `--no-verify`: skips git hooks; forbidden globally.
+ * - `--force`: bare force push; more dangerous than `--force-with-lease`.
+ * - `--force-with-lease`: destructive; refused until an explicit
+ *   operator-set escape hatch lands in a future story.
+ * - `--force-with-lease=<ref>` (prefix form): same refusal.
+ *
+ * (Story 4.4 AC2 / NFR16 / Pattern §9)
+ */
+const NEGATIVE_FLAGS = new Set(["--no-verify", "--force", "--force-with-lease"]);
+
+/**
+ * Assert that `args` contains none of the unconditionally forbidden flags.
+ * Throws `NegativeCapabilityDeniedError` BEFORE any subprocess spawn on
+ * the first offending flag found.
+ *
+ * Exported so `lib/gh.ts` can re-use without duplicating the set.
+ * (Story 4.4 Task 1.3)
+ */
+export function assertNoNegativeFlags(
+  args: readonly string[],
+  role: string,
+  callSite: "gh" | "git",
+): void {
+  for (const arg of args) {
+    if (
+      NEGATIVE_FLAGS.has(arg) ||
+      arg.startsWith("--force-with-lease=")
+    ) {
+      throw new NegativeCapabilityDeniedError({
+        attempted_flag: NEGATIVE_FLAGS.has(arg) ? arg : "--force-with-lease",
+        role,
+        callSite,
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// gitCommit (Story 1.5 AC4, extended by Story 4.4 Task 2.3)
+// ---------------------------------------------------------------------------
 
 /**
  * Single entrypoint for plugin-side git commits (Story 1.5 AC4).
@@ -38,12 +122,20 @@ const COMMIT_MESSAGE_REGEX = /^[a-z][a-z0-9-]*: [^\s].+$/;
  * themselves were already role-gated, so an extra git-side allowlist
  * would be redundant in v1.
  *
+ * **`messageShape`** (Story 4.4 Task 2.3):
+ * - `"plugin-internal"` (default): existing shape `<tool-name>: <ref>`.
+ * - `"conventional"`: validates against the conventional-commits
+ *   subject regex `^<type>(<ref>): <subject>$`. The `body` field
+ *   (already wrapped at 72 chars by the caller) is passed as a second
+ *   `-m` flag.
+ *
  * Refuses calls whose message does not match the required shape AND
  * calls with an empty `paths` set, in both cases BEFORE any
  * subprocess spawn (verified by an `execaImpl` spy in tests).
  *
  * Single-purpose: no retry, no `--no-verify`, no `-S` signing, no
- * `--amend`. Three `execa` calls, in order: `add`, `commit`, then
+ * `--amend`. Three `execa` calls (plugin-internal) or four
+ * (conventional with body), in order: `add`, `commit`, then
  * `rev-parse HEAD` to harvest the commit SHA.
  */
 export async function gitCommit(opts: {
@@ -51,9 +143,12 @@ export async function gitCommit(opts: {
   paths: readonly string[];
   message: string;
   role: string;
+  messageShape?: "plugin-internal" | "conventional";
+  body?: string;
   execaImpl?: typeof defaultExeca;
 }): Promise<GitCommitResult> {
   const { targetRepoRoot, paths, message } = opts;
+  const messageShape = opts.messageShape ?? "plugin-internal";
   const execaImpl = opts.execaImpl ?? defaultExeca;
 
   if (paths.length === 0) {
@@ -64,23 +159,35 @@ export async function gitCommit(opts: {
     });
   }
 
-  if (!COMMIT_MESSAGE_REGEX.test(message)) {
-    throw new GitCommitMessageMalformedError({
-      message,
-      paths,
-      reason: "message does not match required shape",
-    });
+  if (messageShape === "plugin-internal") {
+    if (!PLUGIN_INTERNAL_COMMIT_REGEX.test(message)) {
+      throw new GitCommitMessageMalformedError({
+        message,
+        paths,
+        reason: "message does not match required shape",
+      });
+    }
+  } else {
+    // "conventional"
+    if (!CONVENTIONAL_COMMIT_SUBJECT_REGEX.test(message)) {
+      throw new GitCommitMessageMalformedError({
+        message,
+        paths,
+        reason:
+          "conventional-commits subject does not match required shape " +
+          "`<type>(<ref>): <subject>` with recognised type",
+      });
+    }
   }
 
   await execaImpl("git", ["-C", targetRepoRoot, "add", ...paths]);
 
-  const commitResult = await execaImpl("git", [
-    "-C",
-    targetRepoRoot,
-    "commit",
-    "-m",
-    message,
-  ]);
+  const commitArgs: string[] = ["-C", targetRepoRoot, "commit", "-m", message];
+  if (messageShape === "conventional" && opts.body) {
+    commitArgs.push("-m", opts.body);
+  }
+
+  const commitResult = await execaImpl("git", commitArgs);
 
   const revResult = await execaImpl("git", [
     "-C",
@@ -95,6 +202,78 @@ export async function gitCommit(opts: {
     stderr: commitResult.stderr ?? "",
   };
 }
+
+// ---------------------------------------------------------------------------
+// gitCreateBranch (Story 4.4 Task 2.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Create and check out a new branch in the target repo.
+ *
+ * The branch name MUST match `^story/[a-z0-9-]+$` — a defence-in-depth
+ * check that guards against callers bypassing `buildBranchSlug`. Throws
+ * `GitBranchNameMalformedError` BEFORE any spawn on regex failure.
+ *
+ * Runs `git -C <root> checkout -b <branchName>`.
+ *
+ * (Story 4.4 Task 2.1)
+ */
+export async function gitCreateBranch(opts: {
+  targetRepoRoot: string;
+  branchName: string;
+  execaImpl?: typeof defaultExeca;
+}): Promise<void> {
+  const { targetRepoRoot, branchName } = opts;
+  const execaImpl = opts.execaImpl ?? defaultExeca;
+
+  if (!STORY_BRANCH_REGEX.test(branchName)) {
+    throw new GitBranchNameMalformedError({ branchName });
+  }
+
+  await execaImpl("git", ["-C", targetRepoRoot, "checkout", "-b", branchName]);
+}
+
+// ---------------------------------------------------------------------------
+// gitPush (Story 4.4 Task 2.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Push the given branch to `origin` with `-u` (set-upstream).
+ *
+ * The v1 signature is CLOSED — there is no `args` passthrough. This is
+ * structural prevention of `--force-with-lease` / `--no-verify` injection
+ * (belt-and-braces alongside the wrapper-level `assertNoNegativeFlags`
+ * check). (Story 4.4 Task 2.2 / AC1e)
+ *
+ * Runs `git -C <root> push -u origin <branchName>`.
+ * Throws `GitPushFailedError` on non-zero exit.
+ */
+export async function gitPush(opts: {
+  targetRepoRoot: string;
+  branchName: string;
+  role: string;
+  execaImpl?: typeof defaultExeca;
+}): Promise<void> {
+  const { targetRepoRoot, branchName } = opts;
+  const execaImpl = opts.execaImpl ?? defaultExeca;
+
+  const result = await execaImpl(
+    "git",
+    ["-C", targetRepoRoot, "push", "-u", "origin", branchName],
+    { reject: false },
+  );
+
+  if ((result.exitCode ?? 0) !== 0) {
+    throw new GitPushFailedError({
+      branchName,
+      stderr: (result as unknown as { stderr?: string }).stderr ?? "",
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// readRecentCommitTitles (Story 2.4 FR85)
+// ---------------------------------------------------------------------------
 
 /**
  * Read up to `limit` recent commit titles from the target repo via
