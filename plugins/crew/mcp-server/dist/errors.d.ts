@@ -538,3 +538,86 @@ export declare class PersonaFileMalformedError extends DomainError {
         zodMessage: string;
     });
 }
+/**
+ * An execa wrapper (`gh` or `git`) refused a call because the `args`
+ * array contained a flag that the dev role's permission spec forbids
+ * unconditionally (NFR16 / Pattern §9). Thrown BEFORE any subprocess
+ * spawn; an `execaImpl` spy confirms zero calls.
+ *
+ * Covered by Story 4.4 AC2 (negative-capability refusal).
+ */
+export declare class NegativeCapabilityDeniedError extends DomainError {
+    readonly attempted_flag: string;
+    readonly role: string;
+    readonly callSite: "gh" | "git";
+    constructor(opts: {
+        attempted_flag: string;
+        role: string;
+        callSite: "gh" | "git";
+    });
+}
+/**
+ * `gitCreateBranch` refused to create a branch because the supplied
+ * branch name did not match the `^story/[a-z0-9-]+$` pattern.
+ * Thrown BEFORE any subprocess spawn. (Story 4.4 Task 2.1)
+ */
+export declare class GitBranchNameMalformedError extends DomainError {
+    readonly branchName: string;
+    constructor(opts: {
+        branchName: string;
+    });
+}
+/**
+ * `gitPush` returned a non-zero exit code. The local branch and commit
+ * are left in place for operator-side recovery. Story 4.5 will classify
+ * this as a recoverable error. (Story 4.4 AC1e)
+ */
+export declare class GitPushFailedError extends DomainError {
+    readonly branchName: string;
+    readonly stderr: string;
+    constructor(opts: {
+        branchName: string;
+        stderr: string;
+    });
+}
+/**
+ * `gh pr create` returned a non-zero exit code, or the stdout did not
+ * contain a valid PR URL (starts with `https://github.com/`). Story
+ * 4.5 will wrap this in the recoverable-error classifier. (Story 4.4
+ * AC1g, AC1i)
+ */
+export declare class GhPrCreateFailedError extends DomainError {
+    readonly stderr: string;
+    readonly diagnostic: string;
+    constructor(opts: {
+        stderr: string;
+        diagnostic: string;
+    });
+}
+/**
+ * `runDevTerminalAction` received a `type` argument that is not in the
+ * conventional-commits type set. Thrown BEFORE any subprocess spawn.
+ * (Story 4.4 AC1b)
+ */
+export declare class ConventionalCommitTypeUnknownError extends DomainError {
+    readonly attempted_type: string;
+    readonly allowed_types: readonly string[];
+    constructor(opts: {
+        attempted_type: string;
+        allowed_types: readonly string[];
+    });
+}
+/**
+ * `buildBranchSlug` produced a slug that had no alphanumeric characters
+ * after the `story/` prefix (e.g. a title composed entirely of Unicode
+ * / punctuation). Thrown BEFORE any subprocess spawn. (Story 4.4
+ * Implementation strategy — Risks)
+ */
+export declare class BranchSlugUnrenderableError extends DomainError {
+    readonly ref: string;
+    readonly title: string;
+    constructor(opts: {
+        ref: string;
+        title: string;
+    });
+}

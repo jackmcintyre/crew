@@ -1,5 +1,6 @@
 import { execa as defaultExeca } from "execa";
 import { GhSubcommandDeniedError } from "../errors.js";
+import { assertNoNegativeFlags } from "./git.js";
 import type { RolePermissions } from "../schemas/role-permissions.js";
 
 export interface GhCallResult {
@@ -52,6 +53,13 @@ export async function gh(opts: {
       specPath: permissions.sourcePath,
     });
   }
+
+  // Negative-capability refusal: refuse --no-verify, --force, and
+  // --force-with-lease (including --force-with-lease=<ref> variant)
+  // BEFORE any subprocess spawn. This check is additive over gh_allow
+  // (so denied subcommands still surface as GhSubcommandDeniedError).
+  // (Story 4.4 AC2 / NFR16 / Pattern §9)
+  assertNoNegativeFlags(args, role, "gh");
 
   // v1 gh_allow_args enforcement: exact-string match only.
   const allowedArgs = permissions.gh_allow_args[subcommand];

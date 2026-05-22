@@ -21,7 +21,7 @@
  *   (d) Two-iteration rework convergence.
  *   (e) Reviewer grammar drift.
  *   (f) Reviewer BLOCKED passthrough.
- *   (g) Tool count assertion (21 tools, contains new tools, does not contain runDevSession).
+ *   (g) Tool count assertion (22 tools, contains new tools, does not contain runDevSession).
  *
  * Story 4.3b Task 10.1–10.4.
  */

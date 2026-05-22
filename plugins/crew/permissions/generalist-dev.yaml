@@ -8,6 +8,7 @@ tools_allow:
   - recordYield
   - heartbeat
   - classifyRiskTier
+  - runDevTerminalAction
 gh_allow:
   - pr-create
   - pr-view

@@ -21,7 +21,7 @@
  *   (d) Two-iteration rework convergence.
  *   (e) Reviewer grammar drift.
  *   (f) Reviewer BLOCKED passthrough.
- *   (g) Tool count assertion (21 tools, contains new tools, does not contain runDevSession).
+ *   (g) Tool count assertion (22 tools, contains new tools, does not contain runDevSession).
  *
  * Story 4.3b Task 10.1–10.4.
  */
@@ -343,7 +343,7 @@ describe("AC4(f): reviewer BLOCKED passthrough → done-blocked-reviewer-verdict
 // AC4(g): Tool count — 21 tools, contains new tools, does NOT contain runDevSession
 // ---------------------------------------------------------------------------
 describe("AC4(g): tool count and required tools present", () => {
-    it("registered tool list has exactly 21 entries and contains the three new tools but NOT runDevSession", async () => {
+    it("registered tool list has exactly 22 entries and contains the three new tools but NOT runDevSession", async () => {
         const server = createServer();
         registerAllTools(server);
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -359,7 +359,7 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("processDevTranscript");
             expect(toolNames).toContain("processReviewerTranscript");
             expect(toolNames).not.toContain("runDevSession");
-            expect(toolNames.length).toBe(21);
+            expect(toolNames.length).toBe(22);
         }
         finally {
             await client.close();
