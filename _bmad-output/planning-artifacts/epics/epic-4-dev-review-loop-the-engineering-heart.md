@@ -89,6 +89,26 @@ So that `/crew:start` actually runs the inner dev↔reviewer cycle in production
 
 **AC5 (user-surface):** an operator running `/crew:start` against a scratch repo with at least one ready story observes the AC1/AC2/AC3 chat-surface lines from Story 4.3 (handoff received / re-spawning / grammar drift) in the live session, not just in unit-test fixtures.
 
+## Story 4.3c: Call `completeStory` after `READY FOR MERGE` so the queue drains
+
+As a plugin operator,
+I want `/crew:start` to mark a story `done` once the reviewer returns `READY FOR MERGE` (and equivalently for the `done-blocked-*` branches — those stamp `blocked_by` and stop advancing on that story),
+So that the backlog actually drains across multiple stories — today the manifest stays in `in-progress/` after a green verdict, so the next pass returns `waiting on in-progress work` forever and no second story is ever claimed without manual intervention.
+
+Surfaced during 4.3b operator smoke (PR #105 retro): two seeded stories ran the full dev↔reviewer cycle and both reached `READY FOR MERGE`, but neither moved to `done/` — the queue stalled at the third pass. This story is a temporary bridge until Story 4.10b's auto-merge gate lands; for v1 dogfooding, completion is "reviewer said ready" rather than "PR merged on GitHub".
+
+**Acceptance Criteria:**
+
+**Given** `processReviewerTranscript` returns `{ next: "done-ready-for-merge", ... }`, **When** the SKILL.md prose handles the verdict, **Then** the prose layer calls `completeStory({ targetRepoRoot, ref, sessionUlid })` to atomically move the manifest from `in-progress/<ref>.yaml` to `done/<ref>.yaml` (Story 4.1 FR19 semantics) before looping back to `claimNextStory`. The operator observes a verbatim chat-surface line `story <ref> moved to done — claiming next` at the end of that story's cycle. _(FR19, FR-new)_
+
+**Given** `processReviewerTranscript` returns `{ next: "done-blocked-reviewer-verdict" }` or `{ next: "done-blocked-reviewer-grammar" }`, **When** the SKILL.md prose handles either verdict, **Then** the prose layer does NOT call `completeStory` — the story stays in `in-progress/` with `blocked_by` already stamped by the MCP tool, and the prose emits the verbatim blocked chat line from Story 4.3 unchanged. (We do not auto-blocked-resolve in v1.) _(Architecture clarity)_
+
+**Given** the SKILL.md prose's `allowed_tools` array, **When** the inner cycle runs, **Then** `completeStory` is in the array (set-equality must widen from Story 4.3b's seven-tool set to include it). _(Tool surface)_
+
+**AC4 (integration):** vitest covers the full claim → dev → reviewer-ready → complete → claim-next loop end-to-end against a tmpdir fixture with two ready stories; final disk state has both manifests in `done/` and `to-do/` / `in-progress/` empty.
+
+**AC5 (user-surface):** an operator running `/crew:start` against a scratch repo with two ready stories observes both manifests reach `done/` and the operator sees `story <ref> moved to done — claiming next` after each.
+
 ## Story 4.4: Dev subagent `git push` and `gh pr create` terminal action
 
 As a plugin maintainer,
