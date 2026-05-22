@@ -1,11 +1,13 @@
 /**
  * AC6 — SKILL.md content structure check — Story 4.3b.
+ * AC3 — SKILL.md content structure check — Story 4.3c.
  *
  * Reads the on-disk `plugins/crew/skills/start/SKILL.md`, splits its YAML
  * front-matter, and asserts the deterministic structural anchors required by AC6:
  *
  *   (i)    `allowed_tools` is exactly {getStatus, mintSessionUlid, claimNextStory,
- *           processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task}.
+ *           processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt,
+ *           Task, completeStory}.
  *   (ii)   Body contains the `# Inner cycle: dev → reviewer → rework` section.
  *   (iii)  That section contains `invoke the Task tool with the devPrompt returned by buildPersonaSpawnPrompt`.
  *   (iv)   That section contains `invoke the Task tool with the reviewerPrompt returned by processDevTranscript`.
@@ -15,7 +17,15 @@
  *   (viii) The `# Failure modes` section names `HandoffGrammarDriftError`, `blocked_by: handoff-grammar`,
  *          `ReviewerGrammarDriftError`, `blocked_by: reviewer-grammar`.
  *
- * Story 4.3b Task 11.1.
+ * Additional AC3 anchors (Story 4.3c):
+ *   (AC3-i)   `allowed_tools` equals exactly the 8-tool set including `completeStory`.
+ *   (AC3-iii) Inner-cycle section contains the literal string `completeStory`.
+ *   (AC3-iv)  Inner-cycle section contains `call completeStory({ targetRepoRoot, ref, sessionUlid })`.
+ *   (AC3-v)   Inner-cycle section contains `story <ref> moved to done — claiming next` (em dash).
+ *   (AC3-vi)  Inner-cycle section contains `MUST NOT call completeStory`.
+ *   (AC3-vii) `# Failure modes` section contains `completeStory`.
+ *
+ * Story 4.3b Task 11.1; Story 4.3c Task 5.
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
@@ -57,7 +67,7 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
     it("name field is exactly 'crew:start'", () => {
         expect(frontmatter["name"]).toBe("crew:start");
     });
-    it("AC6(i) — allowed_tools equals exactly the 7-tool set for Story 4.3b", () => {
+    it("AC6(i) / AC3(i) — allowed_tools equals exactly the 8-tool set for Story 4.3c", () => {
         const allowedTools = new Set(frontmatter["allowed_tools"]);
         const expected = new Set([
             "getStatus",
@@ -67,6 +77,7 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
             "processReviewerTranscript",
             "buildPersonaSpawnPrompt",
             "Task",
+            "completeStory",
         ]);
         // Set equality: every expected tool is present.
         for (const tool of expected) {
@@ -112,5 +123,57 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
     });
     it("body still cites the Story 4.2 spec path (backward-compat)", () => {
         expect(raw).toContain("4-2-start-skill-and-per-story-dev-subagent-spawn.md");
+    });
+    // ---------------------------------------------------------------------------
+    // AC3 — Story 4.3c additions
+    // ---------------------------------------------------------------------------
+    /** Extract the text from the inner-cycle H1/H2 heading through the next top-level heading. */
+    function extractInnerCycleSection(b) {
+        // Match only the actual heading line (# or ## prefix), not inline text
+        const match = /^#{1,2} Inner cycle: dev → reviewer → rework/m.exec(b);
+        if (!match)
+            return "";
+        const start = match.index;
+        // Find the next H1 heading after the section start.
+        const rest = b.slice(start);
+        const nextH1 = rest.search(/\n# [^\n]/);
+        return nextH1 === -1 ? rest : rest.slice(0, nextH1);
+    }
+    /** Extract the text from the Failure modes heading to end of body. */
+    function extractFailureModesSection(b) {
+        const start = b.search(/^#+ Failure modes/m);
+        if (start === -1)
+            return "";
+        return b.slice(start);
+    }
+    it("AC3(iii) — inner-cycle section contains the literal string 'completeStory'", () => {
+        const section = extractInnerCycleSection(body);
+        expect(section).not.toBe("");
+        expect(section).toContain("completeStory");
+    });
+    it("AC3(iv) — inner-cycle section contains verbatim call-site anchor", () => {
+        const section = extractInnerCycleSection(body);
+        expect(section).not.toBe("");
+        expect(section).toContain("call completeStory({ targetRepoRoot, ref, sessionUlid })");
+    });
+    it("AC3(v) — inner-cycle section contains verbatim chat-line anchor (em dash U+2014)", () => {
+        const section = extractInnerCycleSection(body);
+        expect(section).not.toBe("");
+        // em dash U+2014, lowercase, no drift
+        expect(section).toContain("story <ref> moved to done — claiming next");
+    });
+    it("AC3(vi) — inner-cycle section contains MUST NOT call completeStory invariant", () => {
+        const section = extractInnerCycleSection(body);
+        expect(section).not.toBe("");
+        expect(section).toContain("MUST NOT call completeStory");
+    });
+    it("AC3(vii) — # Failure modes section contains completeStory", () => {
+        const section = extractFailureModesSection(body);
+        expect(section).not.toBe("");
+        expect(section).toContain("completeStory");
+    });
+    it("HTML comment near the top cites the Story 4.3c behavioural contract spec path", () => {
+        expect(raw).toContain("4-3c-call-completestory-after-ready-for-merge.md");
+        expect(raw).toContain("Completion-on-ready behavioural contract");
     });
 });

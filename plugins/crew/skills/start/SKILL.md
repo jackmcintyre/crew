@@ -1,11 +1,12 @@
 ---
 name: crew:start
 description: "Claim the next ready story from the backlog, spawn a clean-context generalist-dev subagent, and drain the queue until empty."
-allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task]
+allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task, completeStory]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/4-2-start-skill-and-per-story-dev-subagent-spawn.md § Behavioural contract -->
 <!-- Inner-cycle behavioural contract: _bmad-output/implementation-artifacts/4-3b-harness-task-spawn-seam-for-rundevsession.md § Behavioural contract -->
+<!-- Completion-on-ready behavioural contract: _bmad-output/implementation-artifacts/4-3c-call-completestory-after-ready-for-merge.md § Behavioural contract -->
 
 # /crew:start
 
@@ -87,10 +88,15 @@ Both `devTranscript` (passed to `processDevTranscript`) and `reviewerTranscript`
 11. Surface every entry of the returned `chatLog` to the operator in order, before any subsequent call.
 
 12. Switch on the `next` field:
-    - `done-ready-for-merge` → return to outer loop (step 4).
+    - `done-ready-for-merge` →
+      1. call completeStory({ targetRepoRoot, ref, sessionUlid }) to atomically move the manifest from `in-progress/<ref>.yaml` to `done/<ref>.yaml`.
+      2. emit the verbatim chat-surface line `story <ref> moved to done — claiming next` (with `<ref>` substituted at runtime).
+      3. return to outer loop (step 4).
     - `done-blocked-reviewer-verdict` → return to outer loop (step 4).
     - `done-blocked-reviewer-grammar` → return to outer loop (step 4).
     - `rework-dev` → store `devPrompt` and `reworkIteration`; loop back to step 3 (dev spawn), using the `devPrompt` returned by `processReviewerTranscript` in place of the initial dev prompt, and adding `rework_iteration: <reworkIteration>` to the `initial_context`.
+
+**Invariant: MUST NOT call completeStory on the done-blocked-reviewer-verdict or done-blocked-reviewer-grammar branch.** On either blocked branch the manifest stays in `in-progress/` with `blocked_by` already stamped by `processReviewerTranscript`. The prose surfaces the verbatim blocked line from `chatLog` and returns to the outer loop. If `completeStory` raises any error on the green branch, surface the error verbatim and exit — the outer loop MUST NOT proceed to the next `claimNextStory` call when a `completeStory` raised.
 
 The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as the implicit cap.
 
@@ -109,6 +115,8 @@ The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as th
 - **`HandoffGrammarDriftError`** / `blocked_by: handoff-grammar`: The dev subagent terminated without the verbatim locked handoff phrase on its last non-empty output line. The in-progress manifest is stamped with `blocked_by: "handoff-grammar"` (in-place — Story 5.1 will retrofit the atomic move to `blocked/`). The chat surface prints the verbatim drift line (emitted by `processDevTranscript`). Recovery: edit the manifest to remove the `blocked_by` key, then re-run `/crew:start`. Note: v1's recovery is to manually delete the in-progress manifest and re-add the source story to `to-do/` if re-scanning is needed.
 
 - **`ReviewerGrammarDriftError`** / `blocked_by: reviewer-grammar`: The reviewer subagent terminated without a recognised verdict sentinel on its last non-empty output line. The in-progress manifest is stamped with `blocked_by: "reviewer-grammar"` (emitted by `processReviewerTranscript`). Recovery follows the same path as handoff grammar drift.
+
+- **`completeStory` raising `WrongClaimantError` or `InProgressHandEditError`**: When the prose calls `completeStory` after a `READY FOR MERGE` verdict and the in-progress manifest has been hand-edited since claim (FR14a) OR the session ULID does not match `claimed_by` (FR19), `completeStory` raises `InProgressHandEditError` or `WrongClaimantError` respectively. The skill surfaces the error verbatim and exits — the outer loop does NOT advance to the next `claimNextStory` call. Recovery is operator inspection of the in-progress manifest plus a fresh `/crew:start` invocation.
 
 Note: `runDevSession` is no longer used. The SKILL.md prose now drives the inner cycle directly via `Task` tool invocations, with `processDevTranscript` and `processReviewerTranscript` handling the parsing and manifest mutations.
 
