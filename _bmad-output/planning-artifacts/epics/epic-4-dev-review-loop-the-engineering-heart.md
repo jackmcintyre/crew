@@ -71,6 +71,24 @@ So that the verdict comes from a subagent whose context contains no implementati
 
 **AC4 (integration):** vitest covers happy handoff, rework loop, and grammar-drift block paths.
 
+## Story 4.3b: Harness-side `Task`-spawn seam for `runDevSession`
+
+As a plugin maintainer,
+I want the `/crew:start` SKILL.md prose layer to drive the `Task` tool directly and feed the captured transcript into `runDevSession`, rather than the MCP tool spawning subagents itself,
+So that `/crew:start` actually runs the inner dev↔reviewer cycle in production — today the MCP tool's `taskSpawnWithTranscript` parameter can't accept a closure over the wire, so the default empty-transcript stub fires for every claimed story and stamps `blocked_by: handoff-grammar` end-to-end. Without this seam, the user-surface ACs that Stories 4.2 and 4.3 verified through dependency injection are inert in a real session.
+
+**Acceptance Criteria:**
+
+**Given** a claimed story in `in-progress/`, **When** the operator runs `/crew:start` in a real Claude Code session, **Then** the SKILL.md prose invokes the `Task` tool to spawn the per-story dev subagent (using the prompt computed by `buildPersonaSpawnPrompt`), captures the dev's final transcript, and passes that transcript into `runDevSession` (or its successor) — no MCP tool attempts to spawn subagents on its own. _(FR-new)_
+
+**Given** the dev subagent emits the locked handoff phrase, **When** the SKILL.md prose detects it, **Then** the prose layer spawns the reviewer subagent via `Task` (clean context, reviewer persona prompt), captures the reviewer transcript, and feeds it back into the MCP layer for verdict parsing and manifest update — the dev↔reviewer cycle's transitions are observable in the operator's chat surface (AC1/AC2/AC3 lines from Story 4.3 emit verbatim during a live run). _(FR26, FR27, FR28)_
+
+**Given** the new seam, **When** the MCP `runDevSession` API is refactored, **Then** `taskSpawnWithTranscript` is removed (or repurposed as a pure transcript-parsing entrypoint that takes already-captured transcripts as input); the MCP tool no longer holds any subagent-spawn responsibility. _(Architecture cleanup)_
+
+**AC4 (integration):** vitest's existing AC4 branches (happy / rework / grammar-drift) still pass against the refactored API, and a new content-structure test asserts that SKILL.md prose contains the `Task` tool invocation sites for both dev and reviewer.
+
+**AC5 (user-surface):** an operator running `/crew:start` against a scratch repo with at least one ready story observes the AC1/AC2/AC3 chat-surface lines from Story 4.3 (handoff received / re-spawning / grammar drift) in the live session, not just in unit-test fixtures.
+
 ## Story 4.4: Dev subagent `git push` and `gh pr create` terminal action
 
 As a plugin maintainer,
