@@ -1,5 +1,5 @@
 /**
- * `runStartLoop` — Story 4.2 Task 8.
+ * `runStartLoop` — Story 4.2 Task 8, updated in Story 4.3 Task 4.
  *
  * The claim-spawn-terminate loop that the `/crew:start` SKILL.md skill prose
  * maps to. This function is plain TypeScript — no `console.log`, no LLM-side
@@ -8,9 +8,9 @@
  * Code harness.
  *
  * **Test seam:** production callers wire `listTodos`, `claim`, `buildPrompt`,
- * and `taskSpawn` to the real MCP tools and the real Claude Code `Task` tool.
- * Integration tests pass fakes for each dependency so the loop body can be
- * driven deterministically without a running Claude Code process.
+ * and `taskSpawnWithTranscript` to the real MCP tools and the real Claude Code
+ * `Task` tool. Integration tests pass fakes for each dependency so the loop
+ * body can be driven deterministically without a running Claude Code process.
  *
  * **Behavioural contract (from Story 4.2 § Behavioural contract):**
  * - Prints the session header BEFORE any loop iteration.
@@ -23,10 +23,23 @@
  * - On each loop pass, skips refs where `depsReady: false` silently.
  * - Loops until both `todos` (depsReady=true) and `inProgressCount` are empty.
  *
- * Story 4.2 Task 8.1–8.4.
+ * Story 4.2 Task 8.1–8.4. Updated in Story 4.3 Task 4: `taskSpawn` (→ void)
+ * replaced with `taskSpawnWithTranscript` (→ { transcript: string });
+ * `processCandidate` delegates to `runDevReviewerCycle` for the inner
+ * dev → reviewer → rework loop; `readManifest` and `writeManifest` seams
+ * added to `RunStartLoopDeps` for manifest mutations within the inner cycle.
  */
 
+import * as path from "node:path";
+import { stringify as yamlStringify } from "yaml";
 import type { ClaimableCandidate, ListClaimableTodosResult } from "../tools/list-claimable-todos.js";
+import { runDevReviewerCycle } from "./dev-reviewer-cycle.js";
+import type { RunDevReviewerCycleDeps, TaskSpawnWithTranscriptArgs } from "./dev-reviewer-cycle.js";
+import { parseExecutionManifest } from "../schemas/execution-manifest.js";
+import { atomicWriteFile } from "../lib/managed-fs.js";
+import type { ExecutionManifest } from "../schemas/execution-manifest.js";
+import { promises as fs } from "node:fs";
+import { parse as yamlParse } from "yaml";
 
 /** Verbatim queue-drained line from AC3 / AC5(iv) — do not paraphrase. */
 export const QUEUE_DRAINED_LINE =
@@ -67,13 +80,19 @@ export interface RunStartLoopDeps {
     sessionUlid: string;
     role: string;
   }) => Promise<ClaimResult>;
-  /** Assembles the generalist-dev system prompt. One call per spawn. */
+  /** Assembles the system prompt for a role. One call per spawn. */
   buildPrompt: (opts: {
     targetRepoRoot: string;
     role: string;
   }) => Promise<BuildPromptResult>;
-  /** Invokes a subagent via the Task tool. Returns when the subagent terminates. */
-  taskSpawn: (args: TaskSpawnArgs) => Promise<void>;
+  /**
+   * Invokes a subagent via the Task tool and returns its final-output
+   * transcript. Replaces Story 4.2's `taskSpawn: () => Promise<void>`.
+   * The inner cycle needs the transcript to parse the handoff phrase.
+   */
+  taskSpawnWithTranscript: (
+    args: TaskSpawnWithTranscriptArgs,
+  ) => Promise<{ transcript: string }>;
 }
 
 export interface RunStartLoopOptions {
@@ -157,8 +176,9 @@ async function processCandidate(
   chatLog.push(`claiming ${ref} — ${displayTitle}`);
 
   // Call claimStory. On any typed error, surface verbatim and continue.
+  let claimResult: ClaimResult;
   try {
-    await deps.claim({
+    claimResult = await deps.claim({
       targetRepoRoot,
       ref,
       sessionUlid,
@@ -171,45 +191,57 @@ async function processCandidate(
     return;
   }
 
-  // Claim succeeded — build the persona prompt (one read per spawn).
-  let promptResult: BuildPromptResult;
-  try {
-    promptResult = await deps.buildPrompt({
-      targetRepoRoot,
-      role: "generalist-dev",
-    });
-  } catch (err) {
-    const name = err instanceof Error ? err.constructor.name : "Error";
-    const message = err instanceof Error ? err.message : String(err);
-    chatLog.push(`${name}: ${message}`);
-    return;
-  }
-
   // Print spawning line BEFORE Task invocation.
   chatLog.push("spawning generalist-dev subagent (clean context)");
 
-  // Derive manifest path (relative).
-  const manifestPath = `.crew/state/in-progress/${ref}.yaml`;
+  // Derive manifest path (absolute — needed by the inner cycle).
+  const manifestAbsPath = path.resolve(
+    targetRepoRoot,
+    ".crew",
+    "state",
+    "in-progress",
+    `${ref}.yaml`,
+  );
 
-  // Invoke the Task tool. Awaiting means we wait for the subagent to finish
-  // before moving to the next candidate — per Story 4.2 spec ("When the Task
-  // spawn returns, continue the loop").
+  // Build the inner-cycle deps from the outer deps.
+  const cycleDeps: RunDevReviewerCycleDeps = {
+    buildPrompt: async (o) =>
+      deps.buildPrompt({ targetRepoRoot: o.targetRepoRoot, role: o.role }),
+    taskSpawnWithTranscript: deps.taskSpawnWithTranscript,
+    readManifest: async (absPath: string) => {
+      const raw = await fs.readFile(absPath, "utf8");
+      const parsed = yamlParse(raw) as unknown;
+      return parseExecutionManifest(parsed, { absPath });
+    },
+    writeManifest: async (
+      absPath: string,
+      manifest: ExecutionManifest,
+      _opts: { role: string },
+    ) => {
+      const yaml = yamlStringify(manifest, { lineWidth: 0 });
+      await atomicWriteFile(absPath, yaml);
+    },
+  };
+
+  // Delegate to the inner dev → reviewer cycle.
   try {
-    await deps.taskSpawn({
-      systemPrompt: promptResult.systemPrompt,
-      subagentType: "general-purpose",
-      initialContext: {
-        ref,
-        title: displayTitle,
-        sessionUlid,
-        targetRepoRoot,
-        manifestPath,
-      },
+    const cycleResult = await runDevReviewerCycle({
+      targetRepoRoot,
+      sessionUlid,
+      ref,
+      title: displayTitle,
+      manifestPath: manifestAbsPath,
+      deps: cycleDeps,
     });
+    // Append the inner cycle's chat lines to the outer log.
+    chatLog.push(...cycleResult.chatLog);
   } catch (err) {
     const name = err instanceof Error ? err.constructor.name : "Error";
     const message = err instanceof Error ? err.message : String(err);
     chatLog.push(`${name}: ${message}`);
-    // Don't rethrow — subagent errors should not abort the loop.
+    // Don't rethrow — errors in the inner cycle should not abort the outer loop.
   }
+
+  // Suppress unused variable warning for claimResult (used implicitly).
+  void claimResult;
 }

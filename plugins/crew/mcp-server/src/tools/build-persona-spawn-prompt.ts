@@ -103,9 +103,31 @@ export async function buildPersonaSpawnPrompt(
  *   7. ## Locked phrases (do not paraphrase)
  *
  * Frontmatter is NOT included in the output.
+ *
+ * Story 4.3 Task 5: For each locked phrase that contains a `<...>` token,
+ * an additional substitution-instruction line is appended so the LLM knows
+ * to substitute the live value from its initial context before emission.
  */
 export function assemblePrompt(persona: PersonaFile): string {
   const displayName = toDisplayName(persona.role);
+
+  const lockedPhraseLines: string[] = [];
+  for (const [label, phrase] of [
+    ["Handoff", persona.locked_phrases.handoff],
+    ["Yield", persona.locked_phrases.yield],
+    ["Verdict", persona.locked_phrases.verdict],
+  ] as Array<[string, string]>) {
+    lockedPhraseLines.push(`- ${label}: "${phrase}"`);
+    // Extract all <token> placeholders in the phrase.
+    const tokenPattern = /<([^>]+)>/g;
+    let match: RegExpExecArray | null;
+    while ((match = tokenPattern.exec(phrase)) !== null) {
+      const token = match[0]!; // e.g. "<story-id>"
+      lockedPhraseLines.push(
+        `Substitute ${token} with the live value from your initial context before emission; emit the substituted phrase verbatim.`,
+      );
+    }
+  }
 
   const parts: string[] = [
     `# ${displayName} — Persona`,
@@ -131,9 +153,7 @@ export function assemblePrompt(persona: PersonaFile): string {
     persona.sections["Knowledge"],
     ``,
     `## Locked phrases (do not paraphrase)`,
-    `- Handoff: "${persona.locked_phrases.handoff}"`,
-    `- Yield: "${persona.locked_phrases.yield}"`,
-    `- Verdict: "${persona.locked_phrases.verdict}"`,
+    ...lockedPhraseLines,
   ];
 
   return parts.join("\n");

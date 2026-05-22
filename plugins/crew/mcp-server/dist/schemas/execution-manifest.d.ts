@@ -53,13 +53,14 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     narrative: z.ZodString;
     implementation_notes: z.ZodOptional<z.ZodString>;
     withdrawn: z.ZodDefault<z.ZodBoolean>;
-    blocked_by: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"planning-discipline">, z.ZodLiteral<"source-drift">, z.ZodString]>>;
+    blocked_by: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"planning-discipline">, z.ZodLiteral<"source-drift">, z.ZodLiteral<"handoff-grammar">, z.ZodLiteral<"reviewer-grammar">, z.ZodString]>>;
     discipline_violations: z.ZodOptional<z.ZodArray<z.ZodObject<{
         code: z.ZodString;
         field: z.ZodString;
         detail: z.ZodString;
     }, z.core.$strip>>>;
     claimed_by: z.ZodOptional<z.ZodString>;
+    rework_count: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strict>;
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
 /**

@@ -185,4 +185,39 @@ describe("assemblePrompt (pure unit)", () => {
         expect(prompt).toContain("You are the generalist dev.");
         expect(prompt).toContain("Accumulated knowledge goes here.");
     });
+    // ---------------------------------------------------------------------------
+    // Story 4.3 Task 5.2 — per-token substitution instruction assertions
+    // ---------------------------------------------------------------------------
+    it("(Story 4.3) handoff phrase with <story-id> token gets a substitution instruction", () => {
+        const mockPersona = parsePersonaFile(FIXTURE_PERSONA_MD, "/fake/PERSONA.md");
+        const prompt = assemblePrompt(mockPersona);
+        // The handoff phrase contains <story-id>, so a substitution line must be appended.
+        expect(prompt).toContain("Substitute <story-id> with the live value from your initial context before emission; emit the substituted phrase verbatim.");
+    });
+    it("(Story 4.3) verdict phrase with <SENTINEL> token gets a substitution instruction", () => {
+        const mockPersona = parsePersonaFile(FIXTURE_PERSONA_MD, "/fake/PERSONA.md");
+        const prompt = assemblePrompt(mockPersona);
+        // The verdict phrase contains <SENTINEL>, so a substitution line must be appended.
+        expect(prompt).toContain("Substitute <SENTINEL> with the live value from your initial context before emission; emit the substituted phrase verbatim.");
+    });
+    it("(Story 4.3 Task 5.3) yield phrase with <role> token gets a substitution instruction", () => {
+        const mockPersona = parsePersonaFile(FIXTURE_PERSONA_MD, "/fake/PERSONA.md");
+        const prompt = assemblePrompt(mockPersona);
+        // The yield phrase "This sits in <role>'s domain — handing off" contains <role>.
+        expect(prompt).toContain("Substitute <role> with the live value from your initial context before emission; emit the substituted phrase verbatim.");
+    });
+    it("(Story 4.3 Task 5.3 regression) a phrase WITHOUT a <...> token does NOT get a spurious substitution instruction", () => {
+        // Construct a persona with a locked phrase that has no tokens.
+        const noTokenPersonaMd = FIXTURE_PERSONA_MD.replace(`handoff: "Handoff to reviewer — story <story-id> ready for review."`, `handoff: "Handoff to reviewer — story XYZ ready for review."`);
+        const mockPersona = parsePersonaFile(noTokenPersonaMd, "/fake/PERSONA.md");
+        const prompt = assemblePrompt(mockPersona);
+        // Handoff line should be present without a spurious substitution instruction.
+        expect(prompt).toContain(`- Handoff: "Handoff to reviewer — story XYZ ready for review."`);
+        // Crucially, NO extra substitution instruction for the no-token handoff phrase.
+        // We verify by counting "Substitute" lines and confirming the count doesn't include
+        // one for the handoff phrase (only yield and verdict should have substitution lines).
+        const substituteLines = prompt.split("\n").filter((l) => l.startsWith("Substitute <") && l.includes("with the live value"));
+        // Only yield (<role>) and verdict (<SENTINEL>) should have substitution lines.
+        expect(substituteLines.length).toBe(2);
+    });
 });

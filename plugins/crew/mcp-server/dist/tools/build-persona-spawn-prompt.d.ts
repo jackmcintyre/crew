@@ -86,5 +86,9 @@ export declare function buildPersonaSpawnPrompt(opts: BuildPersonaSpawnPromptOpt
  *   7. ## Locked phrases (do not paraphrase)
  *
  * Frontmatter is NOT included in the output.
+ *
+ * Story 4.3 Task 5: For each locked phrase that contains a `<...>` token,
+ * an additional substitution-instruction line is appended so the LLM knows
+ * to substitute the live value from its initial context before emission.
  */
 export declare function assemblePrompt(persona: PersonaFile): string;
