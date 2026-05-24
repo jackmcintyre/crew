@@ -169,4 +169,35 @@ describe("extractAcsFromSpec", () => {
     const acs = await extractAcsFromSpec(specPath);
     expect(acs).toHaveLength(0);
   });
+
+  // ---------------------------------------------------------------------------
+  // M2 fix: body collection stops at the next level-2 (## ) heading.
+  // A trap `artifact: trap.txt` in "## Implementation Notes" MUST NOT be
+  // picked up as part of the last AC's body.
+  // ---------------------------------------------------------------------------
+
+  it("M2: body stops at next ## heading — artifact in Implementation Notes is NOT captured", async () => {
+    const spec = `## Acceptance Criteria
+
+**AC1:**
+**Given** the AC body ends before the section heading,
+**Then** lines under the next section are not captured.
+artifact: real-file.txt
+
+## Implementation Notes
+
+This section describes something.
+artifact: trap.txt
+`;
+    const specPath = await writeTmp(spec);
+    const acs = await extractAcsFromSpec(specPath);
+
+    expect(acs).toHaveLength(1);
+    const ac1 = acs[0]!;
+    // The real artifact marker IS in the AC body.
+    expect(ac1.body.some(l => l.includes("artifact: real-file.txt"))).toBe(true);
+    // The trap artifact from ## Implementation Notes is NOT in the AC body.
+    expect(ac1.body.some(l => l.includes("artifact: trap.txt"))).toBe(false);
+    expect(ac1.body.some(l => l.includes("trap.txt"))).toBe(false);
+  });
 });

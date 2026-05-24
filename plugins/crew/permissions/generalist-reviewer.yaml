@@ -1,12 +1,6 @@
 role: generalist-reviewer
 tools_allow:
-  - readSourceStory
-  - lookupStandards
-  - recordVerdict
-  - classifyRiskTier
-  - computeAgreement
-  - recordYield
-  - heartbeat
+  - runReviewerSession
 gh_allow:
   - pr-view
   - pr-comment

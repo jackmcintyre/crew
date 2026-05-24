@@ -38,13 +38,18 @@ export async function extractAcsFromSpec(specPath) {
         const rawTag = headingMatch[2];
         const tag = rawTag ? rawTag.replace(/^\s*\(/, "").replace(/\)\s*$/, "").trim() : null;
         // Collect all body lines after the heading (Story 4.6 Task 1.3).
-        // Body runs until the next AC heading or end of file.
+        // Body runs until the next AC heading, the next level-2 section heading
+        // (## ), or end of file. Stopping at ## prevents prose under sections like
+        // "## Implementation Notes" from being picked up as AC body (M2 fix).
         const body = [];
         let firstLine = "";
         for (let j = i + 1; j < lines.length; j++) {
             const candidate = lines[j];
             // Stop if we hit another AC heading.
             if (AC_HEADING_RE.test(candidate.trim()))
+                break;
+            // Stop if we hit any level-2 (or higher) markdown section heading.
+            if (/^##+ /.test(candidate))
                 break;
             body.push(candidate);
             // Find first non-blank line for firstLine (original logic preserved).

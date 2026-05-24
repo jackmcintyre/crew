@@ -129,17 +129,32 @@ function makeManifestYaml(ref, sessionUlid) {
         `claimed_by: "${sessionUlid}"`,
     ].join("\n");
 }
-// ---------------------------------------------------------------------------
-// Make a stubbed execaImpl that returns a valid diff for gh pr diff
-// ---------------------------------------------------------------------------
-function makeGhExecaStub(opts = {}) {
-    const stub = vi.fn().mockResolvedValue({
-        stdout: opts.stdout ?? FAKE_PR_DIFF,
-        stderr: opts.stderr ?? "",
-        exitCode: opts.exitCode ?? 0,
-        timedOut: opts.timedOut ?? false,
+function makeDiscriminatingStub(opts = {}) {
+    const stub = vi.fn().mockImplementation(async (cmd, _args, _opts) => {
+        if (cmd === "gh") {
+            return {
+                stdout: opts.gh?.stdout ?? FAKE_PR_DIFF,
+                stderr: opts.gh?.stderr ?? "",
+                exitCode: opts.gh?.exitCode ?? 0,
+                timedOut: opts.gh?.timedOut ?? false,
+            };
+        }
+        if (cmd === "pnpm") {
+            return {
+                stdout: opts.vitest?.stdout ?? "",
+                stderr: opts.vitest?.stderr ?? "",
+                exitCode: opts.vitest?.exitCode ?? 0,
+                timedOut: opts.vitest?.timedOut ?? false,
+            };
+        }
+        // Fallback for any other command — should not occur in production paths.
+        return { stdout: "", stderr: `unexpected command: ${cmd}`, exitCode: 1, timedOut: false };
     });
     return stub;
+}
+/** Convenience: gh-only stub (no vitest calls expected in this test path). */
+function makeGhExecaStub(opts = {}) {
+    return makeDiscriminatingStub({ gh: opts });
 }
 // ---------------------------------------------------------------------------
 // Fixture builder
@@ -241,20 +256,27 @@ describe("AC4(d): structured acResults for the three fixture ACs", () => {
         expect(ac1.status).toBe("pass");
         expect(ac1.reason).toContain("artifact present");
     });
-    // Note: AC2 vitest check runs a real pnpm vitest call which requires a full
-    // project setup. We test the vitest path in isolation via the negative path
-    // (AC4g). For the positive path, we verify the applicability classifier works
-    // correctly by checking the vitest marker is detected.
-    it("AC2: applicability is runnable-vitest, testNameFilter matches spec", async () => {
-        const result = await callSession();
+    // AC4(d) spec clause: "AC2: applicability is runnable-vitest, pass path"
+    // Uses a discriminating stub that returns pnpm vitest exit 0 (pass path).
+    // Asserts ac2.status === "pass" deterministically (not vacuous).
+    it("AC2: applicability is runnable-vitest, pass path — stub returns pnpm exitCode 0, status === 'pass', filter used", async () => {
+        // Stub: gh returns diff, pnpm vitest returns exit 0 (pass).
+        const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 } });
+        const result = await callSession({ execaImpl: passingStub });
         const ac2 = result.acResults[2];
         expect(ac2).toBeDefined();
         expect(ac2.applicability).toBe("runnable-vitest");
         if (ac2.applicability !== "runnable-vitest")
             return;
         expect(ac2.testNameFilter).toBe("fixture passing test");
-        // Status may be pass or fail depending on test environment; just check it ran
-        expect(["pass", "fail"]).toContain(ac2.status);
+        // Deterministic: pnpm stub returned exitCode 0, so status MUST be "pass".
+        expect(ac2.status).toBe("pass");
+        expect(ac2.exitCode).toBe(0);
+        // The vitest filter string from the AC body was forwarded to the stub.
+        const stub = passingStub;
+        const vitestCall = stub.mock.calls.find((c) => c[0] === "pnpm");
+        expect(vitestCall).toBeDefined();
+        expect(vitestCall[1]).toEqual(expect.arrayContaining(["vitest", "--run", "-t", "fixture passing test"]));
     });
     it("AC3: manual-check-required, reason contains 'manual check required'", async () => {
         const result = await callSession();
@@ -295,37 +317,27 @@ describe("AC4(f): missing artifact → acResults[1].status === 'fail' with ENOEN
     });
 });
 // ---------------------------------------------------------------------------
-// AC4(g): Negative path — failing vitest (via injected execaImpl that fails for pnpm)
-// This tests the vitest path via a rewritten fixture test file.
+// AC4(g): Negative path — failing vitest filter (discriminating stub, exit 1)
+//
+// Issue 2 fix: use a discriminating stub that returns pnpm vitest exitCode 1
+// so no real subprocess is spawned. Asserts status === "fail", exitCode !== 0,
+// and reason contains the verbatim "vitest filter '...' failed" message per
+// the spec. The 60s timeout hack is removed — stub completes in milliseconds.
 // ---------------------------------------------------------------------------
-describe("AC4(g): failing vitest test → acResults[2].status === 'fail'", () => {
-    it("rewrites fixture test to fail; AC2 status === fail, exitCode !== 0", { timeout: 60_000 }, async () => {
-        // Rewrite the fixture test to fail
-        await atomicWriteFile(path.join(tmpRoot, "__tests__", "fixture.test.ts"), FIXTURE_VITEST_FAILING_TEST);
-        // We need a real vitest run for this — use a custom execaImpl that only stubs gh,
-        // but lets pnpm vitest run normally. The test file was already set up with a real path.
-        // Use the default execaImpl (real execa) but stub gh calls only.
-        const ghStub = vi.fn().mockImplementation(async (cmd, args) => {
-            if (cmd === "gh") {
-                return { stdout: FAKE_PR_DIFF, stderr: "", exitCode: 0, timedOut: false };
-            }
-            // For pnpm vitest calls, pass through to real execa
-            const { execa: realExeca } = await import("execa");
-            return realExeca(cmd, args, { reject: false });
-        });
-        const result = await runReviewerSession({
-            targetRepoRoot: tmpRoot,
-            sessionUlid: SESSION_ULID,
-            ref: STORY_REF,
-            prNumber: PR_NUMBER,
-            execaImpl: ghStub,
-        });
+describe("AC4(g): failing vitest filter → acResults[2].status === 'fail', exitCode !== 0, reason verbatim", () => {
+    it("stub returns pnpm exitCode 1 → AC2 status === 'fail', reason contains 'vitest filter ... failed'", async () => {
+        // Stub: gh returns diff, pnpm vitest returns exit 1 (fail path).
+        const failingStub = makeDiscriminatingStub({ vitest: { exitCode: 1, stderr: "1 failed" } });
+        const result = await callSession({ execaImpl: failingStub });
         const ac2 = result.acResults[2];
+        expect(ac2).toBeDefined();
         expect(ac2.applicability).toBe("runnable-vitest");
         if (ac2.applicability !== "runnable-vitest")
             return;
-        // May pass or fail depending on environment; just assert it ran
-        expect(typeof ac2.exitCode).toBe("number");
+        expect(ac2.status).toBe("fail");
+        expect(ac2.exitCode).not.toBe(0);
+        // Spec §2c verbatim reason: "vitest filter '<filter>' failed (exit <code>)"
+        expect(ac2.reason).toContain("vitest filter 'fixture passing test' failed");
     });
 });
 // ---------------------------------------------------------------------------
