@@ -10,6 +10,18 @@ export interface AcEntry {
     index: number;
     /** First non-blank line of the AC body, truncated to 120 chars. */
     firstLine: string;
+    /**
+     * Parenthetical tag from the AC heading, without parens.
+     * E.g. `"user-surface"` for `**AC1 (user-surface):**`, `null` for `**AC2:**`.
+     * (Story 4.6 Task 1.2)
+     */
+    tag: string | null;
+    /**
+     * All body lines of the AC (from the line after the heading until the next
+     * AC heading or end of file). Lines are verbatim — not trimmed.
+     * (Story 4.6 Task 1.3 — needed by the applicability classifier)
+     */
+    body: string[];
 }
 /**
  * Read the spec file at `specPath`, extract every AC heading that matches

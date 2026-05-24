@@ -80,6 +80,8 @@ const HANDOFF_PHRASE = `Handoff to reviewer — story ${STORY_REF} ready for rev
 const READY_FOR_MERGE = `**Verdict: READY FOR MERGE**`;
 const NEEDS_CHANGES = `**Verdict: NEEDS CHANGES** [2 issues]`;
 const BLOCKED_VERDICT = `**Verdict: BLOCKED**`;
+// Story 4.6: happy-path transcripts must include a GitHub PR URL for prNumber extraction.
+const FIXTURE_PR_URL = "https://github.com/test-org/test-repo/pull/99";
 // ---------------------------------------------------------------------------
 // Fixture helpers
 // ---------------------------------------------------------------------------
@@ -219,7 +221,12 @@ async function readOnDiskManifest() {
     return parseExecutionManifest(yamlParse(raw), { absPath: manifestPath });
 }
 function makeDevOpts(devTranscript) {
-    return { targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID, ref: STORY_REF, devTranscript };
+    // Story 4.6: prepend the fixture PR URL so processDevTranscript can extract prNumber.
+    // The URL is prepended only when the transcript doesn't already contain a PR URL.
+    const withPrUrl = devTranscript.includes("github.com")
+        ? devTranscript
+        : `${FIXTURE_PR_URL}\n${devTranscript}`;
+    return { targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID, ref: STORY_REF, devTranscript: withPrUrl };
 }
 function makeReviewerOpts(reviewerTranscript) {
     return {
@@ -414,7 +421,7 @@ describe("AC4(f): reviewer BLOCKED passthrough → done-blocked-reviewer-verdict
 // AC4(g): Tool count — 21 tools, contains new tools, does NOT contain runDevSession
 // ---------------------------------------------------------------------------
 describe("AC4(g): tool count and required tools present", () => {
-    it("registered tool list has exactly 22 entries and contains the three new tools but NOT runDevSession", async () => {
+    it("registered tool list has exactly 23 entries and contains the required tools but NOT runDevSession", async () => {
         const server = createServer();
         registerAllTools(server);
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -429,8 +436,9 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("claimNextStory");
             expect(toolNames).toContain("processDevTranscript");
             expect(toolNames).toContain("processReviewerTranscript");
+            expect(toolNames).toContain("runReviewerSession");
             expect(toolNames).not.toContain("runDevSession");
-            expect(toolNames.length).toBe(22);
+            expect(toolNames.length).toBe(23);
         }
         finally {
             await client.close();
@@ -523,11 +531,12 @@ describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript i
         await expect(fs.stat(path.join(root, ".crew", "state", "to-do", `${refA}.yaml`))).rejects.toThrow();
         const handoffPhraseA = `Handoff to reviewer — story ${refA} ready for review.`;
         // AC4(b): processDevTranscript → spawn-reviewer
+        // Story 4.6: include a PR URL so prNumber extraction succeeds.
         const devA = await processDevTranscript({
             targetRepoRoot: root,
             sessionUlid,
             ref: refA,
-            devTranscript: handoffPhraseA,
+            devTranscript: `https://github.com/test-org/test-repo/pull/101\n${handoffPhraseA}`,
         });
         expect(devA.next).toBe("spawn-reviewer");
         syntheticChatLog.push(...devA.chatLog);
@@ -573,11 +582,12 @@ describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript i
         syntheticChatLog.push(...claimB.chatLog);
         await expect(fs.stat(path.join(root, ".crew", "state", "in-progress", `${refB}.yaml`))).resolves.toBeDefined();
         const handoffPhraseB = `Handoff to reviewer — story ${refB} ready for review.`;
+        // Story 4.6: include a PR URL so prNumber extraction succeeds.
         const devB = await processDevTranscript({
             targetRepoRoot: root,
             sessionUlid,
             ref: refB,
-            devTranscript: handoffPhraseB,
+            devTranscript: `https://github.com/test-org/test-repo/pull/102\n${handoffPhraseB}`,
         });
         expect(devB.next).toBe("spawn-reviewer");
         syntheticChatLog.push(...devB.chatLog);
@@ -651,11 +661,12 @@ describe("AC4 (4.3c): blocked branches do NOT invoke completeStory", () => {
             return;
         expect(claim.ref).toBe(refA);
         const handoffPhrase = `Handoff to reviewer — story ${refA} ready for review.`;
+        // Story 4.6: include a PR URL so prNumber extraction succeeds.
         const devResult = await processDevTranscript({
             targetRepoRoot: root,
             sessionUlid,
             ref: refA,
-            devTranscript: handoffPhrase,
+            devTranscript: `https://github.com/test-org/test-repo/pull/103\n${handoffPhrase}`,
         });
         expect(devResult.next).toBe("spawn-reviewer");
         // Reviewer returns BLOCKED
@@ -691,11 +702,12 @@ describe("AC4 (4.3c): blocked branches do NOT invoke completeStory", () => {
             return;
         expect(claim.ref).toBe(refA);
         const handoffPhrase = `Handoff to reviewer — story ${refA} ready for review.`;
+        // Story 4.6: include a PR URL so prNumber extraction succeeds.
         const devResult = await processDevTranscript({
             targetRepoRoot: root,
             sessionUlid,
             ref: refA,
-            devTranscript: handoffPhrase,
+            devTranscript: `https://github.com/test-org/test-repo/pull/104\n${handoffPhrase}`,
         });
         expect(devResult.next).toBe("spawn-reviewer");
         // Reviewer emits an unrecognised sentinel (grammar drift)

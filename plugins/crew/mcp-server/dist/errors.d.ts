@@ -662,6 +662,46 @@ export declare class ConventionalCommitTypeUnknownError extends DomainError {
     });
 }
 /**
+ * Two or more standards criteria slugify to the same id.
+ *
+ * `runReviewerSession` raises this when building `standardsByCriterionId`
+ * and detects that `slugifyStandardsCriterion(name)` produces the same key
+ * for two distinct criteria. This is an authoring bug in `docs/standards.md`
+ * — the operator must rename one criterion to make ids unique.
+ *
+ * (Story 4.6 Task 3.3 / AC3c)
+ */
+export declare class DuplicateStandardsCriterionIdError extends DomainError {
+    readonly criterionId: string;
+    readonly names: string[];
+    constructor(opts: {
+        criterionId: string;
+        names: string[];
+    });
+}
+/**
+ * `processDevTranscript` could not parse a GitHub PR URL from the dev
+ * subagent's transcript on the happy-path `spawn-reviewer` branch.
+ *
+ * Raised when `parseHandoff` succeeds (the dev claimed completion) but no
+ * line in the transcript matches `https://github.com/.../pull/<n>`. This
+ * typically means the dev pushed but `gh pr create` did not surface the PR
+ * URL in the transcript, or the PR was not created at all.
+ *
+ * The `transcriptTail` field carries the last ~500 characters of the
+ * transcript for operator diagnostics.
+ *
+ * (Story 4.6 Task 3.4 / AC1g)
+ */
+export declare class PrUrlNotFoundInDevTranscriptError extends DomainError {
+    readonly ref: string;
+    readonly transcriptTail: string;
+    constructor(opts: {
+        ref: string;
+        transcriptTail: string;
+    });
+}
+/**
  * `buildBranchSlug` produced a slug that had no alphanumeric characters
  * after the `story/` prefix (e.g. a title composed entirely of Unicode
  * / punctuation). Thrown BEFORE any subprocess spawn. (Story 4.4

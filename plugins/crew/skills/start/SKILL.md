@@ -1,7 +1,7 @@
 ---
 name: crew:start
 description: "Claim the next ready story from the backlog, spawn a clean-context generalist-dev subagent, and drain the queue until empty."
-allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, Task]
+allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, runReviewerSession, Task]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/4-2-start-skill-and-per-story-dev-subagent-spawn.md § Behavioural contract -->
@@ -69,7 +69,10 @@ Both `devTranscript` (passed to `processDevTranscript`) and `reviewerTranscript`
 
 7. Switch on the `next` field:
    - `done-blocked-handoff-grammar` → return to outer loop (step 4).
-   - `spawn-reviewer` → store `reviewerPrompt`; continue to reviewer spawn.
+   - `done-blocked-gh-defer` → surface the chatLog and return to outer loop (step 4).
+   - `done-blocked-gh-retry` → surface the chatLog and return to outer loop (step 4).
+   - `done-blocked-gh-needs-human` → surface the chatLog and return to outer loop (step 4).
+   - `spawn-reviewer` → store `reviewerPrompt` AND `prNumber`; continue to reviewer spawn.
 
 ## Reviewer spawn
 
@@ -79,6 +82,7 @@ Both `devTranscript` (passed to `processDevTranscript`) and `reviewerTranscript`
    title: <title>
    sessionUlid: <sessionUlid>
    targetRepoRoot: <targetRepoRoot>
+   prNumber: <prNumber>
    ```
 
 9. When the `Task` tool returns, capture the reviewer subagent's final message as `reviewerTranscript`.

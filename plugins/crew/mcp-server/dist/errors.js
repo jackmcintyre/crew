@@ -801,6 +801,52 @@ export class ConventionalCommitTypeUnknownError extends DomainError {
     }
 }
 /**
+ * Two or more standards criteria slugify to the same id.
+ *
+ * `runReviewerSession` raises this when building `standardsByCriterionId`
+ * and detects that `slugifyStandardsCriterion(name)` produces the same key
+ * for two distinct criteria. This is an authoring bug in `docs/standards.md`
+ * — the operator must rename one criterion to make ids unique.
+ *
+ * (Story 4.6 Task 3.3 / AC3c)
+ */
+export class DuplicateStandardsCriterionIdError extends DomainError {
+    criterionId;
+    names;
+    constructor(opts) {
+        super(`Two or more standards criteria slugify to the same id '${opts.criterionId}': ` +
+            `${opts.names.join(", ")}. ` +
+            `Rename one in docs/standards.md to make ids unique.`);
+        this.criterionId = opts.criterionId;
+        this.names = opts.names;
+    }
+}
+/**
+ * `processDevTranscript` could not parse a GitHub PR URL from the dev
+ * subagent's transcript on the happy-path `spawn-reviewer` branch.
+ *
+ * Raised when `parseHandoff` succeeds (the dev claimed completion) but no
+ * line in the transcript matches `https://github.com/.../pull/<n>`. This
+ * typically means the dev pushed but `gh pr create` did not surface the PR
+ * URL in the transcript, or the PR was not created at all.
+ *
+ * The `transcriptTail` field carries the last ~500 characters of the
+ * transcript for operator diagnostics.
+ *
+ * (Story 4.6 Task 3.4 / AC1g)
+ */
+export class PrUrlNotFoundInDevTranscriptError extends DomainError {
+    ref;
+    transcriptTail;
+    constructor(opts) {
+        super(`Could not parse a GitHub PR URL from the dev subagent's transcript for story ${opts.ref}. ` +
+            `Expected a line containing 'https://github.com/.../pull/<n>'. ` +
+            `Last 500 chars of transcript: ${opts.transcriptTail}`);
+        this.ref = opts.ref;
+        this.transcriptTail = opts.transcriptTail;
+    }
+}
+/**
  * `buildBranchSlug` produced a slug that had no alphanumeric characters
  * after the `story/` prefix (e.g. a title composed entirely of Unicode
  * / punctuation). Thrown BEFORE any subprocess spawn. (Story 4.4

@@ -23,6 +23,7 @@ import { claimNextStory } from "./claim-next-story.js";
 import { processDevTranscript } from "./process-dev-transcript.js";
 import { processReviewerTranscript } from "./process-reviewer-transcript.js";
 import { runDevTerminalAction } from "./run-dev-terminal-action.js";
+import { runReviewerSession } from "./run-reviewer-session.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -827,6 +828,55 @@ export function registerAllTools(server) {
                 .parse(args);
             try {
                 const result = await runDevTerminalAction(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 4.6 — runReviewerSession: composite tool for the reviewer subagent.
+    // Performs the three mandatory reads (source story → PR diff → standards)
+    // in fixed sequential order, runs every AC via the applicability classifier,
+    // and returns ReviewerSessionResult carrying structured acResults.
+    server.registerTool({
+        name: "runReviewerSession",
+        description: "Composite reviewer-session tool. Reads the source story (via active adapter), " +
+            "the PR diff (via gh pr diff), and docs/standards.md in fixed sequential order. " +
+            "Runs every AC against the applicability classifier (artifact-check, vitest, or manual-check-required). " +
+            "Returns ReviewerSessionResult with sourceStory, prDiff, standards, standardsByCriterionId, and acResults. " +
+            "All read and execution errors propagate uncaught. MUST be the reviewer persona's FIRST action. Story 4.6.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+                ref: { type: "string" },
+                prNumber: { type: "number" },
+                role: { type: "string" },
+            },
+            required: ["targetRepoRoot", "sessionUlid", "ref", "prNumber"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                sessionUlid: z.string().min(1),
+                ref: z.string().min(1),
+                prNumber: z.number().int().positive(),
+                role: z.string().optional(),
+            })
+                .parse(args);
+            try {
+                const result = await runReviewerSession(parsed);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };

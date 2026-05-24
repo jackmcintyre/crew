@@ -33,19 +33,26 @@ export async function extractAcsFromSpec(specPath) {
         if (!headingMatch)
             continue;
         const index = parseInt(headingMatch[1], 10);
-        // Find the first non-blank line after the heading.
+        // Extract the parenthetical tag from the AC heading (Story 4.6 Task 1.2).
+        // headingMatch[2] is e.g. " (user-surface)" — strip parens + trim.
+        const rawTag = headingMatch[2];
+        const tag = rawTag ? rawTag.replace(/^\s*\(/, "").replace(/\)\s*$/, "").trim() : null;
+        // Collect all body lines after the heading (Story 4.6 Task 1.3).
+        // Body runs until the next AC heading or end of file.
+        const body = [];
         let firstLine = "";
         for (let j = i + 1; j < lines.length; j++) {
-            const candidate = lines[j].trim();
-            if (candidate.length === 0)
-                continue;
-            // Stop if we hit another AC heading (no body between consecutive ACs).
-            if (AC_HEADING_RE.test(candidate))
+            const candidate = lines[j];
+            // Stop if we hit another AC heading.
+            if (AC_HEADING_RE.test(candidate.trim()))
                 break;
-            firstLine = candidate.slice(0, 120);
-            break;
+            body.push(candidate);
+            // Find first non-blank line for firstLine (original logic preserved).
+            if (firstLine === "" && candidate.trim().length > 0) {
+                firstLine = candidate.trim().slice(0, 120);
+            }
         }
-        results.push({ index, firstLine });
+        results.push({ index, firstLine, tag, body });
     }
     // Sort numerically (specs are usually in order, but be defensive).
     results.sort((a, b) => a.index - b.index);

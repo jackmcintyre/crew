@@ -90,6 +90,51 @@ describe("extractAcsFromSpec", () => {
     );
   });
 
+  // ---------------------------------------------------------------------------
+  // Story 4.6 Task 1.5: tag and body fields
+  // ---------------------------------------------------------------------------
+
+  it("Story 4.6: extracts parenthetical tag from AC heading (user-surface, integration, null for untagged)", async () => {
+    const specPath = await writeTmp(FIXTURE_SPEC);
+    const acs = await extractAcsFromSpec(specPath);
+
+    expect(acs[0]!.tag).toBe("user-surface");   // **AC1 (user-surface):**
+    expect(acs[1]!.tag).toBeNull();              // **AC2:**
+    expect(acs[2]!.tag).toBe("integration");    // **AC3 (integration):**
+  });
+
+  it("Story 4.6: body array contains verbatim lines after heading until next AC heading", async () => {
+    const specPath = await writeTmp(FIXTURE_SPEC);
+    const acs = await extractAcsFromSpec(specPath);
+
+    // AC1 body lines (verbatim)
+    expect(acs[0]!.body.some(l => l.includes("Given a user-facing feature,"))).toBe(true);
+    expect(acs[0]!.body.some(l => l.includes("When the action completes,"))).toBe(true);
+    expect(acs[0]!.body.some(l => l.includes("Then the result is visible."))).toBe(true);
+
+    // AC3 body
+    expect(acs[2]!.body.some(l => l.includes("vitest runs the terminal action"))).toBe(true);
+  });
+
+  it("Story 4.6: body field on AC with no body lines returns empty-ish array", async () => {
+    const spec = `## ACs\n\n**AC1:**\n\n**AC2:**\nSome body.\n`;
+    const specPath = await writeTmp(spec);
+    const acs = await extractAcsFromSpec(specPath);
+
+    // AC1 has no body before AC2 heading
+    expect(acs[0]!.body.every(l => l.trim() === "")).toBe(true);
+    // AC2 has a body
+    expect(acs[1]!.body.some(l => l.includes("Some body."))).toBe(true);
+  });
+
+  it("Story 4.6: body contains artifact: marker line verbatim (needed by classifier)", async () => {
+    const spec = `## ACs\n\n**AC1:**\nGiven something.\nartifact: hello-a.txt\n\n**AC2:**\nSecond.\n`;
+    const specPath = await writeTmp(spec);
+    const acs = await extractAcsFromSpec(specPath);
+
+    expect(acs[0]!.body.some(l => l.trim() === "artifact: hello-a.txt")).toBe(true);
+  });
+
   it("handles gaps in AC numbering — emits in order they appear", async () => {
     const specPath = await writeTmp(FIXTURE_GAP_SPEC);
     const acs = await extractAcsFromSpec(specPath);
