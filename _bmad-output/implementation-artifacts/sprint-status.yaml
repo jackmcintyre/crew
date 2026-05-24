@@ -41,7 +41,7 @@ development_status:
   3-7-plain-language-guideline-and-direct-edit-allowance: done
   3-8-bmad-adapter-real-world-leniency: done
   epic-3-retrospective: done
-  epic-4: backlog
+  epic-4: in-progress
   4-1-claim-story-dependency-check-and-complete-story-mcp-tools: done
   4-2-start-skill-and-per-story-dev-subagent-spawn: done
   4-3-dev-reviewer-handoff-reviewer-spawn-and-rework-signal: done
@@ -54,13 +54,13 @@ development_status:
   4-7-verdict-version-stamping-and-footer-marker-idempotent-rerun: done
   4-8-reviewer-labels-and-negative-capability-enforcement: done
   4-8b-deterministic-seam-hardening-handoff-parser-and-pr-url-extraction: done
-  4-9-risk-tiering-spec-format-and-override-resolution: backlog
-  4-9b-risk-tier-classifier-code-evidence-stamping-and-fallback: backlog
-  4-10-agreement-metric-helper-compute-agreement: backlog
+  4-9-risk-tiering-spec-format-and-override-resolution: ready-for-dev
+  4-9b-risk-tier-classifier-code-evidence-stamping-and-fallback: ready-for-dev
+  4-10-agreement-metric-helper-compute-agreement: ready-for-dev
   4-10b-auto-merge-gate-medium-high-pause-and-user-override: backlog
   4-11-yield-protocol-locked-phrase-domain-routing-in-domain-insistence: backlog
   4-12-per-invocation-telemetry-and-runtime-soft-hard-limits: backlog
-  4-13-typed-error-class-assertions-in-dev-outcome-tests: backlog
+  4-13-typed-error-class-assertions-in-dev-outcome-tests: ready-for-dev
   epic-4-retrospective: optional
   epic-5: backlog
   5-1-block-story-mcp-tool-and-blocked-by-taxonomy: backlog
