@@ -417,3 +417,98 @@ describe("Story 4.6 (m) — PR URL extraction: no URL → PrUrlNotFoundInDevTran
         }
     });
 });
+// ---------------------------------------------------------------------------
+// Story 4.8b: dev-outcome.json seam tests
+// ---------------------------------------------------------------------------
+const SESSION_DIR_PATH = `.crew/state/sessions/${SESSION_ULID}`;
+async function writeDevOutcomeFile(root, content) {
+    const dir = path.join(root, ".crew", "state", "sessions", SESSION_ULID);
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, "dev-outcome.json");
+    const raw = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+    await fs.writeFile(filePath, raw, "utf8");
+    return filePath;
+}
+describe("Story 4.8b (5b) — file-present path: reads prNumber from dev-outcome.json", () => {
+    it("returns prNumber from file even when no PR URL appears in the transcript", async () => {
+        // Write dev-outcome.json with prNumber: 42
+        await writeDevOutcomeFile(tmpRoot, {
+            prUrl: "https://github.com/test-org/test-repo/pull/42",
+            prNumber: 42,
+            branch: "story/test-branch",
+            commitSha: "abc123",
+        });
+        // Transcript has the handoff phrase but NO GitHub PR URL — primary path must not rely on regex
+        const transcript = `Implementation complete.\n${HANDOFF_PHRASE}`;
+        const result = await processDevTranscript({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
+            devTranscript: transcript,
+        });
+        expect(result.next).toBe("spawn-reviewer");
+        if (result.next !== "spawn-reviewer")
+            return;
+        // prNumber comes from the file, not the transcript
+        expect(result.prNumber).toBe(42);
+    });
+});
+describe("Story 4.8b (5c) — fallback path: no dev-outcome.json → regex scan of transcript", () => {
+    it("falls back to PR_URL_RE when dev-outcome.json is absent", async () => {
+        // No dev-outcome.json written — file absent
+        const transcript = `PR created: https://github.com/test-org/test-repo/pull/99\n${HANDOFF_PHRASE}`;
+        const result = await processDevTranscript({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
+            devTranscript: transcript,
+        });
+        expect(result.next).toBe("spawn-reviewer");
+        if (result.next !== "spawn-reviewer")
+            return;
+        // prNumber comes from transcript regex
+        expect(result.prNumber).toBe(99);
+    });
+});
+describe("Story 4.8b (5d) — malformed JSON in dev-outcome.json → DevOutcomeFileMalformedError", () => {
+    it("throws DevOutcomeFileMalformedError and does NOT fall back to transcript scanning", async () => {
+        await writeDevOutcomeFile(tmpRoot, "{ this is not valid json !!!");
+        // Even with a valid PR URL in transcript, must NOT fall back
+        const transcript = `PR: https://github.com/test-org/test-repo/pull/77\n${HANDOFF_PHRASE}`;
+        await expect(processDevTranscript({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
+            devTranscript: transcript,
+        })).rejects.toThrow("dev-outcome.json");
+    });
+});
+describe("Story 4.8b (5e) — missing prNumber field → DevOutcomeFileMalformedError", () => {
+    it("throws DevOutcomeFileMalformedError when prNumber is absent from dev-outcome.json", async () => {
+        await writeDevOutcomeFile(tmpRoot, {
+            prUrl: "https://github.com/test-org/test-repo/pull/42",
+            branch: "story/test-branch",
+            commitSha: "abc123",
+            // prNumber intentionally missing
+        });
+        const transcript = `PR: https://github.com/test-org/test-repo/pull/42\n${HANDOFF_PHRASE}`;
+        await expect(processDevTranscript({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
+            devTranscript: transcript,
+        })).rejects.toThrow("dev-outcome.json");
+    });
+});
+describe("Story 4.8b (5f) — non-regression: no dev-outcome.json, no PR URL → PrUrlNotFoundInDevTranscriptError", () => {
+    it("throws PrUrlNotFoundInDevTranscriptError on fallback path when no URL in transcript", async () => {
+        // No dev-outcome.json (ENOENT) and no URL in transcript
+        const transcript = `Work done.\n${HANDOFF_PHRASE}`;
+        await expect(processDevTranscript({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
+            devTranscript: transcript,
+        })).rejects.toThrow("Could not parse a GitHub PR URL");
+    });
+});

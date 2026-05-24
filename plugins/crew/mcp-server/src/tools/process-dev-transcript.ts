@@ -26,6 +26,7 @@ import { parseHandoff } from "../skills/handoff-parser.js";
 import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { PrUrlNotFoundInDevTranscriptError } from "../errors.js";
+import { readDevOutcomeFile } from "../lib/read-dev-outcome-file.js";
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -92,7 +93,7 @@ const PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)/g;
 export async function processDevTranscript(
   opts: ProcessDevTranscriptOptions,
 ): Promise<ProcessDevTranscriptResult> {
-  const { targetRepoRoot, ref, devTranscript } = opts;
+  const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;
   const chatLog: string[] = [];
 
   const manifestPath = path.resolve(
@@ -159,23 +160,39 @@ export async function processDevTranscript(
   }
 
   // ---------------------------------------------------------------------------
-  // Story 4.6 Task 6.1–6.3: Extract the PR number from the dev transcript.
-  // Takes the rightmost PR URL match (the dev may mention multiple URLs).
+  // Story 4.8b Task 4.3–4.5: Try to read prNumber from dev-outcome.json first.
+  // The file is written atomically by runDevTerminalAction after a successful
+  // gh pr create — making this path machine-authoritative (no LLM text needed).
+  // On ENOENT (file absent): fall through to the PR_URL_RE fallback below.
+  // On malformed file: DevOutcomeFileMalformedError propagates uncaught (Task 4.6).
   // ---------------------------------------------------------------------------
 
-  let lastMatch: RegExpExecArray | null = null;
-  let m: RegExpExecArray | null;
-  const prUrlReClone = new RegExp(PR_URL_RE.source, PR_URL_RE.flags);
-  while ((m = prUrlReClone.exec(devTranscript)) !== null) {
-    lastMatch = m;
-  }
+  const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid);
 
-  if (lastMatch === null) {
-    const tail = devTranscript.slice(-500);
-    throw new PrUrlNotFoundInDevTranscriptError({ ref, transcriptTail: tail });
-  }
+  let prNumber: number;
 
-  const prNumber = parseInt(lastMatch[1]!, 10);
+  if (devOutcome !== null) {
+    // Primary path (AC2): use the machine-written prNumber directly.
+    prNumber = devOutcome.prNumber;
+  } else {
+    // Fallback path (AC3): dev-outcome.json absent — scan transcript with PR_URL_RE.
+    // Preserved verbatim from Story 4.6 Task 6.1–6.3 for backward compatibility
+    // (sessions started before this story was deployed have no dev-outcome.json).
+
+    let lastMatch: RegExpExecArray | null = null;
+    let m: RegExpExecArray | null;
+    const prUrlReClone = new RegExp(PR_URL_RE.source, PR_URL_RE.flags);
+    while ((m = prUrlReClone.exec(devTranscript)) !== null) {
+      lastMatch = m;
+    }
+
+    if (lastMatch === null) {
+      const tail = devTranscript.slice(-500);
+      throw new PrUrlNotFoundInDevTranscriptError({ ref, transcriptTail: tail });
+    }
+
+    prNumber = parseInt(lastMatch[1]!, 10);
+  }
 
   // Handoff parsed OK — compute the reviewer spawn prompt.
   const { systemPrompt: reviewerPrompt } = await buildPersonaSpawnPrompt({

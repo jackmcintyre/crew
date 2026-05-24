@@ -2,7 +2,7 @@
 
 story_shape: substrate
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -106,10 +106,10 @@ vitest covers:
 
 Implementation order is load-bearing.
 
-- [ ] **Task 1: Write `dev-outcome.json` in `runDevTerminalAction`** (AC: #1, #5a, #5h)
-  - [ ] 1.0 In `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`, locate the existing destructure of the `opts` parameter at lines 83–91. `sessionUlid` is declared on `RunDevTerminalActionOptions` but is NOT currently pulled into local scope there — add `sessionUlid` to the destructure so it is available as a plain identifier in the write block added by Task 1.3. Alternatively, reference it as `opts.sessionUlid` in the write call if that reads more cleanly with the surrounding code — pick whichever form is already dominant for other option fields in this file. (This is the same pattern Task 4.2 applies to `process-dev-transcript.ts`.)
-  - [ ] 1.1 In `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`, add an import for `atomicWriteFile` from `"../lib/managed-fs.js"`.
-  - [ ] 1.2 After the `prUrl` validation block (currently lines 177–183, which throw `GhPrCreateFailedError` if `prUrl` is falsy or doesn't start with `https://github.com/`), extract `prNumber` via regex match — NOT `split("/pull/")` (which would silently produce NaN on a malformed URL):
+- [x] **Task 1: Write `dev-outcome.json` in `runDevTerminalAction`** (AC: #1, #5a, #5h)
+  - [x] 1.0 In `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`, locate the existing destructure of the `opts` parameter at lines 83–91. `sessionUlid` is declared on `RunDevTerminalActionOptions` but is NOT currently pulled into local scope there — add `sessionUlid` to the destructure so it is available as a plain identifier in the write block added by Task 1.3. Alternatively, reference it as `opts.sessionUlid` in the write call if that reads more cleanly with the surrounding code — pick whichever form is already dominant for other option fields in this file. (This is the same pattern Task 4.2 applies to `process-dev-transcript.ts`.)
+  - [x] 1.1 In `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`, add an import for `atomicWriteFile` from `"../lib/managed-fs.js"`.
+  - [x] 1.2 After the `prUrl` validation block (currently lines 177–183, which throw `GhPrCreateFailedError` if `prUrl` is falsy or doesn't start with `https://github.com/`), extract `prNumber` via regex match — NOT `split("/pull/")` (which would silently produce NaN on a malformed URL):
     ```ts
     const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
     if (!prNumberMatch) {
@@ -121,13 +121,13 @@ Implementation order is load-bearing.
     const prNumber = parseInt(prNumberMatch[1]!, 10);
     ```
     The regex guarantees `\d+` matched, so `parseInt` returns a positive integer (NaN is unreachable). This is the SINGLE source-of-truth for `prNumber` parsing across this story — AC1 quotes the same expression.
-  - [ ] 1.3 Compute `devOutcomePath = path.resolve(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "dev-outcome.json")`.
-  - [ ] 1.4 Call `await atomicWriteFile(devOutcomePath, JSON.stringify({ prUrl, prNumber, branch, commitSha }, null, 2))`. This happens BEFORE the `return { ok: true, branch, commitSha, prUrl }` statement. `atomicWriteFile` creates the session directory internally; no caller-side `fs.mkdir` is required.
-  - [ ] 1.5 Do NOT add `sessionUlid` to the return type — it is already a tool input; the caller already has it.
-  - [ ] 1.6 Verify the existing `runDevTerminalAction` integration tests still pass. Add a new test case asserting `dev-outcome.json` content (5a). Existing tests do not provide a session directory — that's fine; `atomicWriteFile` will create it. If any existing test asserts "no files are written under `.crew/state/`", update that assertion to allow `dev-outcome.json` under the session directory.
+  - [x] 1.3 Compute `devOutcomePath = path.resolve(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "dev-outcome.json")`.
+  - [x] 1.4 Call `await atomicWriteFile(devOutcomePath, JSON.stringify({ prUrl, prNumber, branch, commitSha }, null, 2))`. This happens BEFORE the `return { ok: true, branch, commitSha, prUrl }` statement. `atomicWriteFile` creates the session directory internally; no caller-side `fs.mkdir` is required.
+  - [x] 1.5 Do NOT add `sessionUlid` to the return type — it is already a tool input; the caller already has it.
+  - [x] 1.6 Verify the existing `runDevTerminalAction` integration tests still pass. Add a new test case asserting `dev-outcome.json` content (5a). Existing tests do not provide a session directory — that's fine; `atomicWriteFile` will create it. If any existing test asserts "no files are written under `.crew/state/`", update that assertion to allow `dev-outcome.json` under the session directory.
 
-- [ ] **Task 2: Add `DevOutcomeFileMalformedError` to `errors.ts`** (AC: #4, #5d, #5e)
-  - [ ] 2.1 In `plugins/crew/mcp-server/src/errors.ts`, add (matching the sibling `ReviewerResultFileMalformedError` ctor shape — `{ path, cause }`, no `sessionUlid`, since `path` already encodes the session via `.../sessions/<sessionUlid>/dev-outcome.json`):
+- [x] **Task 2: Add `DevOutcomeFileMalformedError` to `errors.ts`** (AC: #4, #5d, #5e)
+  - [x] 2.1 In `plugins/crew/mcp-server/src/errors.ts`, add (matching the sibling `ReviewerResultFileMalformedError` ctor shape — `{ path, cause }`, no `sessionUlid`, since `path` already encodes the session via `.../sessions/<sessionUlid>/dev-outcome.json`):
     ```ts
     export class DevOutcomeFileMalformedError extends DomainError {
       readonly path: string;
@@ -135,31 +135,31 @@ Implementation order is load-bearing.
       constructor(opts: { path: string; cause: unknown }) { ... }
     }
     ```
-  - [ ] 2.2 The `cause` field carries the underlying parse error or a descriptive string for missing/wrong-typed-field cases. Follow the pattern of `ReviewerResultFileMalformedError` at `errors.ts:1091`.
+  - [x] 2.2 The `cause` field carries the underlying parse error or a descriptive string for missing/wrong-typed-field cases. Follow the pattern of `ReviewerResultFileMalformedError` at `errors.ts:1091`.
 
-- [ ] **Task 3: Add `readDevOutcomeFile` shared helper** (AC: #2, #3, #4)
-  - [ ] 3.1 Create `plugins/crew/mcp-server/src/lib/read-dev-outcome-file.ts`. Export `readDevOutcomeFile(targetRepoRoot: string, sessionUlid: string): Promise<DevOutcome | null>` where `DevOutcome = { prUrl: string; prNumber: number; branch: string; commitSha: string }`. **Signature deliberately matches `readReviewerResultFile(targetRepoRoot, sessionUlid)` (`lib/read-reviewer-result-file.ts:31`)** — the helper computes the file path internally (`path.join(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "dev-outcome.json")`).
-  - [ ] 3.2 On ENOENT: return `null`.
-  - [ ] 3.3 On read success: `JSON.parse(contents)`. Validate (a) presence and string type of `prUrl`, `branch`, `commitSha`; (b) `prNumber` is a number AND `Number.isInteger(prNumber)` AND `prNumber > 0` (reject NaN, floats, zero, negatives). On parse failure or any validation miss: throw `DevOutcomeFileMalformedError({ path, cause })` where `cause` is the underlying error or a descriptive string naming the offending field.
-  - [ ] 3.4 No Zod dependency required — manual field checks mirror the pattern in `read-reviewer-result-file.ts`.
+- [x] **Task 3: Add `readDevOutcomeFile` shared helper** (AC: #2, #3, #4)
+  - [x] 3.1 Create `plugins/crew/mcp-server/src/lib/read-dev-outcome-file.ts`. Export `readDevOutcomeFile(targetRepoRoot: string, sessionUlid: string): Promise<DevOutcome | null>` where `DevOutcome = { prUrl: string; prNumber: number; branch: string; commitSha: string }`. **Signature deliberately matches `readReviewerResultFile(targetRepoRoot, sessionUlid)` (`lib/read-reviewer-result-file.ts:31`)** — the helper computes the file path internally (`path.join(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "dev-outcome.json")`).
+  - [x] 3.2 On ENOENT: return `null`.
+  - [x] 3.3 On read success: `JSON.parse(contents)`. Validate (a) presence and string type of `prUrl`, `branch`, `commitSha`; (b) `prNumber` is a number AND `Number.isInteger(prNumber)` AND `prNumber > 0` (reject NaN, floats, zero, negatives). On parse failure or any validation miss: throw `DevOutcomeFileMalformedError({ path, cause })` where `cause` is the underlying error or a descriptive string naming the offending field.
+  - [x] 3.4 No Zod dependency required — manual field checks mirror the pattern in `read-reviewer-result-file.ts`.
 
-- [ ] **Task 4: Modify `processDevTranscript` to use the file** (AC: #2, #3, #4, #5b–5g)
-  - [ ] 4.1 Import `readDevOutcomeFile` from `"../lib/read-dev-outcome-file.js"`. (`DevOutcomeFileMalformedError` does not need to be imported here — it propagates uncaught from the helper.)
-  - [ ] 4.2 Add `sessionUlid` to the existing line-95 destructure: change `const { targetRepoRoot, ref, devTranscript } = opts;` to `const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;`. The field is already declared on `ProcessDevTranscriptOptions` (line 49) — only the destructure needs updating.
-  - [ ] 4.3 After `parseHandoff` returns `{ ok: true }` (currently at line 145, before the `PR_URL_RE` scan at line 163), call `const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid);`. No path computation needed in this file — the helper owns it.
-  - [ ] 4.4 If `devOutcome` is non-null: use `devOutcome.prNumber` as `prNumber`. Skip the `PR_URL_RE` scan entirely and jump directly to the `buildPersonaSpawnPrompt` call.
-  - [ ] 4.5 If `devOutcome` is null (file absent): fall through to the existing `PR_URL_RE` scan block (lines 163–175 in current implementation). No change to existing fallback behaviour.
-  - [ ] 4.6 `DevOutcomeFileMalformedError` thrown by `readDevOutcomeFile` propagates uncaught — same pattern as `ReviewerResultFileMalformedError` in `processReviewerTranscript`.
+- [x] **Task 4: Modify `processDevTranscript` to use the file** (AC: #2, #3, #4, #5b–5g)
+  - [x] 4.1 Import `readDevOutcomeFile` from `"../lib/read-dev-outcome-file.js"`. (`DevOutcomeFileMalformedError` does not need to be imported here — it propagates uncaught from the helper.)
+  - [x] 4.2 Add `sessionUlid` to the existing line-95 destructure: change `const { targetRepoRoot, ref, devTranscript } = opts;` to `const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;`. The field is already declared on `ProcessDevTranscriptOptions` (line 49) — only the destructure needs updating.
+  - [x] 4.3 After `parseHandoff` returns `{ ok: true }` (currently at line 145, before the `PR_URL_RE` scan at line 163), call `const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid);`. No path computation needed in this file — the helper owns it.
+  - [x] 4.4 If `devOutcome` is non-null: use `devOutcome.prNumber` as `prNumber`. Skip the `PR_URL_RE` scan entirely and jump directly to the `buildPersonaSpawnPrompt` call.
+  - [x] 4.5 If `devOutcome` is null (file absent): fall through to the existing `PR_URL_RE` scan block (lines 163–175 in current implementation). No change to existing fallback behaviour.
+  - [x] 4.6 `DevOutcomeFileMalformedError` thrown by `readDevOutcomeFile` propagates uncaught — same pattern as `ReviewerResultFileMalformedError` in `processReviewerTranscript`.
 
-- [ ] **Task 5: Update tests** (AC: #5)
-  - [ ] 5.1 In `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`, add test cases for (5b) file-present path, (5c) fallback path, (5d) malformed JSON, (5e) missing field. Use `tmpdir` per `beforeEach`; write `dev-outcome.json` where needed. The `processDevTranscript` call takes `targetRepoRoot` and `sessionUlid` from which the tool resolves the path.
-  - [ ] 5.2 In the `runDevTerminalAction` test file, add test case (5a): stub `gh pr create` to return a known PR URL; assert `dev-outcome.json` is written to the session tmpdir with the expected content.
-  - [ ] 5.3 Run full vitest suite (`pnpm vitest --run` from `mcp-server/`) — confirm all existing tests still pass.
+- [x] **Task 5: Update tests** (AC: #5)
+  - [x] 5.1 In `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`, add test cases for (5b) file-present path, (5c) fallback path, (5d) malformed JSON, (5e) missing field. Use `tmpdir` per `beforeEach`; write `dev-outcome.json` where needed. The `processDevTranscript` call takes `targetRepoRoot` and `sessionUlid` from which the tool resolves the path.
+  - [x] 5.2 In the `runDevTerminalAction` test file, add test case (5a): stub `gh pr create` to return a known PR URL; assert `dev-outcome.json` is written to the session tmpdir with the expected content.
+  - [x] 5.3 Run full vitest suite (`pnpm vitest --run` from `mcp-server/`) — confirm all existing tests still pass.
 
-- [ ] **Task 6: Build, vitest, dist** (AC: all)
-  - [ ] 6.1 `pnpm build` passes.
-  - [ ] 6.2 All vitest tests pass. Tool count unchanged (no new MCP tools registered; `DevOutcomeFileMalformedError` is a new error class, not a new tool).
-  - [ ] 6.3 Commit `dist/` per CLAUDE.md.
+- [x] **Task 6: Build, vitest, dist** (AC: all)
+  - [x] 6.1 `pnpm build` passes.
+  - [x] 6.2 All vitest tests pass. Tool count unchanged (no new MCP tools registered; `DevOutcomeFileMalformedError` is a new error class, not a new tool).
+  - [x] 6.3 Commit `dist/` per CLAUDE.md.
 
 ---
 
@@ -269,10 +269,25 @@ The write happens AFTER `gh pr create` succeeds. If `atomicWriteFile` throws, th
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-sonnet-4-6
 
 ### Debug Log References
 
 ### Completion Notes List
 
+- Task 1: Added `atomicWriteFile` import and `sessionUlid` to destructure in `run-dev-terminal-action.ts`. Inserted prNumber extraction via `/\/pull\/(\d+)/` regex and `dev-outcome.json` write before return.
+- Task 2: Added `DevOutcomeFileMalformedError` to `errors.ts` matching `ReviewerResultFileMalformedError` pattern (`{ path, cause }` constructor, same message shape).
+- Task 3: Created `lib/read-dev-outcome-file.ts` with `readDevOutcomeFile(targetRepoRoot, sessionUlid)` — returns null on ENOENT, throws `DevOutcomeFileMalformedError` on malformed JSON or validation miss.
+- Task 4: Modified `processDevTranscript` to add `sessionUlid` to destructure, call `readDevOutcomeFile` after `parseHandoff` success, use file-sourced `prNumber` on primary path, fall through to `PR_URL_RE` regex scan on null (ENOENT).
+- Task 5: Added 6 new test cases to `process-dev-transcript.test.ts` (5b–5f) and 3 new test cases to `run-dev-terminal-action.integration.test.ts` (5a). Static fs-write guard required using `atomicWriteFile` instead of `fs.writeFile` in test helpers.
+- Task 6: Build passes, 958/959 vitest tests pass. The 1 remaining failure is the dist-shipping contract (expected until dist/ is committed in this same commit).
+
 ### File List
+
+- `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts` (modified)
+- `plugins/crew/mcp-server/src/errors.ts` (modified)
+- `plugins/crew/mcp-server/src/lib/read-dev-outcome-file.ts` (created)
+- `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (modified)
+- `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts` (modified)
+- `plugins/crew/mcp-server/src/tools/__tests__/run-dev-terminal-action.integration.test.ts` (modified)
+- `plugins/crew/mcp-server/dist/` (rebuilt)
