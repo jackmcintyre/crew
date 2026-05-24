@@ -33,9 +33,9 @@ import { z } from "zod";
 export declare const ExecutionManifestSchema: z.ZodObject<{
     ref: z.ZodString;
     status: z.ZodEnum<{
-        "in-progress": "in-progress";
         "to-do": "to-do";
         blocked: "blocked";
+        "in-progress": "in-progress";
         done: "done";
     }>;
     adapter: z.ZodString;
