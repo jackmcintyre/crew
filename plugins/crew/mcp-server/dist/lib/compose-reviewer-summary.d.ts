@@ -25,10 +25,16 @@ import type { ReviewerResultFileShape } from "./read-reviewer-result-file.js";
  * indicating an out-of-band mutation of the persisted file.
  */
 export declare function composeVerdictLine(result: ReviewerResultFileShape): string;
+export interface ComposeSummaryBodyVersionInfo {
+    /** Semver version of the standards doc used to produce this verdict. */
+    standardsVersion: string;
+    /** Semver version of the crew plugin (from getPluginVersion()). */
+    pluginVersion: string;
+}
 /**
  * Compose the full PR review summary body from the persisted result.
  *
- * Body skeleton (Story 4.6b spec §2a):
+ * Body skeleton (Story 4.6b spec §2a, extended by Story 4.7):
  *   # Reviewer summary — ${ref}
  *   ## Acceptance criteria
  *   <per-AC lines>
@@ -36,5 +42,10 @@ export declare function composeVerdictLine(result: ReviewerResultFileShape): str
  *   <per-criterion lines>
  *   [## Manual checks required before merge]  (only if any manual-check-required ACs)
  *   <verdict line>
+ *
+ *   `standards_version: <standardsVersion>` · `plugin_version: <pluginVersion>`
+ *   <!-- crew:verdict:<pluginVersion>:<ref> -->
+ *
+ * The footer marker is the absolute last line (no trailing newline).
  */
-export declare function composeSummaryBody(result: ReviewerResultFileShape): string;
+export declare function composeSummaryBody(result: ReviewerResultFileShape, versionInfo: ComposeSummaryBodyVersionInfo): string;

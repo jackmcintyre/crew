@@ -1,5 +1,6 @@
 /**
  * AC5 (user-surface) operator-smoke extension for Story 4.6b — Task 10.
+ * Extended for Story 4.7 AC4 — idempotent rerun and version stamping.
  *
  * @description
  * Extends the Story 4.6 rubber-stamp reproducer with the post-reviewer step:
@@ -9,17 +10,20 @@
  *   4. `postReviewerComments` is called AFTER runReviewerSession returns and
  *      BEFORE processReviewerTranscript runs.
  *   5. The captured `gh api` body is asserted per spec §5b:
- *      - Final line of body: `**Verdict: NEEDS CHANGES** [1 issues, 0 questions]`
+ *      - Body contains `standards_version:` and `plugin_version:` literals
+ *      - Footer marker `<!-- crew:verdict:` is last line of body
  *      - `comments` array has length 1 (failing artifact path appears in diff)
  *      - Inline comment body contains both `target-file.txt` and `ENOENT`
- *   6. processReviewerTranscript is still called — manifest stays in in-progress/
+ *   6. Second `postReviewerComments` invocation (rerun scenario) — GET returns
+ *      prior verdict with footer marker → PATCH called once, POST not called.
+ *   7. processReviewerTranscript is still called — manifest stays in in-progress/
  *      with `blocked_by: "reviewer-verdict-needs-changes"` (spec §5c).
  *
  * Smoke-gate: per `plugins/crew/docs/user-surface-acs.md` § Pre-PR gate,
- * this test provides the CI-level evidence for AC5 (user-surface).
+ * this test provides the CI-level evidence for AC5 (user-surface) and AC4 (user-surface).
  * The operator may substitute manual-paste evidence per spec §5d.
  *
- * Story 4.6b Task 10.1–10.4.
+ * Story 4.6b Task 10.1–10.4; Story 4.7 Task 6.1–6.3.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promises as fs, mkdtempSync, rmSync } from "node:fs";
@@ -31,6 +35,7 @@ import { processReviewerTranscript } from "../../tools/process-reviewer-transcri
 import { runReviewerSession } from "../../tools/run-reviewer-session.js";
 import { postReviewerComments } from "../../tools/post-reviewer-comments.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
+import { __resetPluginVersionCacheForTests } from "../../lib/plugin-version.js";
 import { SMOKE_STORY_ULID, SMOKE_STORY_REF, SMOKE_ARTIFACT_PATH, makeRubberStampDevTranscript, assertManifestStaysInProgress, } from "./rubber-stamp-reproducer.js";
 import { makeGhExecaStub } from "../test-helpers/gh-execa-stub.js";
 // ---------------------------------------------------------------------------
@@ -89,7 +94,11 @@ criteria:
 let tmpRoot;
 let manifestPath;
 let pluginRoot;
+// Plugin version used in smoke tests — avoids calling real plugin.json
+const SMOKE_PLUGIN_VERSION = "0.1.0-smoke";
 beforeEach(async () => {
+    __resetGhErrorMapCacheForTests();
+    __resetPluginVersionCacheForTests();
     tmpRoot = mkdtempSync(path.join(os.tmpdir(), "crew-4-6b-ac5-smoke-"));
     pluginRoot = path.join(tmpRoot, "plugin");
     // .crew state dirs
@@ -231,7 +240,6 @@ beforeEach(async () => {
             withdrawn: false,
         },
     });
-    __resetGhErrorMapCacheForTests();
 });
 afterEach(() => {
     rmSync(tmpRoot, { recursive: true, force: true });
@@ -287,38 +295,111 @@ describe("AC5 (user-surface): postReviewerComments posts a PR review with inline
         // Verdict must be NEEDS CHANGES
         expect(sessionResult.recommendedVerdict).toBe("NEEDS CHANGES");
         // -----------------------------------------------------------------------
-        // Step 3: postReviewerComments — reads the persisted file and posts review
-        // (spec §5b assertions)
+        // Step 3: postReviewerComments — first run (no prior verdict)
+        // GET returns empty list → POST creates new review
+        // (spec §5b and AC4 Story 4.7 assertions)
         // -----------------------------------------------------------------------
-        let capturedApiInput;
-        const postStub = makeGhExecaStub({
+        const reviewsUrl = `/repos/jackmcintyre/crew/pulls/${devResult.prNumber}/reviews`;
+        let capturedPostInput;
+        const firstPostStub = makeGhExecaStub({
             prDiff: { stdout: FAKE_PR_DIFF_WITH_ARTIFACT },
-            onApiCall: (input) => { capturedApiInput = input; },
+            apiRoutes: [
+                {
+                    url: reviewsUrl,
+                    method: "GET",
+                    response: { stdout: JSON.stringify([]), exitCode: 0 },
+                },
+                {
+                    url: reviewsUrl,
+                    method: "POST",
+                    response: { stdout: JSON.stringify({ id: 1001 }), exitCode: 0 },
+                    onCall: (input) => { capturedPostInput = input; },
+                },
+            ],
         });
-        const postResult = await postReviewerComments({
+        const firstPostResult = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
-            execaImpl: postStub,
+            execaImpl: firstPostStub,
             pluginRootOverride: pluginRoot,
+            pluginVersionOverride: SMOKE_PLUGIN_VERSION,
         });
         // (5b): Tool must have posted
-        expect(postResult.next).toBe("posted");
-        if (postResult.next !== "posted")
+        expect(firstPostResult.next).toBe("posted");
+        if (firstPostResult.next !== "posted")
             return;
+        // First run: POST path
+        expect(firstPostResult.wasEdit).toBe(false);
+        expect(firstPostResult.priorReviewId).toBeNull();
         // Parse the captured gh api body
-        const apiBody = JSON.parse(capturedApiInput);
-        // (5b): Final line of body is the verdict
-        const bodyLines = apiBody.body.split("\n");
-        const lastNonEmpty = [...bodyLines].reverse().find((l) => l.trim().length > 0);
-        expect(lastNonEmpty).toBe("**Verdict: NEEDS CHANGES** [1 issues, 0 questions]");
+        const firstApiBody = JSON.parse(capturedPostInput);
+        // (AC4 4b): version tokens present in POST body
+        expect(firstApiBody.body).toContain("standards_version:");
+        expect(firstApiBody.body).toContain("plugin_version:");
+        expect(firstApiBody.body).toContain("<!-- crew:verdict:");
+        // (AC4 4b): footer marker is absolute last line
+        const footerMarker = `<!-- crew:verdict:${SMOKE_PLUGIN_VERSION}:${SMOKE_STORY_REF} -->`;
+        expect(firstApiBody.body.split("\n").at(-1)).toBe(footerMarker);
+        // (5b): verdict is in body (not necessarily last line after Story 4.7)
+        expect(firstApiBody.body).toContain("**Verdict: NEEDS CHANGES** [1 issues, 0 questions]");
         // (5b): comments array has length 1 (failing artifact in diff)
-        expect(apiBody.comments).toHaveLength(1);
+        expect(firstApiBody.comments).toHaveLength(1);
         // (5b): Inline comment body contains target-file.txt and ENOENT
-        const inlineComment = apiBody.comments[0];
+        const inlineComment = firstApiBody.comments[0];
         expect(inlineComment.body).toContain(SMOKE_ARTIFACT_PATH);
         expect(inlineComment.body).toContain("ENOENT");
         // (5b): event is COMMENT
-        expect(apiBody.event).toBe("COMMENT");
+        expect(firstApiBody.event).toBe("COMMENT");
+        // -----------------------------------------------------------------------
+        // Step 3b: Second postReviewerComments — rerun scenario (AC4 Story 4.7)
+        // GET returns prior verdict with footer marker → PATCH, not POST
+        // -----------------------------------------------------------------------
+        const priorBody = firstApiBody.body; // body from first run (has footer marker)
+        let capturedPatchInput;
+        const secondPostStub = makeGhExecaStub({
+            prDiff: { stdout: FAKE_PR_DIFF_WITH_ARTIFACT },
+            apiRoutes: [
+                {
+                    url: reviewsUrl,
+                    method: "GET",
+                    response: {
+                        stdout: JSON.stringify([{ id: 1001, body: priorBody }]),
+                        exitCode: 0,
+                    },
+                },
+                {
+                    url: new RegExp(`${reviewsUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/1001$`),
+                    method: "PATCH",
+                    response: { stdout: JSON.stringify({ id: 1001 }), exitCode: 0 },
+                    onCall: (input) => { capturedPatchInput = input; },
+                },
+            ],
+        });
+        const secondPostResult = await postReviewerComments({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            execaImpl: secondPostStub,
+            pluginRootOverride: pluginRoot,
+            pluginVersionOverride: SMOKE_PLUGIN_VERSION,
+        });
+        // (AC4 4a): second run: PATCH path taken, not POST
+        expect(secondPostResult.next).toBe("posted");
+        if (secondPostResult.next !== "posted")
+            return;
+        expect(secondPostResult.wasEdit).toBe(true);
+        expect(secondPostResult.priorReviewId).toBe(1001);
+        expect(secondPostResult.inlineCommentCount).toBeNull();
+        // (AC4 4b): PATCH body also contains version tokens and footer marker
+        expect(capturedPatchInput).toBeDefined();
+        const patchPayload = JSON.parse(capturedPatchInput);
+        expect(patchPayload.body).toContain("standards_version:");
+        expect(patchPayload.body).toContain("plugin_version:");
+        expect(patchPayload.body.split("\n").at(-1)).toBe(footerMarker);
+        const secondRunApiCalls = vi.mocked(secondPostStub).mock.calls;
+        const secondRunPostCalls = secondRunApiCalls.filter(([cmd, args]) => cmd === "gh" && args?.[0] === "api" && args?.includes("POST"));
+        expect(secondRunPostCalls).toHaveLength(0); // no POST on second run
+        const secondRunPatchCalls = secondRunApiCalls.filter(([cmd, args]) => cmd === "gh" && args?.[0] === "api" && args?.includes("PATCH"));
+        expect(secondRunPatchCalls).toHaveLength(1);
         // -----------------------------------------------------------------------
         // Step 4: processReviewerTranscript — reads same file, stamps manifest
         // (spec §5c: manifest stays in in-progress/ with blocked_by)

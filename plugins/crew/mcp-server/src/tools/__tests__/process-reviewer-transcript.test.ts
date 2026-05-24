@@ -83,6 +83,7 @@ function makeReviewerResultFile(
     standardsByCriterionId: {},
     sourceStoryRef: STORY_REF,
     prNumber: 42,
+    standardsVersion: "1.2.3",
   };
 }
 

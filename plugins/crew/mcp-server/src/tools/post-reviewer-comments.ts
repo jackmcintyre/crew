@@ -32,6 +32,7 @@ import { execa as defaultExeca } from "execa";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { gh } from "../lib/gh.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
+import { getPluginVersion } from "../lib/plugin-version.js";
 import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
 import { composeSummaryBody } from "../lib/compose-reviewer-summary.js";
 import { findHunkLineForPath } from "../lib/find-hunk-line.js";
@@ -49,11 +50,19 @@ export type PostReviewerCommentsResult =
       postedReviewId: null;
     }
   | {
-      /** Review successfully posted to GitHub. */
+      /** Review successfully posted (first run) or PATCH-edited in place (rerun). */
       next: "posted";
       postedReviewId: number;
-      inlineCommentCount: number;
+      /**
+       * Number of inline comments submitted on POST. `null` on PATCH path —
+       * signals "unknown / unchanged from prior pass", not zero.
+       */
+      inlineCommentCount: number | null;
       verdictLine: string;
+      /** True when the prior verdict was PATCH-edited in place; false on first POST. */
+      wasEdit: boolean;
+      /** ID of the prior verdict review that was PATCH-edited. null on POST path. */
+      priorReviewId: number | null;
     };
 
 export interface PostReviewerCommentsOptions {
@@ -64,6 +73,11 @@ export interface PostReviewerCommentsOptions {
   execaImpl?: typeof defaultExeca;
   /** Plugin root override — test seam for loadRolePermissions. */
   pluginRootOverride?: string;
+  /**
+   * Test seam for the plugin version string. Uses `getPluginVersion()` when absent.
+   * Named with `Override` suffix per project conventions (cf. `pluginRootOverride`).
+   */
+  pluginVersionOverride?: string;
 }
 
 interface InlineComment {
@@ -76,16 +90,36 @@ interface InlineComment {
 // Implementation
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Escape special regex characters in a string so it can be used as a literal
+ * match in a `new RegExp(...)` constructor.
+ */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ---------------------------------------------------------------------------
+// Main entry
+// ---------------------------------------------------------------------------
+
 /**
  * Post the reviewer's verdict as a PR review with inline comments and a
  * summary body. Reads `reviewer-result.json` and composes everything
  * deterministically — no LLM step in the composition path.
+ *
+ * On rerun: GETs existing reviews, searches for a prior verdict footer marker,
+ * and PATCH-edits the prior review body in place instead of posting a duplicate.
  *
  * @param opts.targetRepoRoot - Absolute path to the target repository root.
  * @param opts.sessionUlid - ULID of the calling reviewer session.
  * @param opts.role - Role name for gh permission lookup (default: "generalist-reviewer").
  * @param opts.execaImpl - Test seam for execa.
  * @param opts.pluginRootOverride - Test seam for plugin root path.
+ * @param opts.pluginVersionOverride - Test seam for plugin version string.
  */
 export async function postReviewerComments(
   opts: PostReviewerCommentsOptions,
@@ -93,6 +127,7 @@ export async function postReviewerComments(
   const role = opts.role ?? "generalist-reviewer";
   const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();
   const execaImpl = opts.execaImpl ?? defaultExeca;
+  const pluginVersion = opts.pluginVersionOverride ?? getPluginVersion();
 
   // Step 1: Read the persisted reviewer-result.json file.
   const resultFile = await readReviewerResultFile(opts.targetRepoRoot, opts.sessionUlid);
@@ -140,7 +175,46 @@ export async function postReviewerComments(
     throw new GhApiResponseShapeError({ subcommand: "pr-view", cause });
   }
 
-  // Step 4: Generate inline comments for failing runnable-artifact-check ACs.
+  const reviewsApiUrl = `/repos/${owner}/${repo}/pulls/${resultFile.prNumber}/reviews`;
+
+  // Step 4a: GET existing reviews and search for a prior verdict footer marker.
+  const getReviewsResult = await gh({
+    role,
+    permissions,
+    subcommand: "api",
+    args: [reviewsApiUrl, "--method", "GET"],
+    execaImpl,
+    pluginRootOverride: pluginRoot,
+  });
+
+  let priorReviewId: number | null = null;
+  try {
+    const reviewsRaw = JSON.parse(getReviewsResult.stdout) as unknown;
+    if (!Array.isArray(reviewsRaw)) {
+      throw new Error(`expected array, got ${typeof reviewsRaw}`);
+    }
+    // Search for the first review whose body is a non-null string and matches the footer marker.
+    // Reviews with body === null (Copilot, plain approvals) are skipped — not errors.
+    const footerPattern = new RegExp(
+      "<!-- crew:verdict:[^:]+:" + escapeRegex(resultFile.ref) + " -->",
+    );
+    for (const review of reviewsRaw as Array<{ id: unknown; body: unknown }>) {
+      if (typeof review.body !== "string" || review.body === null) {
+        continue; // skip null-bodied reviews
+      }
+      if (footerPattern.test(review.body)) {
+        if (typeof review.id !== "number") {
+          throw new Error(`review.id is not a number: ${JSON.stringify(review.id)}`);
+        }
+        priorReviewId = review.id;
+        break;
+      }
+    }
+  } catch (cause) {
+    throw new GhApiResponseShapeError({ subcommand: "api", url: reviewsApiUrl, cause });
+  }
+
+  // Step 5: Generate inline comments for failing runnable-artifact-check ACs.
   const inlineComments: InlineComment[] = [];
 
   const acEntries = Object.entries(resultFile.acResults)
@@ -163,15 +237,55 @@ export async function postReviewerComments(
     }
   }
 
-  // Step 5: Compose the summary body.
-  const summaryBody = composeSummaryBody(resultFile);
+  // Step 6: Compose the summary body with version block and footer marker.
+  const summaryBody = composeSummaryBody(resultFile, {
+    standardsVersion: resultFile.standardsVersion,
+    pluginVersion,
+  });
 
-  // Extract the verdict line (the last non-empty line of the body).
+  // Extract the verdict line (find the line matching the verdict sentinel pattern).
   const bodyLines = summaryBody.split("\n");
   const verdictLine =
-    [...bodyLines].reverse().find((l) => l.trim().length > 0) ?? "";
+    bodyLines.find((l) => l.startsWith("**Verdict:")) ?? "";
 
-  // Step 6: Build the gh api request body.
+  // Step 7: PATCH existing review or POST a new one.
+  if (priorReviewId !== null) {
+    // PATCH path — edit prior verdict in place (no inline comments on PATCH).
+    const patchUrl = `${reviewsApiUrl}/${priorReviewId}`;
+    const patchPayloadJson = JSON.stringify({ body: summaryBody });
+
+    const patchResult = await gh({
+      role,
+      permissions,
+      subcommand: "api",
+      args: [patchUrl, "--method", "PATCH", "--input", "-"],
+      execaImpl,
+      pluginRootOverride: pluginRoot,
+      input: patchPayloadJson,
+    });
+
+    let patchedId: number;
+    try {
+      const parsed = JSON.parse(patchResult.stdout) as { id?: unknown };
+      if (typeof parsed.id !== "number") {
+        throw new Error(`response.id is not a number: ${JSON.stringify(parsed.id)}`);
+      }
+      patchedId = parsed.id;
+    } catch (cause) {
+      throw new GhApiResponseShapeError({ subcommand: "api", url: patchUrl, cause });
+    }
+
+    return {
+      next: "posted",
+      postedReviewId: patchedId,
+      inlineCommentCount: null, // PATCH does not update inline comments
+      verdictLine,
+      wasEdit: true,
+      priorReviewId,
+    };
+  }
+
+  // POST path — first run, no prior verdict found.
   const reviewPayload = {
     event: "COMMENT",
     body: summaryBody,
@@ -179,20 +293,17 @@ export async function postReviewerComments(
   };
 
   const reviewPayloadJson = JSON.stringify(reviewPayload);
-  const apiUrl = `/repos/${owner}/${repo}/pulls/${resultFile.prNumber}/reviews`;
 
-  // Step 7: POST the review via `gh api`.
   const apiResult = await gh({
     role,
     permissions,
     subcommand: "api",
-    args: [apiUrl, "--method", "POST", "--input", "-"],
+    args: [reviewsApiUrl, "--method", "POST", "--input", "-"],
     execaImpl,
     pluginRootOverride: pluginRoot,
     input: reviewPayloadJson,
   });
 
-  // Step 8: Parse the response and extract `id`.
   let postedReviewId: number;
   try {
     const parsed = JSON.parse(apiResult.stdout) as { id?: unknown };
@@ -201,14 +312,15 @@ export async function postReviewerComments(
     }
     postedReviewId = parsed.id;
   } catch (cause) {
-    throw new GhApiResponseShapeError({ subcommand: "api", url: apiUrl, cause });
+    throw new GhApiResponseShapeError({ subcommand: "api", url: reviewsApiUrl, cause });
   }
 
-  // Step 9: Return result.
   return {
     next: "posted",
     postedReviewId,
     inlineCommentCount: inlineComments.length,
     verdictLine,
+    wasEdit: false,
+    priorReviewId: null,
   };
 }

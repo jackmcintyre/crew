@@ -7,7 +7,7 @@
  * `postReviewerComments` tool (Story 4.6b) can call the same parser without
  * duplicating the null-on-ENOENT / throw-on-malformed behaviour.
  *
- * Story 4.6b Task 1.1
+ * Story 4.6b Task 1.1; extended Story 4.7 Task 1.2 to carry standardsVersion.
  */
 
 import { promises as fs } from "node:fs";
@@ -21,6 +21,9 @@ export type { ReviewerResultFileShape };
  * Read, parse, and validate the `reviewer-result.json` file written by
  * `runReviewerSession`. Returns `null` when the file is absent (ENOENT).
  * Throws `ReviewerResultFileMalformedError` on malformed JSON or unexpected shape.
+ *
+ * The `standardsVersion` field is optional with a default of `""` for backward
+ * compatibility with files produced by pre-4.7 plugin builds.
  *
  * @param targetRepoRoot - Absolute path to the target repository root.
  * @param sessionUlid - ULID of the calling session.
@@ -72,5 +75,12 @@ export async function readReviewerResultFile(
     });
   }
 
-  return parsed as ReviewerResultFileShape;
+  const asRecord = parsed as Record<string, unknown>;
+
+  // Backfill standardsVersion for pre-4.7 projection files that lack the field.
+  if (typeof asRecord["standardsVersion"] !== "string") {
+    asRecord["standardsVersion"] = "";
+  }
+
+  return asRecord as unknown as ReviewerResultFileShape;
 }

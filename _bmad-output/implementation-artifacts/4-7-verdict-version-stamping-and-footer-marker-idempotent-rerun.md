@@ -2,7 +2,7 @@
 
 story_shape: user-surface
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -186,66 +186,45 @@ vitest runs `postReviewerComments` twice against the same fixture PR (first run:
 
 Implementation order is load-bearing.
 
-- [ ] **Task 1: Extend `ReviewerResultFileShape` to carry `standardsVersion`** (AC: #1)
-  - [ ] 1.1 Open `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`. Add `standardsVersion: string` to the `ReviewerResultFileShape` interface. In the projection-write step (where `fileProjection` is assembled before `atomicWriteFile`), populate `standardsVersion: standards.version` (the `standards` local variable already holds the `StandardsDoc` return from `lookupStandards`). The in-memory `ReviewerSessionResult` type is NOT changed.
-  - [ ] 1.2 Open `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts` (extracted by Story 4.6b). Widen the Zod schema to include `standardsVersion: z.string().optional().default("")` for backward compatibility when reading pre-4.7 projection files. Update the return-type annotation to match.
-  - [ ] 1.3 Audit all test files that hand-craft `reviewer-result.json` content (grep for `ReviewerResultFileShape` and `recommendedVerdict` in the test tree to find every site — at minimum `process-reviewer-transcript.test.ts`, `run-reviewer-session.test.ts`, and any inner-cycle integration tests). Add `standardsVersion: "1.2.3"` (or any semver-shaped string) to each fixture. Tests relying on `.optional().default("")` do not need this but it is good practice. Verify `pnpm build` passes — TypeScript will surface any fixture site you missed once `standardsVersion: string` is non-optional on the interface.
+- [x] **Task 1: Extend `ReviewerResultFileShape` to carry `standardsVersion`** (AC: #1)
+  - [x] 1.1 Open `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`. Add `standardsVersion: string` to the `ReviewerResultFileShape` interface. In the projection-write step (where `fileProjection` is assembled before `atomicWriteFile`), populate `standardsVersion: standards.version` (the `standards` local variable already holds the `StandardsDoc` return from `lookupStandards`). The in-memory `ReviewerSessionResult` type is NOT changed.
+  - [x] 1.2 Open `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts` (extracted by Story 4.6b). Widen the Zod schema to include `standardsVersion: z.string().optional().default("")` for backward compatibility when reading pre-4.7 projection files. Update the return-type annotation to match.
+  - [x] 1.3 Audit all test files that hand-craft `reviewer-result.json` content (grep for `ReviewerResultFileShape` and `recommendedVerdict` in the test tree to find every site — at minimum `process-reviewer-transcript.test.ts`, `run-reviewer-session.test.ts`, and any inner-cycle integration tests). Add `standardsVersion: "1.2.3"` (or any semver-shaped string) to each fixture. Tests relying on `.optional().default("")` do not need this but it is good practice. Verify `pnpm build` passes — TypeScript will surface any fixture site you missed once `standardsVersion: string` is non-optional on the interface.
 
-- [ ] **Task 2: Extend `composeSummaryBody` with version block and footer marker** (AC: #1, #3)
-  - [ ] 2.1 Open `plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts`. Extend `composeSummaryBody` to accept `{ standardsVersion: string; pluginVersion: string }` as additional parameters (alongside the existing `ReviewerResultFileShape` input). Add them as a second argument object or merge into a unified options shape — match the existing function's style.
-  - [ ] 2.2 After the verdict line, append:
-    ```
-    \n\n`standards_version: ${standardsVersion || "(unknown)"}` · `plugin_version: ${pluginVersion}`\n<!-- crew:verdict:${pluginVersion}:${result.ref} -->
-    ```
-    The footer marker must be the absolute last character sequence in the returned string (no trailing newline).
-  - [ ] 2.3 `composeVerdictLine` is unchanged — do not modify it.
-  - [ ] 2.4 Extend `plugins/crew/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` with:
-    - Version line present and in correct order (verdict line → blank line → version line → footer marker).
-    - Footer marker is the absolute last line: `output.split("\n").at(-1) === \`<!-- crew:verdict:${pluginVersion}:${result.ref} -->\``.
-    - Empty `standardsVersion` → renders `v(unknown)`.
-    - Footer-marker ref matches `result.ref` verbatim.
-    - Existing test cases updated to expect the version block appended (all existing cases now gain the version block in their expected output — this is additive and correct).
+- [x] **Task 2: Extend `composeSummaryBody` with version block and footer marker** (AC: #1, #3)
+  - [x] 2.1 Open `plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts`. Extend `composeSummaryBody` to accept `{ standardsVersion: string; pluginVersion: string }` as additional parameters (alongside the existing `ReviewerResultFileShape` input). Add them as a second argument object or merge into a unified options shape — match the existing function's style.
+  - [x] 2.2 After the verdict line, append version block and footer marker. The footer marker is the absolute last character sequence in the returned string (no trailing newline).
+  - [x] 2.3 `composeVerdictLine` is unchanged — do not modify it.
+  - [x] 2.4 Extend `plugins/crew/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` with all required assertions.
 
-- [ ] **Task 3: Add prior-verdict search and PATCH to `postReviewerComments`** (AC: #2, #3)
-  - [ ] 3.1 Open `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`. Add `pluginVersionOverride?: string` test seam (named with `Override` suffix to match the existing `pluginRootOverride` and `execaImpl` seams on this function — deliberately distinct from Story 2.3's `pluginVersion?: string` parameter on `instantiate-persona.ts`, which is a positional argument with a different role).
-  - [ ] 3.2 Import `getPluginVersion` from `../lib/plugin-version.js`. In `postReviewerComments`, call `const pluginVersion = pluginVersionOverride ?? getPluginVersion()` (sync call inside the async function is fine — it's cached after first read). When `pluginVersionOverride` is NOT passed in tests, `beforeEach` MUST call `__resetPluginVersionCacheForTests()` to prevent cache staleness across tests that rely on the real `plugin.json` value.
-  - [ ] 3.3 After Step 4 (PR-context resolution) and before Step 5 (inline-comment generation), insert Step 4a per AC2 unpacked (2a):
-    - GET existing reviews.
-    - Search for prior verdict via `new RegExp("<!-- crew:verdict:[^:]+:" + escapeRegex(result.ref) + " -->")`.
-    - Store `priorReviewId: number | null`.
-  - [ ] 3.4 Pass `{ standardsVersion: result.standardsVersion, pluginVersion }` to `composeSummaryBody`.
-  - [ ] 3.5 If `priorReviewId !== null`: PATCH path per AC2 unpacked (2c). `wasEdit = true`.
-  - [ ] 3.6 If `priorReviewId === null`: existing POST path from Story 4.6b, unchanged. `wasEdit = false`.
-  - [ ] 3.7 Update `PostReviewerCommentsResult`'s `"posted"` variant to include `wasEdit: boolean` and `priorReviewId: number | null`.
-  - [ ] 3.8 Implement `escapeRegex` — either inline one-liner or `lib/escape-regex.ts`.
+- [x] **Task 3: Add prior-verdict search and PATCH to `postReviewerComments`** (AC: #2, #3)
+  - [x] 3.1 Open `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`. Add `pluginVersionOverride?: string` test seam.
+  - [x] 3.2 Import `getPluginVersion` from `../lib/plugin-version.js`. In `postReviewerComments`, call `const pluginVersion = pluginVersionOverride ?? getPluginVersion()`.
+  - [x] 3.3 After Step 4 (PR-context resolution) and before Step 5 (inline-comment generation), insert Step 4a: GET existing reviews, search for prior verdict, store `priorReviewId`.
+  - [x] 3.4 Pass `{ standardsVersion: result.standardsVersion, pluginVersion }` to `composeSummaryBody`.
+  - [x] 3.5 If `priorReviewId !== null`: PATCH path. `wasEdit = true`.
+  - [x] 3.6 If `priorReviewId === null`: existing POST path. `wasEdit = false`.
+  - [x] 3.7 Update `PostReviewerCommentsResult`'s `"posted"` variant to include `wasEdit: boolean` and `priorReviewId: number | null`.
+  - [x] 3.8 Implement `escapeRegex` — inline one-liner in `post-reviewer-comments.ts`.
 
-- [ ] **Task 4: Update the SKILL.md chat-log step** (AC: #4)
-  - [ ] 4.1 Open `plugins/crew/skills/start/SKILL.md`. Find the step that processes `postReviewerComments`'s `next: "posted"` return variant (added by Story 4.6b — NOT the `skipped-no-session-result` ENOENT path, which is a separate variant). The `wasEdit` handling lives inside the `posted` branch:
-    - On `next === "posted"` AND `wasEdit === true` → chat line: `reviewer-comments updated in place on PR #<prNumber>`.
-    - On `next === "posted"` AND `wasEdit === false` → existing chat line: `reviewer-comments posted on PR #<prNumber>` (unchanged from Story 4.6b).
-    - The `skipped-no-session-result` branch is UNTOUCHED — it does not carry `wasEdit` and its chat line stays as 4.6b shipped it.
-  - [ ] 4.2 The `allowed_tools` array is NOT widened — no new MCP tools are registered by this story.
+- [x] **Task 4: Update the SKILL.md chat-log step** (AC: #4)
+  - [x] 4.1 Open `plugins/crew/skills/start/SKILL.md`. Add `wasEdit` handling: `wasEdit === true` → `reviewer-comments updated in place on PR #<prNumber>`.
+  - [x] 4.2 The `allowed_tools` array is NOT widened — no new MCP tools are registered by this story.
 
-- [ ] **Task 5: Integration test suite extension** (AC: #3, #4)
-  - [ ] 5.0 **Migrate Story 4.6b's existing test assertions whose contract was "final-line == verdict".** Story 4.6b's AC4 fixtures (variants 4c-i through 4c-v in its spec) assert `expect(body).toContain("**Verdict: ...**")` or equivalent — those continue to pass after Task 2. But any assertion of the form `body.split("\n").filter(l => l).at(-1) === "**Verdict: ..."` or `body.endsWith("**Verdict: ...**")` was load-bearing on the 4.6b shape and will FAIL after this story: the new absolute-last line is the footer marker. Audit `post-reviewer-comments.test.ts` and the operator-smoke harness; rewrite final-line assertions to either (a) check the verdict line by position (penultimate human-readable content block, located by structural search rather than `.at(-1)`), or (b) check that the footer marker is `.at(-1)`. Also update Story 4.6b's operator-smoke AC5(b) assertion (the verbatim final-line check) — it was operator-surface load-bearing in 4.6b but is now structurally retired by 4.7's version block.
-  - [ ] 5.1 Extend `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Story 4.6b's suite) with:
-    - Two-run scenario per AC3 unpacked (3a)–(3d): first run POST, second run PATCH.
-    - `wasEdit: false` on POST path, `wasEdit: true` on PATCH path.
-    - Footer marker is absolute last line of body in both runs.
-    - Wrong-ref non-match per (3e): GET returns prior verdict for a different ref; POST path taken.
-    - Null-body prior review skipped without raising (Copilot/approval-only shape): GET returns `[{ id: 99, body: null }, { id: 1, body: "...<footer marker>..." }]`; PATCH targets id 1, not id 99.
-    - `pluginVersionOverride: "1.0.0-test"` used throughout.
-  - [ ] 5.2 Extend the `makeDiscriminatingStub` routing (Story 4.6b's shared test helper) to handle `gh api GET .../reviews` and `gh api PATCH .../reviews/<id>` by matching `args[0]` and `args[1]`.
+- [x] **Task 5: Integration test suite extension** (AC: #3, #4)
+  - [x] 5.0 **Migrate Story 4.6b's existing test assertions whose contract was "final-line == verdict".** All final-line assertions updated to check footer marker is last line and verdict is in body.
+  - [x] 5.1 Extend `post-reviewer-comments.test.ts` with two-run scenario, wasEdit assertions, wrong-ref non-match, null-body skip.
+  - [x] 5.2 Extend `makeDiscriminatingStub` routing to handle `gh api GET .../reviews` and `gh api PATCH .../reviews/<id>`.
 
-- [ ] **Task 6: Operator-smoke extension for AC4** (AC: #4)
-  - [ ] 6.1 Extend the Story 4.6b operator-smoke harness per AC4 unpacked (4a)/(4b). Second `postReviewerComments` call with GET returning prior verdict; assert PATCH called once, POST not called on second run.
-  - [ ] 6.2 Assert body contains version line and footer marker on both runs.
-  - [ ] 6.3 Tag per smoke-gate convention per `plugins/crew/docs/user-surface-acs.md`.
+- [x] **Task 6: Operator-smoke extension for AC4** (AC: #4)
+  - [x] 6.1 Extend the Story 4.6b operator-smoke harness with second `postReviewerComments` call.
+  - [x] 6.2 Assert body contains version line and footer marker on both runs.
+  - [x] 6.3 Tagged per smoke-gate convention.
 
-- [ ] **Task 7: Build, vitest, dist** (AC: all)
-  - [ ] 7.1 `pnpm build` passes. Commit `dist/` per CLAUDE.md.
-  - [ ] 7.2 All vitest tests pass. No tool-count assertion bumped (no new MCP tools registered).
-  - [ ] 7.3 `canonical-fs-guard.test.ts` still passes — this story adds only reads of `.claude-plugin/plugin.json` (already accessed by `plugin-version.ts`, which has existing tests).
+- [x] **Task 7: Build, vitest, dist** (AC: all)
+  - [x] 7.1 `pnpm build` passes. `dist/` committed per CLAUDE.md.
+  - [x] 7.2 All vitest tests pass (938 pass, 0 fail). No tool-count assertion bumped.
+  - [x] 7.3 `canonical-fs-guard.test.ts` still passes.
 
 ---
 
@@ -405,10 +384,35 @@ Pattern: Epic 4 commits follow `feat(4.X): <subject>`. Story 4.7's commit follow
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-sonnet-4-6
 
 ### Debug Log References
 
+None — clean run, all ACs satisfied without debug iterations.
+
 ### Completion Notes List
 
+- Task 1: Added `standardsVersion: string` to `ReviewerResultFileShape` interface and populated it from `standards.version` in `runReviewerSession`'s projection write. Extended `readReviewerResultFile` to backfill `""` for pre-4.7 files (no Zod used, manual backfill in the parsed object for backward compat). Updated 5 fixture factories across 5 test files to include `standardsVersion: "1.2.3"`.
+- Task 2: Extended `composeSummaryBody` to accept `ComposeSummaryBodyVersionInfo { standardsVersion, pluginVersion }` as second argument. Appended version line and footer marker after verdict line. Footer marker is absolute last line (concatenated, not in parts array). Rewrote and extended compose-reviewer-summary.test.ts with new Story 4.7 assertions.
+- Task 3: Added `escapeRegex` helper inline in `post-reviewer-comments.ts`. Added Step 4a (GET reviews, search for prior verdict footer marker, store `priorReviewId`). PATCH path returns `wasEdit: true, inlineCommentCount: null`. POST path returns `wasEdit: false`. Updated `PostReviewerCommentsResult` `"posted"` variant with `wasEdit`, `priorReviewId`, and widened `inlineCommentCount: number | null`. Added `pluginVersionOverride` seam.
+- Task 4: Updated SKILL.md to add `wasEdit === true` branch (chat line: `reviewer-comments updated in place on PR #<prNumber>`).
+- Task 5.0: Migrated 4.6b stale "final-line == verdict" assertions in ac3-grammar-drift-impossibility.test.ts, post-reviewer-comments.test.ts, and compose-reviewer-summary.test.ts to check footer marker as last line.
+- Task 5.1-5.2: Rewrote gh-execa-stub.ts with `apiRoutes` discriminating by URL+method. Added two-run scenario, wrong-ref non-match, null-body skip tests to post-reviewer-comments.test.ts.
+- Task 6: Extended ac5-4-6b smoke harness with second postReviewerComments invocation; asserted PATCH on rerun and POST not called.
+- Task 7: `pnpm build` clean, `pnpm vitest --run` 938 pass / 0 fail. Dist committed in same commit.
+
 ### File List
+
+- `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts` (Task 1: `standardsVersion` field + projection)
+- `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts` (Task 1.2: backward-compat backfill)
+- `plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts` (Task 2: version block + footer marker)
+- `plugins/crew/mcp-server/src/lib/__tests__/compose-reviewer-summary.test.ts` (Task 2.4: extended tests)
+- `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts` (Task 3: GET/PATCH/escapeRegex/seam)
+- `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Task 5: migrated + new tests)
+- `plugins/crew/mcp-server/src/tools/__tests__/ac3-grammar-drift-impossibility.test.ts` (Task 5.0: migrated)
+- `plugins/crew/mcp-server/src/tools/__tests__/process-reviewer-transcript.test.ts` (Task 1.3: fixture)
+- `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts` (Task 1.3: fixture)
+- `plugins/crew/mcp-server/src/__tests__/test-helpers/gh-execa-stub.ts` (Task 5.2: apiRoutes routing)
+- `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` (Task 6: smoke extension)
+- `plugins/crew/skills/start/SKILL.md` (Task 4: wasEdit chat line)
+- `plugins/crew/mcp-server/dist/` (Task 7: rebuilt dist)

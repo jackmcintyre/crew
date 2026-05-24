@@ -89,7 +89,8 @@ After a story is claimed, the inner cycle manages the dev spawn → handoff pars
 
 9a. invoke postReviewerComments({ targetRepoRoot, sessionUlid }). This tool reads `reviewer-result.json` and posts a PR review with a deterministic summary body and inline comments via `gh api`. Switch on the `next` field:
    - `skipped-no-session-result` → log the chat line `post-reviewer-comments skipped — no reviewer-result.json (the missing-file case will be handled by processReviewerTranscript next)` and proceed to step 10.
-   - `posted` → log a chat line `posted PR review ${postedReviewId} — ${inlineCommentCount} inline comment(s), verdict: ${verdictLine}` and proceed to step 10.
+   - `posted` AND `wasEdit === true` → log a chat line `reviewer-comments updated in place on PR #${prNumber}` and proceed to step 10.
+   - `posted` AND `wasEdit === false` → log a chat line `posted PR review ${postedReviewId} — ${inlineCommentCount} inline comment(s), verdict: ${verdictLine}` and proceed to step 10.
    - If `postReviewerComments` throws (`GhRecoverableError`, `GhApiResponseShapeError`, `ReviewerResultFileMalformedError`, or any other error): surface the error verbatim and halt the inner cycle. Do NOT proceed to step 10.
 
 10. invoke processReviewerTranscript({ targetRepoRoot, sessionUlid, ref, manifestPath }). The tool reads `reviewer-result.json` and switches on its `recommendedVerdict` field to drive all manifest mutations.

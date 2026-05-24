@@ -33,11 +33,19 @@ export type PostReviewerCommentsResult = {
     next: "skipped-no-session-result";
     postedReviewId: null;
 } | {
-    /** Review successfully posted to GitHub. */
+    /** Review successfully posted (first run) or PATCH-edited in place (rerun). */
     next: "posted";
     postedReviewId: number;
-    inlineCommentCount: number;
+    /**
+     * Number of inline comments submitted on POST. `null` on PATCH path —
+     * signals "unknown / unchanged from prior pass", not zero.
+     */
+    inlineCommentCount: number | null;
     verdictLine: string;
+    /** True when the prior verdict was PATCH-edited in place; false on first POST. */
+    wasEdit: boolean;
+    /** ID of the prior verdict review that was PATCH-edited. null on POST path. */
+    priorReviewId: number | null;
 };
 export interface PostReviewerCommentsOptions {
     targetRepoRoot: string;
@@ -47,16 +55,25 @@ export interface PostReviewerCommentsOptions {
     execaImpl?: typeof defaultExeca;
     /** Plugin root override — test seam for loadRolePermissions. */
     pluginRootOverride?: string;
+    /**
+     * Test seam for the plugin version string. Uses `getPluginVersion()` when absent.
+     * Named with `Override` suffix per project conventions (cf. `pluginRootOverride`).
+     */
+    pluginVersionOverride?: string;
 }
 /**
  * Post the reviewer's verdict as a PR review with inline comments and a
  * summary body. Reads `reviewer-result.json` and composes everything
  * deterministically — no LLM step in the composition path.
  *
+ * On rerun: GETs existing reviews, searches for a prior verdict footer marker,
+ * and PATCH-edits the prior review body in place instead of posting a duplicate.
+ *
  * @param opts.targetRepoRoot - Absolute path to the target repository root.
  * @param opts.sessionUlid - ULID of the calling reviewer session.
  * @param opts.role - Role name for gh permission lookup (default: "generalist-reviewer").
  * @param opts.execaImpl - Test seam for execa.
  * @param opts.pluginRootOverride - Test seam for plugin root path.
+ * @param opts.pluginVersionOverride - Test seam for plugin version string.
  */
 export declare function postReviewerComments(opts: PostReviewerCommentsOptions): Promise<PostReviewerCommentsResult>;
