@@ -217,11 +217,20 @@ describe("BmadAdapter.readSourceStory()", () => {
     );
   });
 
-  it("throws MalformedBmadStoryError for the unknown-status fixture", async () => {
+  it("does NOT throw for the unknown-status fixture — Story 3.8 AC3 leniency", async () => {
+    // Story 3.8 changed the unknown-status branch from throw → return SourceStory
+    // with raw_frontmatter.status_unknown set. The scan-sources loop routes to
+    // blocked/ rather than halting the whole scan.
     configureMalformed();
-    await expect(BmadAdapter.readSourceStory("bmad:2.6")).rejects.toBeInstanceOf(
-      MalformedBmadStoryError,
-    );
+    const story = await BmadAdapter.readSourceStory("bmad:2.6");
+    expect(story.ref).toBe("bmad:2.6");
+    const statusUnknown = story.raw_frontmatter["status_unknown"] as {
+      raw: string;
+      reason: string;
+    };
+    expect(statusUnknown).toBeDefined();
+    expect(statusUnknown.raw).toBe("bogus-status");
+    expect(statusUnknown.reason).toBe("status-vocabulary-unknown");
   });
 });
 

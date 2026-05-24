@@ -126,6 +126,68 @@ BMad has no real frontmatter; the adapter synthesises:
 The `bmad:`-prefixed form lives in `ref`. Additional fields are not
 populated.
 
+## Leniency rules (Story 3.8)
+
+Story 3.8 widened the BMad adapter to handle deviations that accumulate in
+organic BMad backlogs. These rules apply to the parser and `scan-sources`
+loop; the canonical BMad spec shape (H1 contract, `## Acceptance Criteria`
+heading, AC heading shape, `Dependencies` parsing) is unchanged.
+
+### (a) Letter-suffixed story IDs are accepted
+
+Files like `4-8b-...md` and `5-4b-...md` are parsed successfully. The
+returned `SourceStory.ref` preserves the letter suffix (e.g. `bmad:4.8b`),
+and `raw_frontmatter.id` is `"4.8b"`. Manifests downstream key off the
+suffixed ref so `bmad:4.8b` and `bmad:4.8` never collide.
+
+The accepted suffix shape is one lowercase letter (`[a-z]?`) immediately
+following the story number. Wider patterns (multi-letter, alphanumeric)
+are deferred to a later story.
+
+### (b) Missing `Status:` defaults to `backlog`
+
+If no `Status:` line appears between the H1 and the first `##` section
+heading, the parser sets `status = "backlog"` and marks
+`raw_frontmatter.status_defaulted = true`. The story flows to `to-do/` as
+normal. No error is thrown.
+
+### (c) Unknown `Status:` values produce a blocked manifest, not a hard error
+
+If `Status:` is present but its value is not in the known BMad vocabulary
+(`backlog`, `ready-for-dev`, `in-progress`, `done`, `optional`, `contexted`),
+the parser does **not** throw. Instead it:
+
+1. Sets `raw_frontmatter.status_unknown = { raw: "<value>", reason: "status-vocabulary-unknown" }`.
+2. Uses `"backlog"` as the effective execution-mapped status.
+
+The `scan-sources` loop detects `status_unknown` and:
+
+1. Writes the manifest to `.crew/state/blocked/<ref>.yaml` with
+   `blocked_by: "status-vocabulary-unknown"`.
+2. Appends a structured warning to `ScanResult.warnings` naming the file path
+   and the unrecognised value.
+3. Continues the scan — it does **not** halt on the first bad file.
+
+To fix: edit the spec's `Status:` line to one of the known values, or remove
+the line entirely (it then defaults to `backlog`), and re-run `/crew:scan`.
+
+### (d) Non-conforming filenames in the stories directory are silently skipped
+
+Files whose names do not match the BMad story-spec pattern (e.g.
+`epic-1-retro-2026-05-20.md`, `sprint-status.yaml`, `index.md`) are silently
+skipped — no warning emitted, no error thrown, no manifest written. Retros
+and bookkeeping files legitimately live in the same directory.
+
+The filename pattern (after Story 3.8) is:
+`/^\d+-\d+[a-z]?-[a-z0-9-]+\.md$/`
+
+### Cross-reference
+
+Leniency rules introduced in
+`_bmad-output/implementation-artifacts/3-8-bmad-adapter-real-world-leniency.md`.
+The integration fixture exercising all four rules lives at
+`plugins/crew/mcp-server/src/adapters/bmad/fixtures/sample-real-world-repo/`.
+
 ## Disagreements with Story 3.3 tasks
 
 None at spike time. If the dev finds disagreements during

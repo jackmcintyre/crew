@@ -1,5 +1,5 @@
 generated: 2026-05-19
-last_updated: '2026-05-24'
+last_updated: '2026-05-25'
 project: crew
 project_key: NOKEY
 tracking_system: file-system
@@ -39,7 +39,7 @@ development_status:
   3-5-planning-discipline-validation-at-authoring-and-scan-time: done
   3-6-re-open-planning-mid-cycle-and-discard-a-feature-flow: done
   3-7-plain-language-guideline-and-direct-edit-allowance: done
-  3-8-bmad-adapter-real-world-leniency: backlog
+  3-8-bmad-adapter-real-world-leniency: done
   epic-3-retrospective: done
   epic-4: backlog
   4-1-claim-story-dependency-check-and-complete-story-mcp-tools: done

@@ -12,17 +12,21 @@ import { mapBmadStatusToExecution } from "./map-bmad-status.js";
  */
 export function parseBmadStory(absPath, fileContents) {
     const filename = path.basename(absPath);
-    const filenameMatch = /^(\d+)-(\d+)-([a-z0-9-]+)\.md$/.exec(filename);
+    // Story 3.8 Task 1.2: optional [a-z] captures letter suffix (e.g. "b" in "4-8b-...").
+    // Group 1=epic, Group 2=story-number, Group 3=optional-suffix, Group 4=slug.
+    const filenameMatch = /^(\d+)-(\d+)([a-z]?)-([a-z0-9-]+)\.md$/.exec(filename);
     if (!filenameMatch) {
         throw new MalformedBmadStoryError({
             path: absPath,
-            reason: `filename '${filename}' does not match <epic>-<story>-<slug>.md`,
+            reason: `filename '${filename}' does not match <epic>-<story>[<letter>]-<slug>.md`,
             details: { filename },
         });
     }
     const epicFromName = filenameMatch[1];
-    const storyFromName = filenameMatch[2];
-    const slug = filenameMatch[3];
+    // Story 3.8 Task 1.3: combine story-number + optional letter suffix
+    // (e.g. "8" + "b" → "8b"; epic is added later to form the full ref).
+    const storyFromName = filenameMatch[2] + (filenameMatch[3] ?? "");
+    const slug = filenameMatch[4];
     // Strip a leading BOM if present, normalise CRLF -> LF.
     const text = fileContents.replace(/^﻿/, "").replace(/\r\n/g, "\n");
     const lines = text.split("\n");
@@ -35,11 +39,12 @@ export function parseBmadStory(absPath, fileContents) {
         });
     }
     const h1Line = lines[h1Idx];
-    const h1Match = /^#\s+Story\s+(\d+)\.(\d+)\s*:\s*(.+?)\s*$/.exec(h1Line);
+    // Story 3.8 Task 1.4: H1 regex tolerates a letter suffix on the story number.
+    const h1Match = /^#\s+Story\s+(\d+)\.(\d+[a-z]?)\s*:\s*(.+?)\s*$/.exec(h1Line);
     if (!h1Match) {
         throw new MalformedBmadStoryError({
             path: absPath,
-            reason: `H1 '${h1Line}' does not match '# Story <epic>.<story>: <title>'`,
+            reason: `H1 '${h1Line}' does not match '# Story <epic>.<story>[<letter>]: <title>'`,
             details: { h1: h1Line },
         });
     }
@@ -71,21 +76,24 @@ export function parseBmadStory(absPath, fileContents) {
         if (/^##\s/.test(lines[i]))
             break;
     }
+    // Story 3.8 Task 2.1: missing Status defaults to "backlog" instead of throwing.
+    let statusDefaulted;
+    let statusUnknown;
     if (statusValue === undefined) {
-        throw new MalformedBmadStoryError({
-            path: absPath,
-            reason: "no 'Status: <value>' line found between H1 and the first section heading",
-        });
+        statusValue = "backlog";
+        statusDefaulted = true;
     }
-    // Validate against the known vocabulary. mapBmadStatusToExecution
-    // returns null only when we want the caller to skip; an unknown
-    // string returns undefined to signal "throw".
-    if (!isKnownBmadStatus(statusValue)) {
-        throw new MalformedBmadStoryError({
-            path: absPath,
-            reason: `unknown Status value '${statusValue}'`,
-            details: { status: statusValue },
-        });
+    else if (!isKnownBmadStatus(statusValue)) {
+        // Story 3.8 Task 3.1: unknown Status — return a valid SourceStory with
+        // status_unknown attached. The scan-sources loop routes to blocked/ (not
+        // the parser). Do NOT throw here — the parser surfaces facts; routing is
+        // the caller's responsibility (Story 3.5 pattern).
+        const rawValue = statusValue;
+        statusUnknown = { raw: rawValue, reason: "status-vocabulary-unknown" };
+        // Use "backlog" for execution-mapping purposes so downstream helpers don't
+        // hit an unknown value. The caller must check status_unknown and NOT trust
+        // the execution-mapped status for routing decisions.
+        statusValue = "backlog";
     }
     // Split into top-level sections keyed by `## <name>` headings.
     const sections = splitTopLevelSections(lines, h1Idx + 1);
@@ -131,9 +139,14 @@ export function parseBmadStory(absPath, fileContents) {
     const raw_frontmatter = {
         status: statusValue,
         title,
+        // Story 3.8 Tasks 1.5-1.6: id and ref preserve the letter suffix.
         id: `${epicFromName}.${storyFromName}`,
         filename_slug: slug,
         ...(shipGate !== undefined ? { ship_gate: shipGate } : {}),
+        // Story 3.8 Task 2.2: flag when Status was absent and defaulted.
+        ...(statusDefaulted === true ? { status_defaulted: true } : {}),
+        // Story 3.8 Task 3.1: flag when Status was present but unrecognised.
+        ...(statusUnknown !== undefined ? { status_unknown: statusUnknown } : {}),
     };
     const source_hash = createHash("sha256").update(fileContents).digest("hex");
     return {
