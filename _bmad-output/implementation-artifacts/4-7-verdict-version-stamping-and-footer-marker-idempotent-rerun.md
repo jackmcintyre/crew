@@ -6,6 +6,24 @@ Status: ready-for-dev
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
+<!-- Revision 2 (2026-05-24): post-merge code-review amendment.
+  Six defects flagged by high-effort review after PR #111 merged:
+  (1) AC1 vs Task 2.2 contradiction — body format unified to embed literal
+      `standards_version` and `plugin_version` tokens per AC1.
+  (2) Date-style examples violated StandardsDocSchema semver constraint —
+      all examples now use `1.2.3`-style versions.
+  (3) Story 4.6b's "final-line == verdict" invariant inversion not addressed —
+      added Task 5.0 to migrate 4.6b's affected assertions.
+  (4) GET-reviews parse breaks on null-bodied prior reviews (Copilot, plain
+      approvals) — schema now accepts `body: string | null` and search skips nulls.
+  (5) Stale inline-comments on rework — flagged as deferred work in § DOES NOT (m).
+  (6) Broad `gh api` permission from 4.6b is a negative-capability hole that
+      Story 4.8 must narrow — flagged in § DOES NOT (n).
+  Plus minor: Task 1.3 audit-all-test-files instruction; `wasEdit` SKILL.md
+  branch clarified; `inlineCommentCount` widened to `number | null` on PATCH;
+  `__resetPluginVersionCacheForTests()` required in tests not using override. -->
+
+
 ## Story
 
 As a **plugin operator reading a verdict weeks later**,
@@ -44,6 +62,8 @@ The footer marker `<!-- crew:verdict:<plugin-version>:<ref> -->` is an HTML comm
 - (j) Change the `ReviewerSessionResult` in-memory type from Story 4.6. Only the persisted `reviewer-result.json` projection gains `standardsVersion`; the in-memory type is unchanged.
 - (k) Touch `processReviewerTranscript`, `claimStory`, `completeStory`, or any state-machine primitive.
 - (l) Create a new `getPluginVersion` helper. `lib/plugin-version.ts` already exports `getPluginVersion()` (sync, cached) and its JSDoc already cites Story 4.7 as a caller. Use it directly.
+- (m) **Reconcile stale inline comments on rework.** PATCH cannot update inline comments (GitHub API limitation). When a rework cycle FIXES a previously-failing artifact-check, the original `AC<n> FAIL — ENOENT` inline comment persists on the diff line while the new summary body says `AC<n> ✅`. This is a real user-surface trust regression on Story 4.6b's AC1 contract (inline comments reflect verdict). v1 of this story does not solve it — the rationale (line ~277 in § Implementation strategy) downgrades it to "cosmetic" but that is a deferred call, not a designed-around solution. Follow-up story should either (a) resolve stale inline comments on rework via `gh api PATCH /repos/.../pulls/comments/<id>` with body annotation or `gh api DELETE`, (b) hide-then-re-post the review on rework, or (c) explicitly retire Story 4.6b's inline-comment promise. Out of scope here; surfaced as deferred work.
+- (n) **Narrow `gh_allow` for `api`.** Story 4.6b added bare `- api` with no `gh_allow_args` constraint. The reviewer can call `gh api` with any URL and any `--method`. Story 4.7's GET+PATCH usage widens the practical surface. **This is a negative-capability hole that Story 4.8 (next in epic; enforces "reviewer never merges/closes/pushes") MUST narrow** — e.g. via `gh_allow_args["api"]` restricting URLs to `/repos/<owner>/<repo>/pulls/<n>/reviews(/<id>)?` and methods to GET/POST/PATCH. v1 of this story does not narrow; defer to 4.8 implementer, who needs to know `api` is currently unconstrained.
 
 ---
 
@@ -75,7 +95,7 @@ vitest runs `postReviewerComments` twice against the same fixture PR (first run:
 **When** the operator runs `/crew:start` again for the same story and the inner cycle invokes `postReviewerComments`,
 **Then** the operator observes:
 - (a) **Exactly one verdict comment** on the PR after the second run — the prior comment was edited in place, not duplicated. Running `gh pr view <prNumber> --comments` shows one reviewer comment, not two.
-- (b) **Version information visible** in the comment body: the human-readable version line (e.g. `_Reviewed by crew v0.1.0 using standards v2026-05-24._`) is present.
+- (b) **Version information visible** in the comment body: the literal tokens `standards_version:` and `plugin_version:` appear in the body (e.g. `` `standards_version: 1.2.3` · `plugin_version: 0.1.0` ``).
 - (c) **The footer marker** `<!-- crew:verdict:` appears at the end of the comment body (inspectable via raw GitHub view or `gh api`).
 
 <!-- User-surface: AC4 references `/crew:start` (slash command) and the PR surface observable via `gh pr view --comments`. -->
@@ -88,39 +108,40 @@ vitest runs `postReviewerComments` twice against the same fixture PR (first run:
 
 - (1b) **`plugin_version` source:** use the existing `getPluginVersion()` from `plugins/crew/mcp-server/src/lib/plugin-version.ts`. It is sync, load-once cached, reads from `.claude-plugin/plugin.json`. No new helper is needed. Call it inside `postReviewerComments` with no arguments (it resolves the plugin root itself via `fileURLToPath`).
 
-- (1c) **Version block placement in the summary body:** `composeSummaryBody` is extended to accept `{ standardsVersion: string, pluginVersion: string }` as additional parameters (alongside the existing `ReviewerResultFileShape` input). The version block is appended to the body AFTER the verdict line:
+- (1c) **Version block placement in the summary body:** `composeSummaryBody` is extended to accept `{ standardsVersion: string, pluginVersion: string }` as additional parameters (alongside the existing `ReviewerResultFileShape` input). The version block is appended to the body AFTER the verdict line. The body format embeds the literal tokens `standards_version` and `plugin_version` (verbatim from AC1, which is verbatim from epic):
   ```
   **Verdict: READY FOR MERGE**
 
-  _Reviewed by crew v<pluginVersion> using standards v<standardsVersion>._
+  `standards_version: <standardsVersion>` · `plugin_version: <pluginVersion>`
   <!-- crew:verdict:<pluginVersion>:<ref> -->
   ```
-  The `ref` value comes from `result.ref` in the file shape. The HTML comment `<!-- crew:verdict:... -->` is invisible in rendered GitHub markdown; it is the absolute last line of the body string (no trailing newline after it). The human-readable version line is one blank line below the verdict line for visual breathing room.
+  The `ref` value comes from `result.ref` in the file shape. The HTML comment `<!-- crew:verdict:... -->` is invisible in rendered GitHub markdown; it is the absolute last line of the body string (no trailing newline after it). The version line is one blank line below the verdict line for visual breathing room. The backtick code-spans make the field names visually distinct and greppable in raw markdown.
 
 - (1d) **Footer-marker format (verbatim):** `<!-- crew:verdict:<pluginVersion>:<ref> -->`. Single space after `<!--` and before `-->`. The `<ref>` component is the story ref embedded literally (e.g. `native:01HZ-fixture-story`, `bmad:PROJ-123`). If the ref contains special characters they are included verbatim — the marker is an HTML comment and needs no encoding.
 
 - (1e) **`composeVerdictLine` is unchanged:** the function still returns exactly one of the three sentinel-form strings from Story 4.6b. The version block and footer marker are appended by `composeSummaryBody` AFTER calling `composeVerdictLine`. The `composeVerdictLine` signature and return type do not change.
 
 - (1f) **Unit test extensions for `composeSummaryBody`:** Story 4.6b's existing test suite is extended with cases asserting (using exact-string assertions on the output):
-  - The version line `_Reviewed by crew v<pluginVersion> using standards v<standardsVersion>._` appears verbatim.
+  - The version line `` `standards_version: <standardsVersion>` · `plugin_version: <pluginVersion>` `` appears verbatim (exact-string match including backticks and the middle-dot separator `·`).
+  - The literal tokens `standards_version` and `plugin_version` appear in the body (deterministic content-structure check — directly satisfies AC1).
   - The footer marker `<!-- crew:verdict:<pluginVersion>:<ref> -->` is the absolute last line of the body (`body.split("\n").at(-1) === marker`).
   - The verdict line immediately precedes the version block (order assertion: verdict line position < version line position < footer marker position).
-  - When `standardsVersion` is `""` (file produced by pre-4.7 build, `.optional().default("")` in effect): the version line renders `_Reviewed by crew v<pluginVersion> using standards v(unknown)._`.
+  - When `standardsVersion` is `""` (file produced by pre-4.7 build, `.optional().default("")` in effect): the version line renders `` `standards_version: (unknown)` · `plugin_version: <pluginVersion>` ``.
 
 **AC2 unpacked.** Prior-verdict search, PATCH path, and POST fallback:
 
 - (2a) **New Step 4a in `postReviewerComments`:** inserted AFTER the existing Step 4 (PR-context resolution: `owner`, `repo` from `gh pr view`) and BEFORE Step 5 (inline-comment generation). Step 4a:
   1. Call `getPluginVersion()` to obtain `pluginVersion` (sync; the call is inside the `postReviewerComments` async function but the function itself is sync-returns-string).
-  2. Call `gh({ role, permissions, subcommand: "api", args: ["/repos/${owner}/${repo}/pulls/${prNumber}/reviews", "--method", "GET"], execaImpl })`. Parse the response as `Array<{ id: number; body: string }>`. On non-array or parse failure, raise `GhApiResponseShapeError({ subcommand: "api", url: "/reviews", cause })`.
-  3. Search the array for the FIRST item whose `body` matches the JS regex `new RegExp("<!-- crew:verdict:[^:]+:" + escapeRegex(result.ref) + " -->")`. Store the matching `id` as `priorReviewId: number | null`.
+  2. Call `gh({ role, permissions, subcommand: "api", args: ["/repos/${owner}/${repo}/pulls/${prNumber}/reviews", "--method", "GET"], execaImpl })`. Parse the response as `Array<{ id: number; body: string | null }>`. On non-array or parse failure, raise `GhApiResponseShapeError({ subcommand: "api", url: "/reviews", cause })`. Note: `body: null` is COMMON on real PRs — GitHub returns `body: null` for approval-only reviews (Copilot, plain approvals, CODEOWNERS auto-reviews). The Zod schema MUST accept `body: z.string().nullable()` (or `z.string().optional()`) so null-bodied prior reviews don't crash the GET parse.
+  3. Search the array for the FIRST item whose `body` is a non-null string AND matches the JS regex `new RegExp("<!-- crew:verdict:[^:]+:" + escapeRegex(result.ref) + " -->")`. Reviews with `body == null` are SKIPPED in the search (treated as non-matching, not as errors). Store the matching `id` as `priorReviewId: number | null`.
 
 - (2b) **`escapeRegex` helper:** a one-liner pure function `(s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")`. Inline in `post-reviewer-comments.ts` or extracted to `lib/escape-regex.ts` — implementer's choice. Unit-test via the AC3 fixture.
 
-- (2c) **PATCH path (edit-in-place):** if `priorReviewId !== null`, call `gh({ role, permissions, subcommand: "api", args: ["/repos/${owner}/${repo}/pulls/${prNumber}/reviews/${priorReviewId}", "--method", "PATCH", "--input", "-"], input: JSON.stringify({ body: newSummaryBody }), execaImpl })`. Parse response for `id`. Return `{ next: "posted", postedReviewId: priorReviewId, wasEdit: true, priorReviewId, inlineCommentCount: 0, verdictLine }`. NOTE: on the PATCH path, the `comments` array (inline comments) from Story 4.6b is NOT re-submitted — GitHub's PATCH reviews endpoint updates the review body only; inline comments cannot be updated in bulk. v1 accepts this limitation: the inline comments from the first pass remain as-is; only the summary body is updated. Rationale: inline comments are anchored to diff lines and remain accurate across rework passes; the summary body is what changes (updated AC results, new verdict).
+- (2c) **PATCH path (edit-in-place):** if `priorReviewId !== null`, call `gh({ role, permissions, subcommand: "api", args: ["/repos/${owner}/${repo}/pulls/${prNumber}/reviews/${priorReviewId}", "--method", "PATCH", "--input", "-"], input: JSON.stringify({ body: newSummaryBody }), execaImpl })`. Parse response for `id`. Return `{ next: "posted", postedReviewId: priorReviewId, wasEdit: true, priorReviewId, inlineCommentCount: null, verdictLine }`. NOTE: `inlineCommentCount: null` (not 0) signals "this PATCH did not author inline comments; the original POST's inline comments persist on the review" — distinct from "this review has 0 inline comments". Downstream consumers (telemetry, chat surfaces) MUST treat `null` as "unknown / unchanged from prior pass", not as zero. NOTE: on the PATCH path, the `comments` array (inline comments) from Story 4.6b is NOT re-submitted — GitHub's PATCH reviews endpoint updates the review body only; inline comments cannot be updated in bulk. v1 accepts this limitation: the inline comments from the first pass remain as-is; only the summary body is updated. The downside (stale inline comments after rework — see § What this story does NOT (m)) is acknowledged as deferred work.
 
 - (2d) **POST fallback:** if `priorReviewId === null`, the existing POST path from Story 4.6b runs unchanged (the full `{ event, body, comments }` payload). `wasEdit = false`, `priorReviewId = null`.
 
-- (2e) **`PostReviewerCommentsResult` shape extension:** the `"posted"` variant gains two additional fields: `wasEdit: boolean` and `priorReviewId: number | null`. The `"skipped-no-session-result"` variant is unchanged.
+- (2e) **`PostReviewerCommentsResult` shape extension:** the `"posted"` variant gains two additional fields: `wasEdit: boolean` and `priorReviewId: number | null`. The existing `inlineCommentCount: number` widens to `number | null` (PATCH path returns `null`; POST path returns the count as before). The `"skipped-no-session-result"` variant is unchanged.
 
 - (2f) **GET response edge cases:**
   - Empty array (no reviews yet): `priorReviewId = null`; POST path taken.
@@ -129,14 +150,15 @@ vitest runs `postReviewerComments` twice against the same fixture PR (first run:
 
 **AC3 unpacked.** Two-run integration test:
 
-- (3a) **Fixture base:** tmpdir with `<tmp>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` populated with `{ sessionUlid, ref: "native:01HZ-fixture-story", recommendedVerdict: "READY FOR MERGE", acResults: {}, standardsByCriterionId: {}, sourceStoryRef: "native:01HZ-fixture-story", prNumber: 42, standardsVersion: "2026-05-24" }`. The `pluginVersionOverride: "1.0.0-test"` seam is used.
+- (3a) **Fixture base:** tmpdir with `<tmp>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` populated with `{ sessionUlid, ref: "native:01HZ-fixture-story", recommendedVerdict: "READY FOR MERGE", acResults: {}, standardsByCriterionId: {}, sourceStoryRef: "native:01HZ-fixture-story", prNumber: 42, standardsVersion: "1.2.3" }`. The `pluginVersionOverride: "1.0.0-test"` seam is used. NOTE: `standardsVersion` in the projection file is just a `string` (no validation), but production values come from `lookupStandards` which enforces strict semver via `StandardsDocSchema.version: /^\d+\.\d+\.\d+$/` — fixtures that round-trip through `lookupStandards` (e.g. by writing a real `docs/standards.md`) MUST use semver values like `1.2.3`, not date-style.
 
 - (3b) **Discriminating stub routing:**
   - `gh pr diff 42` → fixture unified diff (same as Story 4.6b's stub).
   - `gh pr view 42 --json baseRepository` → `{"baseRepository":{"name":"crew","owner":{"login":"jackmcintyre"}}}`.
   - `gh api /repos/.../pulls/42/reviews --method GET`:
     - First invocation: returns `[]`.
-    - Second invocation: returns `[{ "id": 1, "body": "# Reviewer summary...\n**Verdict: READY FOR MERGE**\n\n_Reviewed by crew v1.0.0-test using standards v2026-05-24._\n<!-- crew:verdict:1.0.0-test:native:01HZ-fixture-story -->" }]`.
+    - Second invocation: returns `[{ "id": 1, "body": "# Reviewer summary...\n**Verdict: READY FOR MERGE**\n\n`standards_version: 1.2.3` · `plugin_version: 1.0.0-test`\n<!-- crew:verdict:1.0.0-test:native:01HZ-fixture-story -->" }]`.
+    - Coverage for null-bodied prior reviews: include in the GET fixture an additional review like `{ "id": 99, "body": null }` (Copilot/approval-only shape) to assert the search skips it without raising.
   - `gh api /repos/.../pulls/42/reviews --method POST --input -` → `{"id":1}`.
   - `gh api /repos/.../pulls/42/reviews/1 --method PATCH --input -` → `{"id":1}`.
 
@@ -153,7 +175,7 @@ vitest runs `postReviewerComments` twice against the same fixture PR (first run:
 - (4b) **Operator-observable assertions:**
   - POST stub called exactly once across both invocations.
   - PATCH stub called exactly once on the second invocation.
-  - The body in both POST and PATCH payloads contains the version line (exact-string check for `_Reviewed by crew v`) and the footer marker (`<!-- crew:verdict:`).
+  - The body in both POST and PATCH payloads contains both literal tokens `standards_version:` and `plugin_version:` (exact-string `.includes` checks) and the footer marker (`<!-- crew:verdict:`).
   - The SKILL.md prose's chat log for the second pass includes `wasEdit: true` context (the chat-line variant from Task 5).
 
 - (4c) **Smoke-gate tag:** tagged per `plugins/crew/docs/user-surface-acs.md`. Operator may substitute manual-paste evidence per § Pre-PR gate.
@@ -167,13 +189,13 @@ Implementation order is load-bearing.
 - [ ] **Task 1: Extend `ReviewerResultFileShape` to carry `standardsVersion`** (AC: #1)
   - [ ] 1.1 Open `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts`. Add `standardsVersion: string` to the `ReviewerResultFileShape` interface. In the projection-write step (where `fileProjection` is assembled before `atomicWriteFile`), populate `standardsVersion: standards.version` (the `standards` local variable already holds the `StandardsDoc` return from `lookupStandards`). The in-memory `ReviewerSessionResult` type is NOT changed.
   - [ ] 1.2 Open `plugins/crew/mcp-server/src/lib/read-reviewer-result-file.ts` (extracted by Story 4.6b). Widen the Zod schema to include `standardsVersion: z.string().optional().default("")` for backward compatibility when reading pre-4.7 projection files. Update the return-type annotation to match.
-  - [ ] 1.3 Update `process-reviewer-transcript.test.ts` and `run-reviewer-session.test.ts` fixture objects that hand-craft `reviewer-result.json` content: add `standardsVersion: "2026-05-24-test"` (or any valid string) to each. Tests relying on `.optional().default("")` do not need this but it is good practice.
+  - [ ] 1.3 Audit all test files that hand-craft `reviewer-result.json` content (grep for `ReviewerResultFileShape` and `recommendedVerdict` in the test tree to find every site — at minimum `process-reviewer-transcript.test.ts`, `run-reviewer-session.test.ts`, and any inner-cycle integration tests). Add `standardsVersion: "1.2.3"` (or any semver-shaped string) to each fixture. Tests relying on `.optional().default("")` do not need this but it is good practice. Verify `pnpm build` passes — TypeScript will surface any fixture site you missed once `standardsVersion: string` is non-optional on the interface.
 
 - [ ] **Task 2: Extend `composeSummaryBody` with version block and footer marker** (AC: #1, #3)
   - [ ] 2.1 Open `plugins/crew/mcp-server/src/lib/compose-reviewer-summary.ts`. Extend `composeSummaryBody` to accept `{ standardsVersion: string; pluginVersion: string }` as additional parameters (alongside the existing `ReviewerResultFileShape` input). Add them as a second argument object or merge into a unified options shape — match the existing function's style.
   - [ ] 2.2 After the verdict line, append:
     ```
-    \n_Reviewed by crew v${pluginVersion} using standards v${standardsVersion || "(unknown)"}._\n<!-- crew:verdict:${pluginVersion}:${result.ref} -->
+    \n\n`standards_version: ${standardsVersion || "(unknown)"}` · `plugin_version: ${pluginVersion}`\n<!-- crew:verdict:${pluginVersion}:${result.ref} -->
     ```
     The footer marker must be the absolute last character sequence in the returned string (no trailing newline).
   - [ ] 2.3 `composeVerdictLine` is unchanged — do not modify it.
@@ -185,8 +207,8 @@ Implementation order is load-bearing.
     - Existing test cases updated to expect the version block appended (all existing cases now gain the version block in their expected output — this is additive and correct).
 
 - [ ] **Task 3: Add prior-verdict search and PATCH to `postReviewerComments`** (AC: #2, #3)
-  - [ ] 3.1 Open `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`. Add `pluginVersionOverride?: string` test seam (alongside existing `execaImpl?` and `pluginRootOverride?`).
-  - [ ] 3.2 Import `getPluginVersion` from `../lib/plugin-version.js`. In `postReviewerComments`, call `const pluginVersion = pluginVersionOverride ?? getPluginVersion()` (sync call inside the async function is fine — it's cached after first read).
+  - [ ] 3.1 Open `plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts`. Add `pluginVersionOverride?: string` test seam (named with `Override` suffix to match the existing `pluginRootOverride` and `execaImpl` seams on this function — deliberately distinct from Story 2.3's `pluginVersion?: string` parameter on `instantiate-persona.ts`, which is a positional argument with a different role).
+  - [ ] 3.2 Import `getPluginVersion` from `../lib/plugin-version.js`. In `postReviewerComments`, call `const pluginVersion = pluginVersionOverride ?? getPluginVersion()` (sync call inside the async function is fine — it's cached after first read). When `pluginVersionOverride` is NOT passed in tests, `beforeEach` MUST call `__resetPluginVersionCacheForTests()` to prevent cache staleness across tests that rely on the real `plugin.json` value.
   - [ ] 3.3 After Step 4 (PR-context resolution) and before Step 5 (inline-comment generation), insert Step 4a per AC2 unpacked (2a):
     - GET existing reviews.
     - Search for prior verdict via `new RegExp("<!-- crew:verdict:[^:]+:" + escapeRegex(result.ref) + " -->")`.
@@ -198,17 +220,20 @@ Implementation order is load-bearing.
   - [ ] 3.8 Implement `escapeRegex` — either inline one-liner or `lib/escape-regex.ts`.
 
 - [ ] **Task 4: Update the SKILL.md chat-log step** (AC: #4)
-  - [ ] 4.1 Open `plugins/crew/skills/start/SKILL.md`. In the step that processes `postReviewerComments`'s return value (Step 7.3 added by Story 4.6b), add handling for `wasEdit`:
-    - `wasEdit === true` → chat line: `reviewer-comments updated in place on PR #<prNumber>`.
-    - `wasEdit === false` → existing chat line: `reviewer-comments posted on PR #<prNumber>` (unchanged from Story 4.6b).
+  - [ ] 4.1 Open `plugins/crew/skills/start/SKILL.md`. Find the step that processes `postReviewerComments`'s `next: "posted"` return variant (added by Story 4.6b — NOT the `skipped-no-session-result` ENOENT path, which is a separate variant). The `wasEdit` handling lives inside the `posted` branch:
+    - On `next === "posted"` AND `wasEdit === true` → chat line: `reviewer-comments updated in place on PR #<prNumber>`.
+    - On `next === "posted"` AND `wasEdit === false` → existing chat line: `reviewer-comments posted on PR #<prNumber>` (unchanged from Story 4.6b).
+    - The `skipped-no-session-result` branch is UNTOUCHED — it does not carry `wasEdit` and its chat line stays as 4.6b shipped it.
   - [ ] 4.2 The `allowed_tools` array is NOT widened — no new MCP tools are registered by this story.
 
 - [ ] **Task 5: Integration test suite extension** (AC: #3, #4)
+  - [ ] 5.0 **Migrate Story 4.6b's existing test assertions whose contract was "final-line == verdict".** Story 4.6b's AC4 fixtures (variants 4c-i through 4c-v in its spec) assert `expect(body).toContain("**Verdict: ...**")` or equivalent — those continue to pass after Task 2. But any assertion of the form `body.split("\n").filter(l => l).at(-1) === "**Verdict: ..."` or `body.endsWith("**Verdict: ...**")` was load-bearing on the 4.6b shape and will FAIL after this story: the new absolute-last line is the footer marker. Audit `post-reviewer-comments.test.ts` and the operator-smoke harness; rewrite final-line assertions to either (a) check the verdict line by position (penultimate human-readable content block, located by structural search rather than `.at(-1)`), or (b) check that the footer marker is `.at(-1)`. Also update Story 4.6b's operator-smoke AC5(b) assertion (the verbatim final-line check) — it was operator-surface load-bearing in 4.6b but is now structurally retired by 4.7's version block.
   - [ ] 5.1 Extend `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (Story 4.6b's suite) with:
     - Two-run scenario per AC3 unpacked (3a)–(3d): first run POST, second run PATCH.
     - `wasEdit: false` on POST path, `wasEdit: true` on PATCH path.
     - Footer marker is absolute last line of body in both runs.
     - Wrong-ref non-match per (3e): GET returns prior verdict for a different ref; POST path taken.
+    - Null-body prior review skipped without raising (Copilot/approval-only shape): GET returns `[{ id: 99, body: null }, { id: 1, body: "...<footer marker>..." }]`; PATCH targets id 1, not id 99.
     - `pluginVersionOverride: "1.0.0-test"` used throughout.
   - [ ] 5.2 Extend the `makeDiscriminatingStub` routing (Story 4.6b's shared test helper) to handle `gh api GET .../reviews` and `gh api PATCH .../reviews/<id>` by matching `args[0]` and `args[1]`.
 
@@ -230,7 +255,7 @@ Implementation order is load-bearing.
 
 ### MUST
 
-- **MUST append a version line and footer marker to every posted summary body.** Format: `_Reviewed by crew v<pluginVersion> using standards v<standardsVersion>._` followed by `<!-- crew:verdict:<pluginVersion>:<ref> -->` as the absolute last line. Enforced by extended `composeSummaryBody` unit tests.
+- **MUST append a version line and footer marker to every posted summary body.** Format: `` `standards_version: <standardsVersion>` · `plugin_version: <pluginVersion>` `` followed by `<!-- crew:verdict:<pluginVersion>:<ref> -->` as the absolute last line. The literal tokens `standards_version` and `plugin_version` MUST appear verbatim (verbatim from AC1, verbatim from epic). Enforced by extended `composeSummaryBody` unit tests.
 - **MUST search existing PR reviews for a footer-marker match before posting.** One GET call per `postReviewerComments` invocation. If found, PATCH; else POST.
 - **MUST use the exact footer-marker format for both writing and searching.** The written format and the search regex MUST be kept in sync; drift in either direction breaks idempotent reruns.
 - **MUST propagate `GhApiResponseShapeError`, `GhRecoverableError`, `PluginManifestMissingError` (from `getPluginVersion`), and `GhSubcommandDeniedError` verbatim.** No swallow, no retry.
