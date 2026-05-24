@@ -41,9 +41,11 @@ The "handoff parser" part of the story name addresses the coupling inside `proce
 - (g) Change how `prNumber` flows to the reviewer. SKILL.md prose already stores `prNumber` from the `processDevTranscript` result and passes it to `runReviewerSession`. The type and call site are unchanged.
 - (h) Write any file outside `.crew/state/sessions/<sessionUlid>/`. `dev-outcome.json` is written to the session directory, which is already managed state.
 - (i) Emit telemetry. Story 4.12 owns telemetry.
-- (j) Handle the case where the session directory does not exist when `runDevTerminalAction` tries to write. The session directory is created by `mintSessionUlid` before any tool call. If the directory is missing, `atomicWriteFile` will throw ENOENT — propagate uncaught (existing invariant).
+- (j) Pre-create the session directory before writing. `atomicWriteFile` (`lib/managed-fs.ts:115–120`) already calls `fs.mkdir(path.dirname(absPath), { recursive: true })` internally — no caller-side `fs.mkdir` is required. Only genuine filesystem errors (disk full, EROFS, permission denied) propagate uncaught from the write.
 - (k) Change the `runReviewerSession` caller in SKILL.md or its inputs. Only `processDevTranscript`'s internal PR-number resolution changes; the output shape `{ next: "spawn-reviewer", prNumber, reviewerPrompt, chatLog }` is unchanged.
 - (l) Add a strict "handoff implies dev-outcome file exists" assertion. `processDevTranscript` checks for the file opportunistically (use if present, fall back otherwise). A strict assertion — refusing to proceed if `parseHandoff` succeeds but no `dev-outcome.json` exists — is deferred work (see § Deferred work).
+- (m) Handle the partial-failure case where `gh pr create` succeeds but the subsequent `atomicWriteFile` throws. In that case, the PR exists on GitHub (irreversible) but `runDevTerminalAction` raises the filesystem error; the dev subagent never receives the `prUrl`, the handoff phrase is never emitted, the story stays in `in-progress/`, and a retry will hit `gh pr create`'s "PR already exists for branch" error. v1 accepts this as a regression on Story 4.4's failure surface (4.4 § (k) acknowledged a similar shape) — operator inspects, deletes the stuck branch's PR via `gh pr close`, and re-runs `/crew:start`. A typed `DevOutcomeWriteFailedError` with structured recovery hints is deferred work.
+- (n) Define rework-cycle semantics for `dev-outcome.json`. On a Story 4.3 rework iteration the dev subagent re-runs against the same story; current Story 4.4 behaviour is that `runDevTerminalAction` would call `gh pr create` again and that call would fail with "PR already exists" — so `atomicWriteFile` never runs and the original `dev-outcome.json` is preserved untouched. This story does NOT add idempotency-on-rework logic; if Story 4.4 is later amended to skip `gh pr create` on rework, the same amendment owner must decide whether to (i) skip the `dev-outcome.json` write too, or (ii) overwrite it with the same content (the PR number and branch don't change across rework iterations).
 
 ### Deferred work
 
@@ -59,7 +61,7 @@ The "handoff parser" part of the story name addresses the coupling inside `proce
 **AC1:**
 **Given** the `runDevTerminalAction` MCP tool completes a successful `gh pr create` (i.e., `prUrl` is validated as starting with `https://github.com/`),
 **When** the tool runs,
-**Then** it atomically writes `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/dev-outcome.json` with the shape `{ "prUrl": "<url>", "prNumber": <int>, "branch": "<branch>", "commitSha": "<sha>" }` using `atomicWriteFile` from `lib/managed-fs.ts`, where `prNumber` is parsed as `parseInt(prUrl.split("/pull/")[1]!, 10)`. The write happens before the `return { ok: true, ... }` statement. If the write throws (e.g., session directory missing), the error propagates uncaught before the return. _(seam reliability; replaces the fragile LLM-text extraction path)_
+**Then** it atomically writes `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/dev-outcome.json` with the shape `{ "prUrl": "<url>", "prNumber": <positive int>, "branch": "<branch>", "commitSha": "<sha>" }` using `atomicWriteFile` from `lib/managed-fs.ts`. `prNumber` is extracted via: `const m = prUrl.match(/\/pull\/(\d+)/); if (!m) throw new GhPrCreateFailedError({ stderr: ghResult.stderr, diagnostic: "PR URL stdout contained no /pull/<n> segment" }); const prNumber = parseInt(m[1]!, 10);` — the regex captures `\d+`, so `parseInt` always returns a positive integer (NaN is unreachable). The write happens before the `return { ok: true, ... }` statement. `atomicWriteFile` internally creates parents via `fs.mkdir(..., { recursive: true })`, so a missing session directory is NOT an error case; only genuine filesystem errors (disk full, EROFS, permission denied) propagate uncaught. _(seam reliability; replaces the fragile LLM-text extraction path)_
 
 <!-- Not user-surface: AC1 describes a tool's internal file-write side-effect. No operator-visible change. -->
 
@@ -79,8 +81,8 @@ The "handoff parser" part of the story name addresses the coupling inside `proce
 
 **AC4:**
 **Given** `dev-outcome.json` exists in the session directory,
-**When** `processDevTranscript` reads it and the file contains malformed JSON or is missing any required field (`prUrl`, `prNumber`, `branch`, `commitSha`),
-**Then** `processDevTranscript` throws `DevOutcomeFileMalformedError` (new typed error extending `DomainError`, with fields `{ sessionUlid: string; path: string; cause: unknown }`). The tool does NOT fall back to transcript scanning on a malformed file — a malformed file is a write-seam bug, not a missing-file case; silent fallback would paper over it.
+**When** `processDevTranscript` reads it and the file contains malformed JSON OR is missing any required field OR `prNumber` fails the `Number.isInteger(n) && n > 0` check (rejecting NaN, floats, zero, and negatives),
+**Then** `processDevTranscript` throws `DevOutcomeFileMalformedError` (new typed error extending `DomainError`, with fields `{ path: string; cause: unknown }` — matching the sibling `ReviewerResultFileMalformedError` constructor shape; `path` encodes the session via `.../sessions/<sessionUlid>/dev-outcome.json`). The tool does NOT fall back to transcript scanning on a malformed file — a malformed file is a write-seam bug, not a missing-file case; silent fallback would paper over it.
 
 <!-- Not user-surface: AC4 describes error-propagation on a malformed state file. -->
 
@@ -106,38 +108,47 @@ Implementation order is load-bearing.
 
 - [ ] **Task 1: Write `dev-outcome.json` in `runDevTerminalAction`** (AC: #1, #5a, #5h)
   - [ ] 1.1 In `plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`, add an import for `atomicWriteFile` from `"../lib/managed-fs.js"`.
-  - [ ] 1.2 After the `prUrl` validation block (currently lines 177–183, which throw `GhPrCreateFailedError` if `prUrl` is falsy or doesn't start with `https://github.com/`), compute `prNumber = parseInt(prUrl.split("/pull/").at(-1)!, 10)`.
+  - [ ] 1.2 After the `prUrl` validation block (currently lines 177–183, which throw `GhPrCreateFailedError` if `prUrl` is falsy or doesn't start with `https://github.com/`), extract `prNumber` via regex match — NOT `split("/pull/")` (which would silently produce NaN on a malformed URL):
+    ```ts
+    const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+    if (!prNumberMatch) {
+      throw new GhPrCreateFailedError({
+        stderr: ghResult.stderr,
+        diagnostic: "PR URL stdout contained no /pull/<n> segment",
+      });
+    }
+    const prNumber = parseInt(prNumberMatch[1]!, 10);
+    ```
+    The regex guarantees `\d+` matched, so `parseInt` returns a positive integer (NaN is unreachable). This is the SINGLE source-of-truth for `prNumber` parsing across this story — AC1 quotes the same expression.
   - [ ] 1.3 Compute `devOutcomePath = path.resolve(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "dev-outcome.json")`.
-  - [ ] 1.4 Call `await atomicWriteFile(devOutcomePath, JSON.stringify({ prUrl, prNumber, branch, commitSha }, null, 2))`. This happens BEFORE the `return { ok: true, branch, commitSha, prUrl }` statement.
+  - [ ] 1.4 Call `await atomicWriteFile(devOutcomePath, JSON.stringify({ prUrl, prNumber, branch, commitSha }, null, 2))`. This happens BEFORE the `return { ok: true, branch, commitSha, prUrl }` statement. `atomicWriteFile` creates the session directory internally; no caller-side `fs.mkdir` is required.
   - [ ] 1.5 Do NOT add `sessionUlid` to the return type — it is already a tool input; the caller already has it.
-  - [ ] 1.6 Verify the existing `runDevTerminalAction` integration tests still pass. Add a new test case asserting `dev-outcome.json` content (5a).
+  - [ ] 1.6 Verify the existing `runDevTerminalAction` integration tests still pass. Add a new test case asserting `dev-outcome.json` content (5a). Existing tests do not provide a session directory — that's fine; `atomicWriteFile` will create it. If any existing test asserts "no files are written under `.crew/state/`", update that assertion to allow `dev-outcome.json` under the session directory.
 
 - [ ] **Task 2: Add `DevOutcomeFileMalformedError` to `errors.ts`** (AC: #4, #5d, #5e)
-  - [ ] 2.1 In `plugins/crew/mcp-server/src/errors.ts`, add:
+  - [ ] 2.1 In `plugins/crew/mcp-server/src/errors.ts`, add (matching the sibling `ReviewerResultFileMalformedError` ctor shape — `{ path, cause }`, no `sessionUlid`, since `path` already encodes the session via `.../sessions/<sessionUlid>/dev-outcome.json`):
     ```ts
     export class DevOutcomeFileMalformedError extends DomainError {
-      readonly sessionUlid: string;
       readonly path: string;
       readonly cause: unknown;
-      constructor(opts: { sessionUlid: string; path: string; cause: unknown }) { ... }
+      constructor(opts: { path: string; cause: unknown }) { ... }
     }
     ```
-  - [ ] 2.2 The `cause` field carries the underlying parse error or a descriptive string for missing-field cases. Follow the pattern of `ReviewerResultFileMalformedError` in the same file.
+  - [ ] 2.2 The `cause` field carries the underlying parse error or a descriptive string for missing/wrong-typed-field cases. Follow the pattern of `ReviewerResultFileMalformedError` at `errors.ts:1091`.
 
 - [ ] **Task 3: Add `readDevOutcomeFile` shared helper** (AC: #2, #3, #4)
-  - [ ] 3.1 Create `plugins/crew/mcp-server/src/lib/read-dev-outcome-file.ts`. Export `readDevOutcomeFile(devOutcomePath: string, sessionUlid: string): Promise<DevOutcome | null>` where `DevOutcome = { prUrl: string; prNumber: number; branch: string; commitSha: string }`.
+  - [ ] 3.1 Create `plugins/crew/mcp-server/src/lib/read-dev-outcome-file.ts`. Export `readDevOutcomeFile(targetRepoRoot: string, sessionUlid: string): Promise<DevOutcome | null>` where `DevOutcome = { prUrl: string; prNumber: number; branch: string; commitSha: string }`. **Signature deliberately matches `readReviewerResultFile(targetRepoRoot, sessionUlid)` (`lib/read-reviewer-result-file.ts:31`)** — the helper computes the file path internally (`path.join(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "dev-outcome.json")`).
   - [ ] 3.2 On ENOENT: return `null`.
-  - [ ] 3.3 On read success: `JSON.parse(contents)`. Validate the presence and types of all four required fields (`prUrl: string`, `prNumber: number`, `branch: string`, `commitSha: string`). On parse failure or missing/wrong-typed fields: throw `DevOutcomeFileMalformedError({ sessionUlid, path: devOutcomePath, cause })`.
+  - [ ] 3.3 On read success: `JSON.parse(contents)`. Validate (a) presence and string type of `prUrl`, `branch`, `commitSha`; (b) `prNumber` is a number AND `Number.isInteger(prNumber)` AND `prNumber > 0` (reject NaN, floats, zero, negatives). On parse failure or any validation miss: throw `DevOutcomeFileMalformedError({ path, cause })` where `cause` is the underlying error or a descriptive string naming the offending field.
   - [ ] 3.4 No Zod dependency required — manual field checks mirror the pattern in `read-reviewer-result-file.ts`.
 
 - [ ] **Task 4: Modify `processDevTranscript` to use the file** (AC: #2, #3, #4, #5b–5g)
-  - [ ] 4.1 Import `readDevOutcomeFile` from `"../lib/read-dev-outcome-file.js"` and import `DevOutcomeFileMalformedError` from `"../errors.js"`.
-  - [ ] 4.2 After `parseHandoff` returns `{ ok: true }` (currently at line 145, before the `PR_URL_RE` scan at line 163), compute `devOutcomePath = path.resolve(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "dev-outcome.json")`.
-  - [ ] 4.3 Call `const devOutcome = await readDevOutcomeFile(devOutcomePath, sessionUlid)`.
+  - [ ] 4.1 Import `readDevOutcomeFile` from `"../lib/read-dev-outcome-file.js"`. (`DevOutcomeFileMalformedError` does not need to be imported here — it propagates uncaught from the helper.)
+  - [ ] 4.2 Add `sessionUlid` to the existing line-95 destructure: change `const { targetRepoRoot, ref, devTranscript } = opts;` to `const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;`. The field is already declared on `ProcessDevTranscriptOptions` (line 49) — only the destructure needs updating.
+  - [ ] 4.3 After `parseHandoff` returns `{ ok: true }` (currently at line 145, before the `PR_URL_RE` scan at line 163), call `const devOutcome = await readDevOutcomeFile(targetRepoRoot, sessionUlid);`. No path computation needed in this file — the helper owns it.
   - [ ] 4.4 If `devOutcome` is non-null: use `devOutcome.prNumber` as `prNumber`. Skip the `PR_URL_RE` scan entirely and jump directly to the `buildPersonaSpawnPrompt` call.
   - [ ] 4.5 If `devOutcome` is null (file absent): fall through to the existing `PR_URL_RE` scan block (lines 163–175 in current implementation). No change to existing fallback behaviour.
   - [ ] 4.6 `DevOutcomeFileMalformedError` thrown by `readDevOutcomeFile` propagates uncaught — same pattern as `ReviewerResultFileMalformedError` in `processReviewerTranscript`.
-  - [ ] 4.7 The `sessionUlid` variable is already in scope in `processDevTranscript` (it is destructured from `opts` at line 95). No new parameters needed.
 
 - [ ] **Task 5: Update tests** (AC: #5)
   - [ ] 5.1 In `plugins/crew/mcp-server/src/tools/__tests__/process-dev-transcript.test.ts`, add test cases for (5b) file-present path, (5c) fallback path, (5d) malformed JSON, (5e) missing field. Use `tmpdir` per `beforeEach`; write `dev-outcome.json` where needed. The `processDevTranscript` call takes `targetRepoRoot` and `sessionUlid` from which the tool resolves the path.
@@ -169,6 +180,14 @@ Session continuity: a `/crew:start` session that started before this story is de
 
 A malformed file is a machine-write failure, not an absent file. If `atomicWriteFile` produces invalid JSON (e.g., a bug in Task 1's `JSON.stringify` call), silently falling back to transcript scanning would hide the write-seam bug and produce a misleading `PrUrlNotFoundInDevTranscriptError` instead of pointing at the real root cause. Hard errors on malformed files surface bugs faster.
 
+### Why session-state rather than the manifest
+
+Story 4.4 §(j) anticipated that "a future story may add `pr_url` to the manifest for faster reviewer-side lookup." Story 4.8b deliberately picks the session directory (`<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/dev-outcome.json`) instead. Rationale: PR URLs are session-scoped artefacts — they belong to the dev→reviewer cycle that produced them and have no meaning outside it. The manifest is long-lived per-story state and should not accumulate transient run-cycle metadata. Persisting to the session directory keeps the manifest schema stable and mirrors how `reviewer-result.json` is scoped (Story 4.6 revision 2). If a future story needs a manifest-level `pr_url` for cross-session lookup (e.g., for blocked-story recovery), it can read the most-recent session's `dev-outcome.json` and write a derived field — that work is out of scope here.
+
+### Acknowledging the partial-failure regression
+
+The write happens AFTER `gh pr create` succeeds. If `atomicWriteFile` throws, the PR exists on GitHub but the dev session crashes before emitting the handoff phrase — see §What this story does NOT (m) for the operator recovery path. This is a real (small) regression on Story 4.4's failure surface; the alternative (write `dev-outcome.json` first, before `gh pr create`) is impossible because the URL doesn't exist yet. Accepted in v1; a typed `DevOutcomeWriteFailedError` with structured recovery is deferred work.
+
 ---
 
 ## Locked files
@@ -183,7 +202,7 @@ A malformed file is a machine-write failure, not an absent file. If `atomicWrite
 
 - **`plugins/crew/mcp-server/src/tools/run-dev-terminal-action.ts`** (Story 4.4) — Task 1 adds a `dev-outcome.json` write after a successful `gh pr create`. The change is additive (new side-effect only; return type unchanged) and is load-bearing for AC1's machine-authoritative seam.
 - **`plugins/crew/mcp-server/src/tools/process-dev-transcript.ts`** (Stories 4.3b / 4.5 / 4.6) — Task 4 inserts a `readDevOutcomeFile` call in the `parseHandoff`-success branch (before the `PR_URL_RE` scan). Existing recoverable-error check (Step 1) and handoff-phrase check (Step 2) are UNTOUCHED. The `PR_URL_RE` scan block is preserved as-is for the fallback path.
-- **`plugins/crew/mcp-server/src/errors.ts`** (Stories 4.5 / 4.6b) — Task 2 adds `DevOutcomeFileMalformedError`. No existing error classes are modified.
+- **`plugins/crew/mcp-server/src/errors.ts`** (typed-error hierarchy; appended-to by most Epic-1 through Epic-4 stories including 4.1 / 4.2 / 4.3 / 4.3b / 4.4 / 4.5 / 4.6 / 4.6b / 4.7 / 4.8) — Task 2 appends `DevOutcomeFileMalformedError`. No existing error classes are modified; routine additive growth follows the established `extends DomainError` pattern.
 
 ---
 
@@ -204,9 +223,9 @@ A malformed file is a machine-write failure, not an absent file. If `atomicWrite
 
 ### Current-state notes on files being modified
 
-- **`run-dev-terminal-action.ts`** (current state per Story 4.4): `sessionUlid` is already a typed input parameter (line 80). The `prUrl` is set at line 177. The write in Task 1 goes between lines 183 (the `GhPrCreateFailedError` throw on bad URL) and the existing `return { ok: true, ... }` at line 190. `atomicWriteFile` import is `import { atomicWriteFile } from "../lib/managed-fs.js"`.
-- **`process-dev-transcript.ts`** (current state per Stories 4.3b / 4.5 / 4.6): `sessionUlid` is already destructured from `opts` (line 95). The `PR_URL_RE` scan block begins at line 163 (`let lastMatch: RegExpExecArray | null = null`). Task 4 inserts before line 163 — the fallback path starts exactly where the old path was.
-- **`errors.ts`** (current state per Story 4.6b): `ReviewerResultFileMalformedError` (around line 1000) is the pattern to follow for `DevOutcomeFileMalformedError`.
+- **`run-dev-terminal-action.ts`** (current state per Story 4.4): `sessionUlid` is already a typed input parameter (line 80, inside the options object literal type). The `prUrl` is set at line 177. The write in Task 1 goes between line 183 (the `GhPrCreateFailedError` throw on bad URL) and the existing `return { ok: true, ... }` at lines 186–190. `atomicWriteFile` import is `import { atomicWriteFile } from "../lib/managed-fs.js"`. Note: `sessionUlid` is destructured along with the other options at lines 83-90 — it should already be in local scope by the time Task 1's write runs.
+- **`process-dev-transcript.ts`** (current state per Stories 4.3b / 4.5 / 4.6): `ProcessDevTranscriptOptions` declares `sessionUlid: string` (line 49) but line 95 only destructures `{ targetRepoRoot, ref, devTranscript } = opts;` — **`sessionUlid` is NOT currently in local scope; Task 4.2 adds it to the destructure.** The `PR_URL_RE` scan block begins at line 163 (`let lastMatch: RegExpExecArray | null = null`). Task 4.3's `readDevOutcomeFile` call goes between line 159 (the end of the grammar-drift `return`) and line 163 — the fallback path starts exactly where the old path was.
+- **`errors.ts`** (current state per Stories 4.5 / 4.6b / 4.7 / 4.8): `ReviewerResultFileMalformedError` at `errors.ts:1091` is the pattern to follow for `DevOutcomeFileMalformedError` — same ctor shape (`{ path, cause }`), same `extends DomainError`, same minimal validation message convention.
 
 ### Testing standards
 
