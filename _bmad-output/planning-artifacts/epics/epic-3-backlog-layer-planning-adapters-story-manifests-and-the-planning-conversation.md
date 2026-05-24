@@ -156,4 +156,26 @@ So that I'm not blocked by jargon when checking whether a story matches my inten
 
 **AC4 (integration):** vitest asserts hand-edit acceptance in `to-do/` and refusal in `in-progress/`.
 
+## Story 3.8: BMad adapter leniency for real-world BMad backlogs
+
+As a plugin operator pointing crew at an existing BMad backlog,
+I want the BMad adapter to handle the deviations real BMad repos accumulate (letter-suffixed follow-up story IDs, missing or non-canonical `Status:` values, non-conforming filenames mixed into the stories directory),
+So that `/crew:scan` succeeds against repos like this one without first requiring a mass rewrite of every existing spec.
+
+Context: surfaced on 2026-05-25 during the first attempted dogfood of `/crew:start` against the `crew` repo's own backlog. The adapter's v1 reference implementation (Story 3.3) was written against a strict-BMad fixture; this repo's `_bmad-output/implementation-artifacts/` accumulated organic deviations: ~10 stories with letter-suffixed IDs (`4-8b`, `5-4b`, `6-13`), 41 of 45 specs missing a `Status:` line entirely, and a handful of files (retros, `sprint-status.yaml`) sharing the directory but not being stories. The scan halted on the first non-conforming file. This story makes the adapter accept reality.
+
+**Acceptance Criteria:**
+
+**Given** a stories directory containing a spec file whose filename has a letter-suffixed story ID (e.g. `4-8b-...md`, `5-4b-...md`, `6-13-...md`), **When** the BMad adapter scans, **Then** the file parses successfully, the story ref preserves the letter suffix (`4-8b`, not `4-8`), and the manifest written under `.crew/state/to-do/` (or wherever the lifecycle places it) uses the letter-suffixed ref. _(adapter regex hardening; closes the gap that hides ~10 follow-up stories from crew)_
+
+**Given** a spec file with no `Status:` line at all, **When** the adapter parses, **Then** it defaults to a documented status (most likely `backlog` → execution state `to-do`) without throwing. _(handles the 41 of 45 specs in this repo that have no Status field)_
+
+**Given** a spec file with a `Status:` value outside the canonical BMad vocabulary (e.g. `review`, free-text notes like `revised — re-implement per ...`), **When** the adapter parses, **Then** it emits a single warning to the scan output naming the file and the unrecognised value, treats the story as `blocked` with `blocked_by: status-vocabulary-unknown`, and continues the scan — does NOT halt the whole scan on one bad file. _(robustness; today the scan halts on the first malformed file, hiding all downstream issues)_
+
+**Given** a file in the stories directory whose filename does NOT match the story-spec pattern (e.g. `epic-1-retro-2026-05-20.md`, `sprint-status.yaml`), **When** the adapter scans, **Then** the file is silently skipped — no warning, no throw. _(retros and bookkeeping files legitimately live in the same directory)_
+
+**Given** `/crew:status` is invoked on a repo whose `.crew/config.yaml` declares `adapter: bmad` with a custom `adapter_config.stories_root` that differs from `BmadAdapter.defaultConfig().stories_root`, **When** the status surface formats the adapter line, **Then** it does NOT label the adapter as `mismatched` — the config explicitly wins per Story 3.3b, so the mismatch label is misleading. _(cosmetic, but it confused the first-dogfood operator into thinking the setup was broken)_
+
+**AC6 (integration):** vitest covers each of the above against a fixture directory mirroring this repo's actual messy state (letter-suffixed file, status-less file, free-text-status file, retro file). The suite must scan the fixture end-to-end and produce the correct mix of `to-do/` manifests, `blocked/` manifests with the new `status-vocabulary-unknown` reason, and silently-skipped non-story files.
+
 ---
