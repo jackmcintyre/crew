@@ -1,13 +1,22 @@
 /**
- * `processReviewerTranscript` MCP tool — Story 4.3b Task 3.
+ * `processReviewerTranscript` MCP tool — Story 4.3b Task 3; Story 4.3c Task 2.
  *
- * Pure transcript-in / verdict-out function: receives the reviewer subagent's
- * final transcript (captured by the SKILL.md prose after the `Task` tool
- * returns), parses the verdict sentinel, mutates the in-progress manifest on
- * rework or grammar drift, and returns the next step for the prose layer.
+ * Receives the reviewer subagent's final transcript (captured by the SKILL.md
+ * prose after the `Task` tool returns), parses the verdict sentinel, mutates
+ * the in-progress manifest on rework or grammar drift, and returns the next
+ * step for the prose layer.
  *
- * **Behavioural contract source:**
+ * **Behavioural contract sources:**
  * `_bmad-output/implementation-artifacts/4-3b-harness-task-spawn-seam-for-rundevsession.md § Behavioural contract`
+ * `_bmad-output/implementation-artifacts/4-3c-call-completestory-after-ready-for-merge.md § Behavioural contract`
+ *
+ * On `READY FOR MERGE`: calls `completeStory` internally (via direct function
+ * import from `./complete-story.js`) to atomically move the manifest to `done/`
+ * BEFORE returning. The prose layer reads the `completed: true` flag on the
+ * returned object to confirm the move and emit its informational chat line.
+ * The `completeStory` call is NOT made through the MCP `register.ts` surface —
+ * it is a plain Node import, so it does not need a permission entry in
+ * SKILL.md's `allowed_tools`.
  *
  * This tool MUST NOT spawn anything. The MCP server runs over JSON-RPC stdio
  * and has no access to Claude Code's `Task` tool. Spawn responsibility belongs
@@ -16,12 +25,13 @@
  * Chat lines flow through the returned `chatLog: string[]` — no console.*.
  * Errors propagate as typed `DomainError`s; `register.ts` wraps them.
  *
- * Story 4.3b Task 3.1–3.5.
+ * Story 4.3b Task 3.1–3.5; Story 4.3c Task 2.1–2.7.
  */
 
 import { parseVerdict } from "../skills/verdict-parser.js";
 import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
+import { completeStory } from "./complete-story.js";
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -34,7 +44,7 @@ export type ProcessReviewerTranscriptResult =
       reworkIteration: number;
       chatLog: string[];
     }
-  | { next: "done-ready-for-merge"; chatLog: string[] }
+  | { next: "done-ready-for-merge"; completed: true; chatLog: string[] }
   | { next: "done-blocked-reviewer-verdict"; chatLog: string[] }
   | { next: "done-blocked-reviewer-grammar"; chatLog: string[] };
 
@@ -61,7 +71,14 @@ export interface ProcessReviewerTranscriptOptions {
  * `blocked_by: "reviewer-grammar"` on the in-progress manifest. On
  * `NEEDS CHANGES`: increments `rework_count`, writes to disk BEFORE composing
  * the dev re-spawn prompt, then returns the next dev prompt. On `READY FOR
- * MERGE` or `BLOCKED`: pass-through (no manifest mutation).
+ * MERGE`: calls `completeStory` internally to atomically move the manifest to
+ * `done/` BEFORE returning; the returned object carries `completed: true` as a
+ * literal-typed field confirming the move. On `BLOCKED`: pass-through (no
+ * manifest mutation, no `completed` field).
+ *
+ * The `completeStory` call errors (`InProgressHandEditError`, `WrongClaimantError`,
+ * `ManifestNotFoundError`) propagate verbatim — no catch, no wrap. The
+ * `register.ts` `DomainError` → `isError: true` path handles serialisation.
  *
  * The SKILL.md prose MUST pass `reviewerTranscript` verbatim — no
  * summarisation, no editing. The full final-message string is the contract.
@@ -75,7 +92,7 @@ export interface ProcessReviewerTranscriptOptions {
 export async function processReviewerTranscript(
   opts: ProcessReviewerTranscriptOptions,
 ): Promise<ProcessReviewerTranscriptResult> {
-  const { targetRepoRoot, ref, manifestPath, reviewerTranscript } = opts;
+  const { targetRepoRoot, ref, sessionUlid, manifestPath, reviewerTranscript } = opts;
   const chatLog: string[] = [];
 
   // Parse the reviewer verdict exactly once.
@@ -99,9 +116,15 @@ export async function processReviewerTranscript(
   const { sentinel } = verdictResult;
 
   if (sentinel === "READY FOR MERGE") {
-    // Pass-through — no manifest mutation.
+    // Push the verdict chat line BEFORE calling completeStory so the operator
+    // sees the verdict even if the move throws (per behavioural contract).
     chatLog.push(`reviewer verdict: READY FOR MERGE — story ${ref} ready for merge gate`);
-    return { next: "done-ready-for-merge", chatLog };
+    // Atomically move the manifest to done/ via internal function import.
+    // Errors propagate verbatim — no try/catch (behavioural contract §
+    // _bmad-output/implementation-artifacts/4-3c-call-completestory-after-ready-for-merge.md
+    // § Behavioural contract).
+    await completeStory({ targetRepoRoot, ref, sessionUlid });
+    return { next: "done-ready-for-merge", completed: true as const, chatLog };
   }
 
   if (sentinel === "BLOCKED") {
