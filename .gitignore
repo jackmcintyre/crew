@@ -24,6 +24,8 @@ _bmad-output/*
 !_bmad-output/planning-artifacts/
 !_bmad-output/planning-artifacts/**
 _bmad-output/planning-artifacts/archive/
+!_bmad-output/implementation-artifacts/
+!_bmad-output/implementation-artifacts/**
 
 # Claude Code runtime — generated per-session/per-machine, not source
 .claude/scheduled_tasks.lock
