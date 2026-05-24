@@ -562,17 +562,11 @@ def cmd_cleanup(args) -> None:
     branch = f"story/{key}"
     summary: dict = {"pr": pr_number, "mergedAt": info.get("mergedAt")}
 
-    # 1. status → done
-    data = load_status()
-    dev = data.get("development_status") or {}
-    if key in dev and dev[key] != "done":
-        dev[key] = "done"
-        save_status(data)
-        summary["status"] = "done"
-    else:
-        summary["status"] = dev.get(key, "absent")
-
-    # 2. sync local main (only if currently on main; otherwise just fetch)
+    # 1. sync local main FIRST (only if currently on main; otherwise just
+    # fetch). Under the post-2026-05-24 flow the merged PR carries the
+    # `status: done` flip already, so syncing first avoids the redundant
+    # local write that would otherwise collide with the incoming ff-merge
+    # (the failure mode that surfaced cleaning up PR #122).
     subprocess.check_call(
         ["git", "fetch", "origin", "main"], cwd=REPO,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -594,6 +588,23 @@ def cmd_cleanup(args) -> None:
         summary["main_synced"] = True
     else:
         summary["main_synced"] = f"skipped (HEAD={cur})"
+
+    # 2. status → done (idempotent: under the post-2026-05-24 flow the
+    # ff-merge in step 1 already brought the flip in via Step 8's
+    # bookkeeping commit, so this is normally a no-op verification. The
+    # write branch remains as a safety net for legacy stories shipped
+    # before the bookkeeping commit existed, or for stories whose
+    # bookkeeping commit was somehow omitted.)
+    data = load_status()
+    dev = data.get("development_status") or {}
+    if key in dev and dev[key] != "done":
+        dev[key] = "done"
+        save_status(data)
+        summary["status"] = "done (written)"
+    elif key in dev:
+        summary["status"] = "done (already)"
+    else:
+        summary["status"] = "absent"
 
     # 3. remove worktree (fails closed if dirty)
     if worktree.exists():
