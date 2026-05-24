@@ -49,7 +49,7 @@ development_status:
   4-4-dev-subagent-git-push-and-gh-pr-create-terminal-action: done
   4-5-gh-error-map-yaml-and-recoverable-error-classification: done
   4-6-reviewer-subagent-read-sources-and-run-acs: done
-  4-6b-reviewer-posts-inline-comments-and-summary-verdict: in-progress
+  4-6b-reviewer-posts-inline-comments-and-summary-verdict: done
   4-7-verdict-version-stamping-and-footer-marker-idempotent-rerun: backlog
   4-8-reviewer-labels-and-negative-capability-enforcement: backlog
   4-8b-deterministic-seam-hardening-handoff-parser-and-pr-url-extraction: backlog
