@@ -1,20 +1,23 @@
 /**
- * Unit tests for `processReviewerTranscript` — Story 4.3b Task 9.
+ * Unit tests for `processReviewerTranscript` — Story 4.3b Task 9; Story 4.3c Task 5.
  *
  * Uses a real tmpdir with real `node:fs` ops. No mocking of imported modules.
  *
  * Covers:
- *   (a) READY FOR MERGE → `next: "done-ready-for-merge"`, manifest NOT mutated.
+ *   (a) READY FOR MERGE → `next: "done-ready-for-merge"`, `completed: true`,
+ *       manifest moved to done/ with `status: "done"` and preserved `claimed_by`.
+ *       (AC3(ii) seam contract — Story 4.3c)
  *   (b) NEEDS CHANGES (first rework) → `next: "rework-dev"`, reworkIteration: 1,
- *       manifest `rework_count: 1`, devPrompt populated.
+ *       manifest `rework_count: 1`, devPrompt populated, no `completed` field.
  *   (c) NEEDS CHANGES (second rework) → reworkIteration: 2, manifest `rework_count: 2`.
- *   (d) BLOCKED → `next: "done-blocked-reviewer-verdict"`, manifest NOT mutated.
+ *   (d) BLOCKED → `next: "done-blocked-reviewer-verdict"`, manifest NOT mutated,
+ *       no `completed` field. (AC3(iii) — Story 4.3c)
  *   (e) Drift / empty / unknown-sentinel → `next: "done-blocked-reviewer-grammar"`,
- *       manifest `blocked_by: "reviewer-grammar"`.
+ *       manifest `blocked_by: "reviewer-grammar"`, no `completed` field. (AC3(iv) — Story 4.3c)
  *
- * Story 4.3b Task 9.1–9.2.
+ * Story 4.3b Task 9.1–9.2; Story 4.3c Task 5.1–5.5.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -22,6 +25,15 @@ import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processReviewerTranscript } from "../process-reviewer-transcript.js";
+// ---------------------------------------------------------------------------
+// Mock deriveSourceBaseline so completeStory's hand-edit guard passes.
+// The fixture manifest has source_hash: "a".repeat(64); we return the same hash.
+// ---------------------------------------------------------------------------
+vi.mock("../../state/derive-source-baseline.js", () => ({
+    deriveSourceBaseline: vi.fn(),
+}));
+import { deriveSourceBaseline } from "../../state/derive-source-baseline.js";
+const mockDeriveSourceBaseline = vi.mocked(deriveSourceBaseline);
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -98,10 +110,24 @@ async function seedManifest(manifest) {
 beforeEach(async () => {
     tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "crew-process-reviewer-transcript-"));
     await fs.mkdir(path.join(tmpRoot, ".crew", "state", "in-progress"), { recursive: true });
+    await fs.mkdir(path.join(tmpRoot, ".crew", "state", "done"), { recursive: true });
     manifestPath = path.join(tmpRoot, ".crew", "state", "in-progress", `${STORY_REF}.yaml`);
     await seedManifest(makeBaseManifest(STORY_REF));
     await fs.mkdir(path.join(tmpRoot, "team", "generalist-dev"), { recursive: true });
     await atomicWriteFile(path.join(tmpRoot, "team", "generalist-dev", "PERSONA.md"), FIXTURE_DEV_PERSONA_MD);
+    // Set up the mock so completeStory's hand-edit guard passes.
+    // The fixture manifest has source_hash: "a".repeat(64).
+    mockDeriveSourceBaseline.mockResolvedValue({
+        sourceHash: "a".repeat(64),
+        sourceFields: {
+            title: "Test Story",
+            narrative: "As a dev, I want to test.",
+            acceptance_criteria: [{ text: "Given x, when y, then z.", kind: "integration" }],
+            implementation_notes: undefined,
+            depends_on: [],
+            withdrawn: false,
+        },
+    });
 });
 afterEach(async () => {
     await fs.rm(tmpRoot, { recursive: true, force: true });
@@ -123,22 +149,37 @@ function makeOpts(reviewerTranscript) {
     };
 }
 // ---------------------------------------------------------------------------
-// (a) READY FOR MERGE
+// (a) READY FOR MERGE — AC3(ii) seam contract (Story 4.3c Task 5.2)
 // ---------------------------------------------------------------------------
-describe("(a) READY FOR MERGE → done-ready-for-merge", () => {
-    it("no manifest mutation, chatLog has verbatim line (without bracket)", async () => {
+describe("(a) READY FOR MERGE → done-ready-for-merge with completeStory side-effect", () => {
+    it("moves manifest to done/, returns completed: true, chatLog has verbatim line (without bracket)", async () => {
         const result = await processReviewerTranscript(makeOpts(READY_FOR_MERGE));
+        // AC3(i): return type has completed: true literal field
         expect(result.next).toBe("done-ready-for-merge");
+        if (result.next !== "done-ready-for-merge")
+            return;
+        expect(result.completed).toBe(true);
+        // Chat log has verbatim verdict line
         expect(result.chatLog).toContain(`reviewer verdict: READY FOR MERGE — story ${STORY_REF} ready for merge gate`);
-        const onDisk = await readOnDiskManifest();
-        expect(onDisk.rework_count).toBeUndefined();
-        expect(onDisk.blocked_by).toBeUndefined();
+        // AC3(ii): in-progress manifest no longer exists
+        await expect(fs.stat(path.join(tmpRoot, ".crew", "state", "in-progress", `${STORY_REF}.yaml`))).rejects.toThrow(); // ENOENT
+        // AC3(ii): done manifest exists with status: "done" and preserved claimed_by
+        const doneManifestRaw = await fs.readFile(path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`), "utf8");
+        const doneManifest = parseExecutionManifest(yamlParse(doneManifestRaw), {
+            absPath: path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
+        });
+        expect(doneManifest.status).toBe("done");
+        expect(doneManifest.claimed_by).toBe(SESSION_ULID);
     });
-    it("no manifest mutation with bracket trailer", async () => {
+    it("moves manifest to done/ with bracket trailer in transcript", async () => {
         const result = await processReviewerTranscript(makeOpts(READY_WITH_BRACKET));
         expect(result.next).toBe("done-ready-for-merge");
-        const onDisk = await readOnDiskManifest();
-        expect(onDisk.rework_count).toBeUndefined();
+        if (result.next !== "done-ready-for-merge")
+            return;
+        expect(result.completed).toBe(true);
+        // in-progress gone, done exists
+        await expect(fs.stat(path.join(tmpRoot, ".crew", "state", "in-progress", `${STORY_REF}.yaml`))).rejects.toThrow();
+        await expect(fs.stat(path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`))).resolves.toBeDefined();
     });
 });
 // ---------------------------------------------------------------------------
@@ -177,45 +218,75 @@ describe("(c) NEEDS CHANGES (rework_count: 1 → 2)", () => {
     });
 });
 // ---------------------------------------------------------------------------
-// (d) BLOCKED
+// (d) BLOCKED — AC3(iii) (Story 4.3c Task 5.3)
 // ---------------------------------------------------------------------------
 describe("(d) BLOCKED → done-blocked-reviewer-verdict", () => {
-    it("no manifest mutation, chatLog has verbatim BLOCKED line (without bracket)", async () => {
+    it("no manifest mutation, no completed field, chatLog has verbatim BLOCKED line (without bracket)", async () => {
         const result = await processReviewerTranscript(makeOpts(BLOCKED_VERDICT));
         expect(result.next).toBe("done-blocked-reviewer-verdict");
+        // AC3(iii): BLOCKED branch must NOT have a completed field
+        expect("completed" in result).toBe(false);
         expect(result.chatLog).toContain(`reviewer verdict: BLOCKED — story ${STORY_REF} awaiting human`);
+        // Manifest stays in in-progress/
         const onDisk = await readOnDiskManifest();
         expect(onDisk.blocked_by).toBeUndefined();
         expect(onDisk.rework_count).toBeUndefined();
+        // done/ is empty
+        const doneFiles = await fs.readdir(path.join(tmpRoot, ".crew", "state", "done"));
+        expect(doneFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
     });
-    it("no manifest mutation with bracket trailer", async () => {
+    it("no manifest mutation with bracket trailer, no completed field", async () => {
         const result = await processReviewerTranscript(makeOpts(BLOCKED_WITH_BRACKET));
         expect(result.next).toBe("done-blocked-reviewer-verdict");
+        expect("completed" in result).toBe(false);
         const onDisk = await readOnDiskManifest();
         expect(onDisk.blocked_by).toBeUndefined();
     });
 });
 // ---------------------------------------------------------------------------
-// (e) Drift / empty / unknown-sentinel
+// (e) Drift / empty / unknown-sentinel — AC3(iv) (Story 4.3c Task 5.4)
 // ---------------------------------------------------------------------------
 describe("(e) drift → done-blocked-reviewer-grammar", () => {
-    it("drift (unrecognised paraphrase) stamps blocked_by: 'reviewer-grammar'", async () => {
+    it("drift (unrecognised paraphrase) stamps blocked_by: 'reviewer-grammar', no completed field", async () => {
         const result = await processReviewerTranscript(makeOpts("Looks good to me!"));
         expect(result.next).toBe("done-blocked-reviewer-grammar");
+        // AC3(iv): grammar-drift branch must NOT have a completed field
+        expect("completed" in result).toBe(false);
         expect(result.chatLog).toContain(`reviewer grammar drift — story ${STORY_REF} blocked. expected verbatim final line: "**Verdict: <SENTINEL>**" where SENTINEL is one of READY FOR MERGE | NEEDS CHANGES | BLOCKED.`);
         const onDisk = await readOnDiskManifest();
         expect(onDisk.blocked_by).toBe("reviewer-grammar");
+        // done/ is empty
+        const doneFiles = await fs.readdir(path.join(tmpRoot, ".crew", "state", "done"));
+        expect(doneFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
     });
-    it("empty transcript stamps blocked_by: 'reviewer-grammar'", async () => {
+    it("empty transcript stamps blocked_by: 'reviewer-grammar', no completed field", async () => {
         const result = await processReviewerTranscript(makeOpts(""));
         expect(result.next).toBe("done-blocked-reviewer-grammar");
+        expect("completed" in result).toBe(false);
         const onDisk = await readOnDiskManifest();
         expect(onDisk.blocked_by).toBe("reviewer-grammar");
     });
-    it("unknown sentinel ('Verdict: APPROVED') stamps blocked_by: 'reviewer-grammar'", async () => {
+    it("unknown sentinel ('Verdict: APPROVED') stamps blocked_by: 'reviewer-grammar', no completed field", async () => {
         const result = await processReviewerTranscript(makeOpts("Verdict: APPROVED"));
         expect(result.next).toBe("done-blocked-reviewer-grammar");
+        expect("completed" in result).toBe(false);
         const onDisk = await readOnDiskManifest();
         expect(onDisk.blocked_by).toBe("reviewer-grammar");
+    });
+});
+// ---------------------------------------------------------------------------
+// (f) NEEDS CHANGES — no completed field (Story 4.3c Task 5.5)
+// ---------------------------------------------------------------------------
+describe("(f) NEEDS CHANGES → rework-dev — no completed field", () => {
+    it("rework branch does not carry a completed field", async () => {
+        const result = await processReviewerTranscript(makeOpts("**Verdict: NEEDS CHANGES** [issues]"));
+        expect(result.next).toBe("rework-dev");
+        expect("completed" in result).toBe(false);
+        // Manifest stays in in-progress/ (rework_count incremented)
+        const onDisk = await readOnDiskManifest();
+        expect(onDisk.rework_count).toBe(1);
+        // done/ is empty
+        const doneFiles = await fs.readdir(path.join(tmpRoot, ".crew", "state", "done"));
+        expect(doneFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
     });
 });

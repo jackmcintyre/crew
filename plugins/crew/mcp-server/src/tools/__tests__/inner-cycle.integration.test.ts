@@ -1,15 +1,21 @@
 /**
  * Integration tests for the inner dev → reviewer cycle through tool composition
- * — Story 4.3b Task 10; Story 4.3c Task 4.
+ * — Story 4.3b Task 10; Story 4.3c Task 6.
  *
  * Behavioural contract source:
  *   _bmad-output/implementation-artifacts/4-3b-harness-task-spawn-seam-for-rundevsession.md § Behavioural contract
  *   _bmad-output/implementation-artifacts/4-3c-call-completestory-after-ready-for-merge.md § Behavioural contract
  *
- * Composes `processDevTranscript`, `processReviewerTranscript`, `claimNextStory`,
- * and `completeStory` in the order the SKILL.md prose will compose them. The
- * Claude Code `Task` tool is NOT in the loop — this is a unit-level integration
- * test of the MCP layer's composition correctness.
+ * Composes `processDevTranscript`, `processReviewerTranscript`, and `claimNextStory`
+ * in the order the SKILL.md prose will compose them. The Claude Code `Task` tool is
+ * NOT in the loop — this is a unit-level integration test of the MCP layer's
+ * composition correctness.
+ *
+ * NOTE (Story 4.3c): `completeStory` is no longer called directly by the test code
+ * on the green branch. `processReviewerTranscript` calls `completeStory` internally
+ * when it parses a `READY FOR MERGE` verdict. The test asserts the side-effect by
+ * inspecting the on-disk manifest state after `processReviewerTranscript` returns.
+ * The `completeStory` import is retained for the blocked-branch negative assertions.
  *
  * Each test case seeds a fixture tmpdir with:
  *   - `.crew/config.yaml` (native adapter)
@@ -26,17 +32,18 @@
  *   (f) Reviewer BLOCKED passthrough.
  *   (g) Tool count assertion (22 tools, contains new tools, does not contain runDevSession).
  *
- * AC4 (4.3c) — two-story drain with completeStory:
- *   (a)–(g) Two stories driven through claimNextStory → processDevTranscript →
- *           processReviewerTranscript → completeStory, then third claimNextStory
- *           returns queue-drained.
- *   (h) Blocked branch: completeStory NOT called, manifest stays in in-progress/.
+ * AC4 (4.3c) — two-story drain via processReviewerTranscript internal seam:
+ *   Two stories driven through claimNextStory → processDevTranscript →
+ *   processReviewerTranscript (which internally calls completeStory and returns
+ *   completed: true), then third claimNextStory returns queue-drained.
+ *   (h) Blocked branch: processReviewerTranscript does NOT move manifest, returned
+ *       object has no `completed` field.
  *   (i) Reviewer-grammar-drift branch: same MUST NOT pattern as (h).
  *
- * Story 4.3b Task 10.1–10.4; Story 4.3c Task 4.1–4.10.
+ * Story 4.3b Task 10.1–10.4; Story 4.3c Task 6.1–6.6.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -46,7 +53,6 @@ import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processDevTranscript } from "../process-dev-transcript.js";
 import { processReviewerTranscript } from "../process-reviewer-transcript.js";
 import { claimNextStory } from "../claim-next-story.js";
-import { completeStory } from "../complete-story.js";
 import { scanSources } from "../scan-sources.js";
 import { registerAllTools } from "../register.js";
 import { createServer } from "../../server.js";
@@ -54,6 +60,25 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { ExecutionManifest } from "../../schemas/execution-manifest.js";
+
+// ---------------------------------------------------------------------------
+// Mock deriveSourceBaseline for the tests that use the fixture STORY_REF
+// (which uses a non-Crockford ULID that fails native adapter validation).
+// Tests that use buildTwoStoryWorkspace (real source files) set the mock to
+// call the real implementation via realDeriveSourceBaseline.
+// ---------------------------------------------------------------------------
+
+vi.mock("../../state/derive-source-baseline.js", () => ({
+  deriveSourceBaseline: vi.fn(),
+}));
+
+import { deriveSourceBaseline } from "../../state/derive-source-baseline.js";
+const mockDeriveSourceBaseline = vi.mocked(deriveSourceBaseline);
+
+// Capture a real implementation reference via importActual for workspace-based tests.
+const { deriveSourceBaseline: realDeriveSourceBaseline } = await vi.importActual<
+  typeof import("../../state/derive-source-baseline.js")
+>("../../state/derive-source-baseline.js");
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -199,6 +224,21 @@ beforeEach(async () => {
     path.join(tmpRoot, "team", "generalist-reviewer", "PERSONA.md"),
     FIXTURE_REVIEWER_PERSONA_MD,
   );
+
+  // Mock deriveSourceBaseline so completeStory's hand-edit guard passes for
+  // the fixture STORY_REF (which has a non-Crockford ULID / no source file).
+  // The two-story drain tests override this mock to use real source resolution.
+  mockDeriveSourceBaseline.mockResolvedValue({
+    sourceHash: "a".repeat(64),
+    sourceFields: {
+      title: "Integration Test Story",
+      narrative: "As a dev, I want to integrate test.",
+      acceptance_criteria: [{ text: "Given x, when y, then z.", kind: "integration" }],
+      implementation_notes: undefined,
+      depends_on: [],
+      withdrawn: false,
+    },
+  });
 });
 
 afterEach(async () => {
@@ -233,7 +273,7 @@ function makeReviewerOpts(reviewerTranscript: string) {
 // ---------------------------------------------------------------------------
 
 describe("AC4(a): happy handoff + READY FOR MERGE", () => {
-  it("full cycle: spawn-reviewer → done-ready-for-merge, no manifest mutations, verbatim chatLog", async () => {
+  it("full cycle: spawn-reviewer → done-ready-for-merge, completed: true, verbatim chatLog, manifest moved to done/", async () => {
     const devResult = await processDevTranscript(makeDevOpts(HANDOFF_PHRASE));
 
     expect(devResult.next).toBe("spawn-reviewer");
@@ -241,6 +281,10 @@ describe("AC4(a): happy handoff + READY FOR MERGE", () => {
 
     const reviewerResult = await processReviewerTranscript(makeReviewerOpts(READY_FOR_MERGE));
     expect(reviewerResult.next).toBe("done-ready-for-merge");
+    if (reviewerResult.next !== "done-ready-for-merge") return;
+
+    // Story 4.3c: completed: true confirms completeStory ran internally.
+    expect(reviewerResult.completed).toBe(true);
 
     // Cumulative chatLog contains AC1 verbatim line.
     const allChatLog = [...devResult.chatLog, ...reviewerResult.chatLog];
@@ -252,10 +296,18 @@ describe("AC4(a): happy handoff + READY FOR MERGE", () => {
       `reviewer verdict: READY FOR MERGE — story ${STORY_REF} ready for merge gate`,
     );
 
-    // No rework_count, no blocked_by.
-    const onDisk = await readOnDiskManifest();
-    expect(onDisk.rework_count).toBeUndefined();
-    expect(onDisk.blocked_by).toBeUndefined();
+    // Story 4.3c: manifest moved to done/; in-progress/ no longer has the ref.
+    await expect(fs.stat(manifestPath)).rejects.toThrow(); // ENOENT
+    const doneManifestRaw = await fs.readFile(
+      path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
+      "utf8",
+    );
+    const doneManifest = parseExecutionManifest(yamlParse(doneManifestRaw) as unknown, {
+      absPath: path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
+    });
+    expect(doneManifest.status).toBe("done");
+    expect(doneManifest.rework_count).toBeUndefined();
+    expect(doneManifest.blocked_by).toBeUndefined();
   });
 });
 
@@ -264,7 +316,7 @@ describe("AC4(a): happy handoff + READY FOR MERGE", () => {
 // ---------------------------------------------------------------------------
 
 describe("AC4(b): NEEDS CHANGES (rework_count undefined → 1) → second cycle READY FOR MERGE", () => {
-  it("rework-dev → reworkIteration: 1, then done-ready-for-merge; manifest rework_count: 1; verbatim AC2 line", async () => {
+  it("rework-dev → reworkIteration: 1, then done-ready-for-merge; done manifest rework_count: 1; verbatim AC2 line", async () => {
     // First dev turn: happy handoff.
     const devResult1 = await processDevTranscript(makeDevOpts(HANDOFF_PHRASE));
     expect(devResult1.next).toBe("spawn-reviewer");
@@ -284,6 +336,9 @@ describe("AC4(b): NEEDS CHANGES (rework_count undefined → 1) → second cycle 
     // Second reviewer turn: READY FOR MERGE.
     const reviewerResult2 = await processReviewerTranscript(makeReviewerOpts(READY_FOR_MERGE));
     expect(reviewerResult2.next).toBe("done-ready-for-merge");
+    if (reviewerResult2.next !== "done-ready-for-merge") return;
+    // Story 4.3c: completed: true confirms the internal move
+    expect(reviewerResult2.completed).toBe(true);
 
     // Cumulative chatLog contains AC2 verbatim line with <n>=1.
     const allChatLog = [
@@ -296,10 +351,17 @@ describe("AC4(b): NEEDS CHANGES (rework_count undefined → 1) → second cycle 
       `reviewer verdict: NEEDS CHANGES — re-spawning generalist-dev subagent (rework iteration 1)`,
     );
 
-    // Manifest final state: rework_count: 1.
-    const onDisk = await readOnDiskManifest();
-    expect(onDisk.rework_count).toBe(1);
-    expect(onDisk.blocked_by).toBeUndefined();
+    // Story 4.3c: manifest moved to done/ with rework_count: 1 preserved.
+    await expect(fs.stat(manifestPath)).rejects.toThrow(); // ENOENT
+    const doneManifestRaw = await fs.readFile(
+      path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
+      "utf8",
+    );
+    const doneManifest = parseExecutionManifest(yamlParse(doneManifestRaw) as unknown, {
+      absPath: path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
+    });
+    expect(doneManifest.rework_count).toBe(1);
+    expect(doneManifest.blocked_by).toBeUndefined();
   });
 });
 
@@ -363,6 +425,9 @@ describe("AC4(d): two-iteration rework: NEEDS CHANGES × 2 → READY FOR MERGE",
     const rev3 = await processReviewerTranscript(makeReviewerOpts(READY_FOR_MERGE));
     allChatLog.push(...rev3.chatLog);
     expect(rev3.next).toBe("done-ready-for-merge");
+    if (rev3.next !== "done-ready-for-merge") return;
+    // Story 4.3c: completed: true
+    expect(rev3.completed).toBe(true);
 
     // AC2 line appears twice.
     const n1Line = `reviewer verdict: NEEDS CHANGES — re-spawning generalist-dev subagent (rework iteration 1)`;
@@ -370,10 +435,17 @@ describe("AC4(d): two-iteration rework: NEEDS CHANGES × 2 → READY FOR MERGE",
     expect(allChatLog).toContain(n1Line);
     expect(allChatLog).toContain(n2Line);
 
-    // Final manifest: rework_count: 2, no blocked_by.
-    const onDisk = await readOnDiskManifest();
-    expect(onDisk.rework_count).toBe(2);
-    expect(onDisk.blocked_by).toBeUndefined();
+    // Story 4.3c: manifest moved to done/ with rework_count: 2 preserved.
+    await expect(fs.stat(manifestPath)).rejects.toThrow(); // ENOENT
+    const doneManifestRaw = await fs.readFile(
+      path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
+      "utf8",
+    );
+    const doneManifest = parseExecutionManifest(yamlParse(doneManifestRaw) as unknown, {
+      absPath: path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
+    });
+    expect(doneManifest.rework_count).toBe(2);
+    expect(doneManifest.blocked_by).toBeUndefined();
   });
 });
 
@@ -545,20 +617,22 @@ async function buildTwoStoryWorkspace(scratch: string): Promise<{
   return { root, refA, refB };
 }
 
-describe("AC4 (4.3c): green-path two-story drain calls completeStory and reaches queue-drained", () => {
+describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript internal seam", () => {
   let twoStoryRoot: string;
 
   beforeEach(async () => {
     twoStoryRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "crew-ac4-4-3c-two-story-"),
     );
+    // Use real deriveSourceBaseline for workspace-based tests (has real source files).
+    mockDeriveSourceBaseline.mockImplementation(realDeriveSourceBaseline);
   });
 
   afterEach(async () => {
     await fs.rm(twoStoryRoot, { recursive: true, force: true });
   });
 
-  it("drives two stories through claim → dev → reviewer-ready → complete, then queue-drained", async () => {
+  it("drives two stories through claim → dev → reviewer-ready (internal completeStory), then queue-drained", async () => {
     const sessionUlid = "01HZSESSION4_3CTWO_STORY_0001";
     const { root, refA, refB } = await buildTwoStoryWorkspace(twoStoryRoot);
 
@@ -593,7 +667,9 @@ describe("AC4 (4.3c): green-path two-story drain calls completeStory and reaches
     expect(devA.next).toBe("spawn-reviewer");
     syntheticChatLog.push(...devA.chatLog);
 
-    // AC4(c): processReviewerTranscript → done-ready-for-merge
+    // AC4(c): processReviewerTranscript → done-ready-for-merge with completed: true
+    // NOTE (Story 4.3c): No external completeStory call here — the side-effect is
+    // performed INSIDE processReviewerTranscript before it returns.
     const reviewerA = await processReviewerTranscript({
       targetRepoRoot: root,
       sessionUlid,
@@ -602,16 +678,15 @@ describe("AC4 (4.3c): green-path two-story drain calls completeStory and reaches
       reviewerTranscript: READY_FOR_MERGE,
     });
     expect(reviewerA.next).toBe("done-ready-for-merge");
+    if (reviewerA.next !== "done-ready-for-merge") return;
+    // AC4(c): completed: true confirms the internal completeStory ran
+    expect(reviewerA.completed).toBe(true);
     syntheticChatLog.push(...reviewerA.chatLog);
 
-    // AC4(d): completeStory moves manifest to done/
-    const completeA = await completeStory({ targetRepoRoot: root, ref: refA, sessionUlid });
-    expect(completeA.ref).toBe(refA);
-
-    // Assert in-progress/ no longer has refA; done/ does
+    // AC4(c) disk assertion: in-progress/ no longer has refA; done/ does
     await expect(
       fs.stat(path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`)),
-    ).rejects.toThrow(); // ENOENT
+    ).rejects.toThrow(); // ENOENT — moved by processReviewerTranscript internally
     const doneManifestARaw = await fs.readFile(
       path.join(root, ".crew", "state", "done", `${refA}.yaml`),
       "utf8",
@@ -622,9 +697,9 @@ describe("AC4 (4.3c): green-path two-story drain calls completeStory and reaches
     expect(doneManifestA.status).toBe("done");
     expect(doneManifestA.claimed_by).toBe(sessionUlid);
 
-    // AC4(e): synthetic chat log contains the verbatim completion line AFTER the READY FOR MERGE line
+    // AC4(d): synthetic chat log — prose observes completed: true and appends the line
     const completionLineA = `story ${refA} moved to done — claiming next`;
-    syntheticChatLog.push(completionLineA);
+    syntheticChatLog.push(completionLineA); // simulates prose emitting line after observing completed: true
 
     const readyForMergeLineA = `reviewer verdict: READY FOR MERGE — story ${refA} ready for merge gate`;
     const readyIdx = syntheticChatLog.indexOf(readyForMergeLineA);
@@ -656,6 +731,7 @@ describe("AC4 (4.3c): green-path two-story drain calls completeStory and reaches
     expect(devB.next).toBe("spawn-reviewer");
     syntheticChatLog.push(...devB.chatLog);
 
+    // processReviewerTranscript calls completeStory internally for story B too
     const reviewerB = await processReviewerTranscript({
       targetRepoRoot: root,
       sessionUlid,
@@ -664,10 +740,9 @@ describe("AC4 (4.3c): green-path two-story drain calls completeStory and reaches
       reviewerTranscript: READY_FOR_MERGE,
     });
     expect(reviewerB.next).toBe("done-ready-for-merge");
+    if (reviewerB.next !== "done-ready-for-merge") return;
+    expect(reviewerB.completed).toBe(true);
     syntheticChatLog.push(...reviewerB.chatLog);
-
-    const completeB = await completeStory({ targetRepoRoot: root, ref: refB, sessionUlid });
-    expect(completeB.ref).toBe(refB);
 
     await expect(
       fs.stat(path.join(root, ".crew", "state", "in-progress", `${refB}.yaml`)),
@@ -683,7 +758,7 @@ describe("AC4 (4.3c): green-path two-story drain calls completeStory and reaches
     expect(doneManifestB.claimed_by).toBe(sessionUlid);
 
     const completionLineB = `story ${refB} moved to done — claiming next`;
-    syntheticChatLog.push(completionLineB);
+    syntheticChatLog.push(completionLineB); // simulates prose observing completed: true
 
     const readyForMergeLineB = `reviewer verdict: READY FOR MERGE — story ${refB} ready for merge gate`;
     const readyIdxB = syntheticChatLog.lastIndexOf(readyForMergeLineB);
@@ -691,14 +766,14 @@ describe("AC4 (4.3c): green-path two-story drain calls completeStory and reaches
     expect(readyIdxB).toBeGreaterThanOrEqual(0);
     expect(doneIdxB).toBeGreaterThan(readyIdxB);
 
-    // AC4(f): third claimNextStory → queue-drained
+    // AC4(e): third claimNextStory → queue-drained
     const claimThird = await claimNextStory({ targetRepoRoot: root, sessionUlid });
     expect(claimThird.next).toBe("queue-drained");
     expect(claimThird.chatLog[0]).toBe(
       "queue drained — to-do/ and in-progress/ are both empty. Stop here, or run /crew:plan to add work.",
     );
 
-    // AC4(g): final on-disk state
+    // AC4(f): final on-disk state
     const todoFiles = await fs.readdir(path.join(root, ".crew", "state", "to-do"));
     expect(todoFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
 
@@ -714,16 +789,18 @@ describe("AC4 (4.3c): green-path two-story drain calls completeStory and reaches
 });
 
 // ---------------------------------------------------------------------------
-// AC4 (4.3c): Blocked branches do NOT call completeStory
+// AC4 (4.3c): Blocked branches do NOT invoke completeStory
 // ---------------------------------------------------------------------------
 
-describe("AC4 (4.3c): blocked branches do NOT call completeStory", () => {
+describe("AC4 (4.3c): blocked branches do NOT invoke completeStory", () => {
   let blockedRoot: string;
 
   beforeEach(async () => {
     blockedRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "crew-ac4-4-3c-blocked-"),
     );
+    // Use real deriveSourceBaseline for workspace-based tests.
+    mockDeriveSourceBaseline.mockImplementation(realDeriveSourceBaseline);
   });
 
   afterEach(async () => {
@@ -731,10 +808,10 @@ describe("AC4 (4.3c): blocked branches do NOT call completeStory", () => {
   });
 
   /**
-   * AC4(h): Reviewer BLOCKED branch — test code does NOT call completeStory,
-   * manifest stays in in-progress/, done/ is empty.
+   * AC4(g): Reviewer BLOCKED branch — processReviewerTranscript does NOT move
+   * the manifest, returned object has no `completed` field, done/ is empty.
    */
-  it("AC4(h): reviewer BLOCKED verdict — manifest stays in-progress, done/ empty", async () => {
+  it("AC4(g): reviewer BLOCKED verdict — manifest stays in-progress, no completed field, done/ empty", async () => {
     const sessionUlid = "01HZSESSION4_3CBLOCKED_001";
     const { root, refA } = await buildTwoStoryWorkspace(blockedRoot);
 
@@ -763,9 +840,10 @@ describe("AC4 (4.3c): blocked branches do NOT call completeStory", () => {
     });
     expect(reviewerResult.next).toBe("done-blocked-reviewer-verdict");
 
-    // Prose-layer guard: on done-blocked-reviewer-verdict, the test code simulates
-    // the SKILL.md prose NOT calling completeStory. We verify the manifest state
-    // without invoking completeStory at all.
+    // AC4(g): BLOCKED branch must NOT have a completed field
+    expect("completed" in reviewerResult).toBe(false);
+
+    // Manifest stays in in-progress/
     const inProgressStat = await fs.stat(
       path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
     );
@@ -781,10 +859,10 @@ describe("AC4 (4.3c): blocked branches do NOT call completeStory", () => {
   });
 
   /**
-   * AC4(i): Reviewer grammar drift — manifest stays in-progress/ with
-   * blocked_by: "reviewer-grammar", done/ is empty. completeStory NOT called.
+   * AC4(h): Reviewer grammar drift — manifest stays in-progress/ with
+   * blocked_by: "reviewer-grammar", done/ is empty, no `completed` field.
    */
-  it("AC4(i): reviewer grammar drift — manifest stays in-progress with blocked_by, done/ empty", async () => {
+  it("AC4(h): reviewer grammar drift — manifest stays in-progress with blocked_by, no completed field, done/ empty", async () => {
     const sessionUlid = "01HZSESSION4_3CGRAMMAR_001";
     const { root, refA } = await buildTwoStoryWorkspace(blockedRoot);
 
@@ -813,8 +891,10 @@ describe("AC4 (4.3c): blocked branches do NOT call completeStory", () => {
     });
     expect(reviewerResult.next).toBe("done-blocked-reviewer-grammar");
 
-    // Prose-layer guard: on done-blocked-reviewer-grammar, completeStory is NOT called.
-    // Manifest stays in in-progress/ with blocked_by: "reviewer-grammar".
+    // AC4(h): grammar-drift branch must NOT have a completed field
+    expect("completed" in reviewerResult).toBe(false);
+
+    // Manifest stays in in-progress/ with blocked_by: "reviewer-grammar"
     const inProgressRaw = await fs.readFile(
       path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
       "utf8",
