@@ -52,7 +52,7 @@ development_status:
   4-6b-reviewer-posts-inline-comments-and-summary-verdict: done
   4-7-verdict-version-stamping-and-footer-marker-idempotent-rerun: done
   4-8-reviewer-labels-and-negative-capability-enforcement: done
-  4-8b-deterministic-seam-hardening-handoff-parser-and-pr-url-extraction: ready-for-dev
+  4-8b-deterministic-seam-hardening-handoff-parser-and-pr-url-extraction: done
   4-9-risk-tiering-spec-format-and-override-resolution: backlog
   4-9b-risk-tier-classifier-code-evidence-stamping-and-fallback: backlog
   4-10-agreement-metric-helper-compute-agreement: backlog
