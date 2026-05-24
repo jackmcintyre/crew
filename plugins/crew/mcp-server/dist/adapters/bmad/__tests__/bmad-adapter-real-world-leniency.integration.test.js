@@ -28,6 +28,7 @@ import { parse as yamlParse } from "yaml";
 import { atomicWriteFile } from "../../../lib/managed-fs.js";
 import { BmadAdapter, configureBmadAdapter, resetBmadAdapter, } from "../index.js";
 import { scanSources } from "../../../tools/scan-sources.js";
+import { getStatus, renderStatus } from "../../../tools/get-status.js";
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
@@ -174,5 +175,55 @@ describe("BMad adapter real-world leniency (Story 3.8 AC6)", () => {
         expect(idx31).toBeLessThan(idx48);
         expect(idx48).toBeLessThan(idx48b);
         expect(idx48b).toBeLessThan(idx51);
+    });
+    // ---------------------------------------------------------------------------
+    // AC5 (user-surface): getStatus / renderStatus path — custom storiesRoot
+    // must NOT produce "mismatched" label.
+    //
+    // These tests exercise the full getStatus → resolveWorkspace →
+    // validateActiveAdapter → BmadAdapter.detect() chain so that the
+    // "adapter: bmad (ok)" / "adapter: bmad (mismatched)" output of
+    // /crew:status is directly covered.
+    // ---------------------------------------------------------------------------
+    it("AC5 positive: getStatus renders 'adapter: bmad (ok)' when custom stories_root contains BMad stories", async () => {
+        const root = path.join(scratch, "repo-ac5-pos");
+        // Write .crew/config.yaml with an explicit stories_root pointing at the fixture.
+        // stories_root must be an absolute path that BmadAdapter.detect() can stat directly.
+        await atomicWriteFile(path.join(root, ".crew", "config.yaml"), [
+            "adapter: bmad",
+            "adapter_config:",
+            `  stories_root: ${FIXTURE_STORIES_ROOT}`,
+        ].join("\n") + "\n");
+        // Pass the real BmadAdapter (no stub) so detect() exercises the AC5 fix.
+        const report = await getStatus({ targetRepoRoot: root, adapters: [BmadAdapter] });
+        // adapter.state must be "ok" — not "mismatched".
+        expect(report.adapter.state).toBe("ok");
+        if (report.adapter.state === "ok") {
+            expect(report.adapter.name).toBe("bmad");
+        }
+        // renderStatus must produce the "ok" label, not the "mismatched" label.
+        const rendered = renderStatus(report);
+        expect(rendered).toContain("adapter: bmad (ok)");
+        expect(rendered).not.toContain("adapter: bmad (mismatched)");
+    });
+    it("AC5 negative: getStatus renders 'adapter: bmad (mismatched)' when custom stories_root is an empty directory", async () => {
+        const root = path.join(scratch, "repo-ac5-neg");
+        const emptyStoriesRoot = path.join(scratch, "empty-stories-root");
+        await fs.mkdir(emptyStoriesRoot, { recursive: true });
+        // Write .crew/config.yaml pointing at an empty directory.
+        await atomicWriteFile(path.join(root, ".crew", "config.yaml"), [
+            "adapter: bmad",
+            "adapter_config:",
+            `  stories_root: ${emptyStoriesRoot}`,
+        ].join("\n") + "\n");
+        const report = await getStatus({ targetRepoRoot: root, adapters: [BmadAdapter] });
+        // adapter.state must be "mismatched" — the empty dir has no BMad stories.
+        expect(report.adapter.state).toBe("mismatched");
+        if (report.adapter.state === "mismatched") {
+            expect(report.adapter.name).toBe("bmad");
+        }
+        const rendered = renderStatus(report);
+        expect(rendered).toContain("adapter: bmad (mismatched)");
+        expect(rendered).not.toContain("adapter: bmad (ok)");
     });
 });
