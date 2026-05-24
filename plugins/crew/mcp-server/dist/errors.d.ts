@@ -595,6 +595,60 @@ export declare class GhPrCreateFailedError extends DomainError {
     });
 }
 /**
+ * `plugins/crew/permissions/gh-error-map.yaml` failed schema validation: the
+ * top-level shape was wrong, a per-entry key was unknown, `class` was not in
+ * the literal set, `exit_code` was missing or non-integer, or a `stderr_regex`
+ * string could not be compiled as a JavaScript regex.
+ *
+ * Thrown by `parseGhErrorMap` in `lib/gh-error-map.ts`.
+ *
+ * `rowIndex` is 1-indexed (the first entry is row 1). Present only when the
+ * error is tied to a specific entry. `offendingKey` names the YAML key that
+ * caused the failure. `reason` carries the human-readable cause string.
+ *
+ * Story 4.5 Task 1.3
+ */
+export declare class MalformedGhErrorMapError extends DomainError {
+    readonly filePath: string;
+    readonly reason: string;
+    readonly rowIndex?: number;
+    readonly offendingKey?: string;
+    constructor(opts: {
+        filePath: string;
+        reason: string;
+        rowIndex?: number;
+        offendingKey?: string;
+    });
+}
+/**
+ * `gh()` wrapper detected a mapped recoverable error via the `gh-error-map.yaml`
+ * classifier. Raised AFTER `execaImpl` returns with a non-zero exit code and the
+ * classifier returns a non-null class. The error propagates through
+ * `runDevTerminalAction` unchanged; the dev subagent emits the locked marker line
+ * so `processDevTranscript` can stamp `blocked_by: gh-<class>` on the in-progress
+ * manifest.
+ *
+ * Fields:
+ * - `class` — one of `"defer" | "retry" | "needs-human"` (the mapped class from the YAML table).
+ * - `exitCode` — the `gh` process exit code.
+ * - `stderr` — the raw stderr string from `gh`.
+ * - `subcommand` — the kebab-cased subcommand (e.g. `"pr-create"`).
+ *
+ * Story 4.5 Task 3.1
+ */
+export declare class GhRecoverableError extends DomainError {
+    readonly class: "defer" | "retry" | "needs-human";
+    readonly exitCode: number;
+    readonly stderr: string;
+    readonly subcommand: string;
+    constructor(opts: {
+        class: "defer" | "retry" | "needs-human";
+        exitCode: number;
+        stderr: string;
+        subcommand: string;
+    });
+}
+/**
  * `runDevTerminalAction` received a `type` argument that is not in the
  * conventional-commits type set. Thrown BEFORE any subprocess spawn.
  * (Story 4.4 AC1b)
