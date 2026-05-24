@@ -470,8 +470,9 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("processDevTranscript");
             expect(toolNames).toContain("processReviewerTranscript");
             expect(toolNames).toContain("runReviewerSession");
+            expect(toolNames).toContain("postReviewerComments");
             expect(toolNames).not.toContain("runDevSession");
-            expect(toolNames.length).toBe(23);
+            expect(toolNames.length).toBe(24);
         }
         finally {
             await client.close();

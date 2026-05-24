@@ -721,6 +721,45 @@ export declare class ReviewerResultFileMalformedError extends DomainError {
     });
 }
 /**
+ * A `gh api` subcommand returned a response body that could not be parsed
+ * as JSON or did not match the expected shape. Raised by
+ * `postReviewerComments` when `gh api .../reviews` returns non-JSON stdout
+ * or when `gh pr view --json baseRepository` returns an unexpected shape.
+ *
+ * Fields:
+ * - `subcommand` — the kebab-cased subcommand (e.g. `"api"`, `"pr-view"`).
+ * - `url` — the API URL path (only present for `api` calls).
+ * - `cause` — the raw parse/validation error.
+ *
+ * Story 4.6b Task 6.1
+ */
+export declare class GhApiResponseShapeError extends DomainError {
+    readonly subcommand: string;
+    readonly url?: string;
+    readonly cause: unknown;
+    constructor(opts: {
+        subcommand: string;
+        url?: string;
+        cause: unknown;
+    });
+}
+/**
+ * `composeVerdictLine` reached the BLOCKED branch but `acResults` is neither
+ * empty nor contains a `manual-check-required` entry. Per Story 4.6 §3f this
+ * state is unreachable in a non-mutated `reviewer-result.json` — reaching it
+ * means the persisted file was mutated out-of-band (e.g. hand-edited). Raised
+ * to refuse fabricating a reason string that would violate AC2's enumerated
+ * grammar.
+ *
+ * Story 4.6b Task 6.2
+ */
+export declare class UnreachableBlockedReasonError extends DomainError {
+    readonly acResultKeys: readonly string[];
+    constructor(opts: {
+        acResults: Record<number, unknown>;
+    });
+}
+/**
  * `buildBranchSlug` produced a slug that had no alphanumeric characters
  * after the `story/` prefix (e.g. a title composed entirely of Unicode
  * / punctuation). Thrown BEFORE any subprocess spawn. (Story 4.4

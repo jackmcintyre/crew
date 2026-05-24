@@ -53,51 +53,9 @@
  *
  * Story 4.3b Task 3.1–3.5; Story 4.3c Task 2.1–2.7; Story 4.6 Task 8b.
  */
-import { promises as fs } from "node:fs";
-import * as path from "node:path";
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { completeStory } from "./complete-story.js";
-import { ReviewerResultFileMalformedError } from "../errors.js";
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-/**
- * Read, parse, and validate the `reviewer-result.json` file written by
- * `runReviewerSession`. Returns `null` when the file is absent (ENOENT).
- * Throws `ReviewerResultFileMalformedError` on malformed JSON or unexpected shape.
- */
-async function readReviewerResultFile(targetRepoRoot, sessionUlid) {
-    const filePath = path.join(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "reviewer-result.json");
-    let raw;
-    try {
-        raw = await fs.readFile(filePath, "utf8");
-    }
-    catch (err) {
-        const code = err.code;
-        if (code === "ENOENT") {
-            return null;
-        }
-        throw err;
-    }
-    let parsed;
-    try {
-        parsed = JSON.parse(raw);
-    }
-    catch (cause) {
-        throw new ReviewerResultFileMalformedError({ path: filePath, cause });
-    }
-    // Minimal shape validation — just enough to confirm the fields we rely on.
-    if (typeof parsed !== "object" ||
-        parsed === null ||
-        typeof parsed.recommendedVerdict !== "string" ||
-        !["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED"].includes(parsed.recommendedVerdict)) {
-        throw new ReviewerResultFileMalformedError({
-            path: filePath,
-            cause: "missing or invalid 'recommendedVerdict' field — expected one of: READY FOR MERGE, NEEDS CHANGES, BLOCKED",
-        });
-    }
-    return parsed;
-}
+import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------

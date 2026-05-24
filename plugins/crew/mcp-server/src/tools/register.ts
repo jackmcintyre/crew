@@ -25,6 +25,7 @@ import { processDevTranscript } from "./process-dev-transcript.js";
 import { processReviewerTranscript } from "./process-reviewer-transcript.js";
 import { runDevTerminalAction } from "./run-dev-terminal-action.js";
 import { runReviewerSession } from "./run-reviewer-session.js";
+import { postReviewerComments } from "./post-reviewer-comments.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -861,6 +862,52 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         .parse(args);
       try {
         const result = await runDevTerminalAction(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.6b — postReviewerComments: posts the reviewer's verdict as a PR review.
+  // Reads reviewer-result.json, composes summary body + inline comments deterministically,
+  // and POSTs a single gh api review. Invoked from SKILL.md prose AFTER reviewer Task
+  // returns and BEFORE processReviewerTranscript runs.
+  server.registerTool({
+    name: "postReviewerComments",
+    description:
+      "Read the persisted reviewer-result.json (written by runReviewerSession) and post a PR review " +
+      "with a deterministic summary body and zero-or-more inline comments. " +
+      "Returns { next: 'skipped-no-session-result', postedReviewId: null } when the file is absent, " +
+      "or { next: 'posted', postedReviewId, inlineCommentCount, verdictLine } on success. " +
+      "All composition is deterministic (no LLM step). Story 4.6b.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        sessionUlid: { type: "string" },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "sessionUlid"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          sessionUlid: z.string().min(1),
+          role: z.string().optional(),
+        })
+        .parse(args);
+      try {
+        const result = await postReviewerComments(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
