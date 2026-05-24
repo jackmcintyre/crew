@@ -67,12 +67,6 @@ import type { ReviewerResultFileShape, RecommendedVerdict } from "./run-reviewer
 // ---------------------------------------------------------------------------
 
 export type ProcessReviewerTranscriptResult =
-  | {
-      next: "rework-dev";
-      devPrompt: string;
-      reworkIteration: number;
-      chatLog: string[];
-    }
   | { next: "done-ready-for-merge"; completed: true; chatLog: string[] }
   | {
       /** Reviewer's `runReviewerSession` found one or more failing ACs. Dev must iterate. */

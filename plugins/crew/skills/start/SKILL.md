@@ -43,7 +43,7 @@ One `/crew:start` invocation is one session. The session ULID is minted once at 
 After a story is claimed, the inner cycle manages the dev spawn → handoff parse → reviewer spawn → verdict parse loop. The SKILL.md prose owns the `Task` tool invocations; the MCP tools own the parsing and manifest mutations.
 
 **Invariant: The SKILL.md prose MUST pass the transcript verbatim — no summarisation, no editing.**
-Both `devTranscript` (passed to `processDevTranscript`) and `reviewerTranscript` (passed to `processReviewerTranscript`) MUST be the full final-message string returned by the `Task` tool — no extraction, no trimming.
+`devTranscript` (passed to `processDevTranscript`) MUST be the full final-message string returned by the `Task` tool — no extraction, no trimming. The reviewer's chat transcript is NOT passed to `processReviewerTranscript`; the verdict transport is the `reviewer-result.json` file written by `runReviewerSession` (Story 4.6 revision 2). `runReviewerSession` is the reviewer's only valid verdict-path; `processReviewerTranscript` reads the file, not the chat.
 
 ## Dev spawn
 
@@ -85,9 +85,9 @@ Both `devTranscript` (passed to `processDevTranscript`) and `reviewerTranscript`
    prNumber: <prNumber>
    ```
 
-9. When the `Task` tool returns, capture the reviewer subagent's final message as `reviewerTranscript`.
+9. When the `Task` tool returns, the reviewer subagent's session result is already persisted to `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` by `runReviewerSession`. No transcript capture is needed — the verdict transport is the file, not the chat.
 
-10. pass the captured reviewerTranscript to processReviewerTranscript({ targetRepoRoot, sessionUlid, ref, manifestPath, reviewerTranscript }).
+10. invoke processReviewerTranscript({ targetRepoRoot, sessionUlid, ref, manifestPath }). The tool reads `reviewer-result.json` and switches on its `recommendedVerdict` field to drive all manifest mutations.
 
 11. Surface every entry of the returned `chatLog` to the operator in order, before any subsequent call.
 
@@ -96,11 +96,11 @@ Both `devTranscript` (passed to `processDevTranscript`) and `reviewerTranscript`
       1. Confirm `completed: true` is present on the returned object. This flag signals that `processReviewerTranscript` has already called `completeStory` internally and moved the manifest from `in-progress/<ref>.yaml` to `done/<ref>.yaml` before returning.
       2. emit the verbatim chat-surface line `story <ref> moved to done — claiming next` (with `<ref>` substituted at runtime).
       3. return to outer loop step 4 (`claimNextStory`).
-    - `done-blocked-reviewer-verdict` → return to outer loop (step 4).
-    - `done-blocked-reviewer-grammar` → return to outer loop (step 4).
-    - `rework-dev` → store `devPrompt` and `reworkIteration`; loop back to step 3 (dev spawn), using the `devPrompt` returned by `processReviewerTranscript` in place of the initial dev prompt, and adding `rework_iteration: <reworkIteration>` to the `initial_context`.
+    - `done-blocked-reviewer-needs-changes` → emit the verbatim chat line `reviewer verdict: NEEDS CHANGES — story <ref> needs dev rework` (with `<ref>` substituted). The manifest stays in `in-progress/` with `blocked_by: reviewer-verdict-needs-changes` (stamped by `processReviewerTranscript`). Loop back to step 3 (dev spawn) for rework — use the original `devPrompt` from `buildPersonaSpawnPrompt` and include `rework_iteration: <n>` in the `initial_context`.
+    - `done-blocked-reviewer-blocked` → emit the verbatim chat line `reviewer verdict: BLOCKED — story <ref> awaiting human`. The manifest stays in `in-progress/` with `blocked_by: reviewer-verdict-blocked`. Do NOT loop — operator must intervene. Return to outer loop step 4.
+    - `done-blocked-no-session-result` → emit the verbatim chat line `reviewer did not invoke runReviewerSession — story <ref> awaiting human`. The manifest stays in `in-progress/` with `blocked_by` already stamped by `processReviewerTranscript`. Do NOT loop — operator must inspect why `reviewer-result.json` was not written. Return to outer loop step 4.
 
-**Invariant: MUST NOT invoke completeStory directly — processReviewerTranscript performs the move internally on the done-ready-for-merge branch.** The prose layer is not in the `completeStory` call path; `completeStory` is not in `allowed_tools`. **MUST NOT call completeStory on the done-blocked-reviewer-verdict or done-blocked-reviewer-grammar branch.** On either blocked branch the manifest stays in `in-progress/` with `blocked_by` already stamped by `processReviewerTranscript`. The prose surfaces the verbatim blocked line from `chatLog` and returns to the outer loop. If `processReviewerTranscript` raises any error on the green branch (propagated from `completeStory`), surface the error verbatim and exit — the outer loop MUST NOT proceed to the next `claimNextStory` call when a `completeStory` error propagated through `processReviewerTranscript`.
+**Invariant: MUST NOT invoke completeStory directly — processReviewerTranscript performs the move internally on the done-ready-for-merge branch.** The prose layer is not in the `completeStory` call path; `completeStory` is not in `allowed_tools`. **MUST NOT call completeStory on the done-blocked-reviewer-needs-changes, done-blocked-reviewer-blocked, or done-blocked-no-session-result branch.** On any blocked branch the manifest stays in `in-progress/` with `blocked_by` already stamped by `processReviewerTranscript`. The prose surfaces the verbatim blocked line from `chatLog` and returns to the outer loop. If `processReviewerTranscript` raises any error on the green branch (propagated from `completeStory`), surface the error verbatim and exit — the outer loop MUST NOT proceed to the next `claimNextStory` call when a `completeStory` error propagated through `processReviewerTranscript`.
 
 The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as the implicit cap.
 
@@ -118,7 +118,13 @@ The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as th
 
 - **`HandoffGrammarDriftError`** / `blocked_by: handoff-grammar`: The dev subagent terminated without the verbatim locked handoff phrase on its last non-empty output line. The in-progress manifest is stamped with `blocked_by: "handoff-grammar"` (in-place — Story 5.1 will retrofit the atomic move to `blocked/`). The chat surface prints the verbatim drift line (emitted by `processDevTranscript`). Recovery: edit the manifest to remove the `blocked_by` key, then re-run `/crew:start`. Note: v1's recovery is to manually delete the in-progress manifest and re-add the source story to `to-do/` if re-scanning is needed.
 
-- **`ReviewerGrammarDriftError`** / `blocked_by: reviewer-grammar`: The reviewer subagent terminated without a recognised verdict sentinel on its last non-empty output line. The in-progress manifest is stamped with `blocked_by: "reviewer-grammar"` (emitted by `processReviewerTranscript`). Recovery follows the same path as handoff grammar drift.
+- **`done-blocked-reviewer-needs-changes`** / `blocked_by: reviewer-verdict-needs-changes`: `runReviewerSession` found one or more failing ACs (`status: "fail"`); `recommendedVerdict` is `"NEEDS CHANGES"`. The in-progress manifest is stamped with `blocked_by: "reviewer-verdict-needs-changes"` by `processReviewerTranscript`. The inner cycle loops back to spawn a new dev subagent for rework. Recovery: address the reviewer's findings, then re-run `/crew:start`.
+
+- **`done-blocked-reviewer-blocked`** / `blocked_by: reviewer-verdict-blocked`: `runReviewerSession` returned `recommendedVerdict: "BLOCKED"` (empty ACs or manual-check-required ACs present). The in-progress manifest is stamped with `blocked_by: "reviewer-verdict-blocked"`. Human operator must intervene before the story can proceed.
+
+- **`done-blocked-no-session-result`** / `blocked_by: reviewer-no-session-result`: The reviewer subagent ran but did not call `runReviewerSession`; `reviewer-result.json` was not persisted. The in-progress manifest is stamped by `processReviewerTranscript`. Operator must inspect the reviewer's transcript to understand why the mandatory tool invocation was skipped. This is the rubber-stamp protection — a reviewer that skipped `runReviewerSession` cannot have verified the ACs. Recovery: clear `blocked_by` on the manifest and re-run `/crew:start` after diagnosing the reviewer's behaviour.
+
+- **`ReviewerResultFileMalformedError`**: `reviewer-result.json` exists but fails JSON parse or shape validation (missing/invalid `recommendedVerdict` field). This is a bug in `runReviewerSession`; the file should always be schema-valid when present. Surface the error verbatim and stop.
 
 - **`completeStory` raising `WrongClaimantError` or `InProgressHandEditError`**: On the `READY FOR MERGE` branch, `processReviewerTranscript` calls `completeStory` internally. If the in-progress manifest has been hand-edited since claim (FR14a) OR the session ULID does not match `claimed_by` (FR19), `completeStory` raises `InProgressHandEditError` or `WrongClaimantError` respectively. These errors propagate verbatim THROUGH `processReviewerTranscript` to the prose layer, which surfaces them and exits — the outer loop does NOT advance to the next `claimNextStory` call. Recovery is operator inspection of the in-progress manifest plus a fresh `/crew:start` invocation.
 

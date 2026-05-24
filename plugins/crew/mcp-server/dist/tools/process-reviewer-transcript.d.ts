@@ -54,11 +54,6 @@
  * Story 4.3b Task 3.1–3.5; Story 4.3c Task 2.1–2.7; Story 4.6 Task 8b.
  */
 export type ProcessReviewerTranscriptResult = {
-    next: "rework-dev";
-    devPrompt: string;
-    reworkIteration: number;
-    chatLog: string[];
-} | {
     next: "done-ready-for-merge";
     completed: true;
     chatLog: string[];

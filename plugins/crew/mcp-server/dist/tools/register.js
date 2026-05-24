@@ -852,7 +852,10 @@ export function registerAllTools(server) {
         description: "Composite reviewer-session tool. Reads the source story (via active adapter), " +
             "the PR diff (via gh pr diff), and docs/standards.md in fixed sequential order. " +
             "Runs every AC against the applicability classifier (artifact-check, vitest, or manual-check-required). " +
-            "Returns ReviewerSessionResult with sourceStory, prDiff, standards, standardsByCriterionId, and acResults. " +
+            "Derives a `recommendedVerdict` literal (READY FOR MERGE | NEEDS CHANGES | BLOCKED) from acResults " +
+            "and persists the full ReviewerSessionResult to " +
+            "`<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` as a side-effect before returning. " +
+            "Returns ReviewerSessionResult with sourceStory, prDiff, standards, standardsByCriterionId, acResults, and recommendedVerdict. " +
             "All read and execution errors propagate uncaught. MUST be the reviewer persona's FIRST action. Story 4.6.",
         inputSchema: {
             type: "object",
