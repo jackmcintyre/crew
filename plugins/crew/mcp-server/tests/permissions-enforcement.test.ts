@@ -205,8 +205,11 @@ describe("shipped role specs (AC5e)", () => {
     expect(perms.gh_allow).not.toContain("pr-merge");
     expect(perms.gh_allow).not.toContain("pr-close");
     expect(perms.gh_allow.some((s) => /push/i.test(s))).toBe(false);
-    // Positive guard: pr-review is a required capability for the reviewer
-    // (catalogue pins it). Asserting presence prevents future drift.
-    expect(perms.gh_allow).toContain("pr-review");
+    // Positive guard: pr-view and api are required capabilities for the reviewer.
+    // pr-comment and pr-review were removed in Story 4.8 (negative-capability tightening).
+    expect(perms.gh_allow).toContain("pr-view");
+    expect(perms.gh_allow).toContain("api");
+    expect(perms.gh_allow).not.toContain("pr-review");
+    expect(perms.gh_allow).not.toContain("pr-comment");
   });
 });

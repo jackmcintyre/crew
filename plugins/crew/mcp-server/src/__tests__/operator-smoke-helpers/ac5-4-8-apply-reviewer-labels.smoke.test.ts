@@ -1,29 +1,24 @@
 /**
- * AC5 (user-surface) operator-smoke extension for Story 4.6b — Task 10.
- * Extended for Story 4.7 AC4 — idempotent rerun and version stamping.
+ * AC5 (user-surface) operator-smoke extension for Story 4.8 — Task 7.
  *
  * @description
- * Extends the Story 4.6 rubber-stamp reproducer with the post-reviewer step:
+ * Extends the Story 4.6b / 4.7 operator-smoke harness with the
+ * `applyReviewerLabels` step after `processReviewerTranscript`:
  *   1. Same scratch repo — one ready story with `artifact: target-file.txt`.
  *   2. Dev handoffs without creating the artifact (rubber-stamp).
  *   3. `runReviewerSession` executes — finds artifact missing, returns NEEDS CHANGES.
- *   4. `postReviewerComments` is called AFTER runReviewerSession returns and
- *      BEFORE processReviewerTranscript runs.
- *   5. The captured `gh api` body is asserted per spec §5b:
- *      - Body contains `standards_version:` and `plugin_version:` literals
- *      - Footer marker `<!-- crew:verdict:` is last line of body
- *      - `comments` array has length 1 (failing artifact path appears in diff)
- *      - Inline comment body contains both `target-file.txt` and `ENOENT`
- *   6. Second `postReviewerComments` invocation (rerun scenario) — GET returns
- *      prior verdict with footer marker → PATCH called once, POST not called.
- *   7. processReviewerTranscript is still called — manifest stays in in-progress/
- *      with `blocked_by: "reviewer-verdict-needs-changes"` (spec §5c).
+ *   4. `postReviewerComments` is called AFTER runReviewerSession returns.
+ *   5. `processReviewerTranscript` is called — manifest stays in in-progress/
+ *      with `blocked_by: reviewer-verdict-needs-changes`.
+ *   6. `applyReviewerLabels` is called — asserts two sequential `gh api POST /labels`
+ *      calls: first for `reviewed-by-agent`, second for `needs-human`.
+ *   7. Return value is `{ next: "applied", labelsApplied: ["reviewed-by-agent", "needs-human"] }`.
+ *   8. Story 4.6b / 4.7 invariants still hold per AC5 (5c): manifest stays in in-progress/.
  *
- * Smoke-gate: per `plugins/crew/docs/user-surface-acs.md` § Pre-PR gate,
- * this test provides the CI-level evidence for AC5 (user-surface) and AC4 (user-surface).
- * The operator may substitute manual-paste evidence per spec §5d.
+ * AC5 smoke-gate: per `plugins/crew/docs/user-surface-acs.md` § Pre-PR gate,
+ * this test provides CI-level evidence for AC5 (user-surface) of Story 4.8.
  *
- * Story 4.6b Task 10.1–10.4; Story 4.7 Task 6.1–6.3.
+ * Story 4.8 Task 7.1–7.4.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,6 +30,7 @@ import { processDevTranscript } from "../../tools/process-dev-transcript.js";
 import { processReviewerTranscript } from "../../tools/process-reviewer-transcript.js";
 import { runReviewerSession } from "../../tools/run-reviewer-session.js";
 import { postReviewerComments } from "../../tools/post-reviewer-comments.js";
+import { applyReviewerLabels } from "../../tools/apply-reviewer-labels.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 import { __resetPluginVersionCacheForTests } from "../../lib/plugin-version.js";
 import {
@@ -61,12 +57,8 @@ const mockDeriveSourceBaseline = vi.mocked(deriveSourceBaseline);
 // Constants
 // ---------------------------------------------------------------------------
 
-const SESSION_ULID = "01HZSMOKE4_6B_SESSION000000";
+const SESSION_ULID = "01HZSMOKE4_8_SESSION0000000";
 
-/**
- * A diff where target-file.txt appears as a new file, giving the inline-comment
- * generator a hunk anchor for the failing artifact-check AC.
- */
 const FAKE_PR_DIFF_WITH_ARTIFACT = `diff --git a/target-file.txt b/target-file.txt
 new file mode 100644
 --- /dev/null
@@ -75,7 +67,7 @@ new file mode 100644
 +built by dev
 `;
 
-const SMOKE_SOURCE_STORY = `# Smoke Story — Post Reviewer Comments
+const SMOKE_SOURCE_STORY = `# Smoke Story — Apply Reviewer Labels
 
 ## Narrative
 
@@ -104,6 +96,9 @@ criteria:
     anti_criterion: "Scope creep."
 `;
 
+// Plugin version used in smoke tests — avoids calling real plugin.json
+const SMOKE_PLUGIN_VERSION = "0.1.0-smoke";
+
 // ---------------------------------------------------------------------------
 // Setup / teardown
 // ---------------------------------------------------------------------------
@@ -112,14 +107,11 @@ let tmpRoot: string;
 let manifestPath: string;
 let pluginRoot: string;
 
-// Plugin version used in smoke tests — avoids calling real plugin.json
-const SMOKE_PLUGIN_VERSION = "0.1.0-smoke";
-
 beforeEach(async () => {
   __resetGhErrorMapCacheForTests();
   __resetPluginVersionCacheForTests();
 
-  tmpRoot = mkdtempSync(path.join(os.tmpdir(), "crew-4-6b-ac5-smoke-"));
+  tmpRoot = mkdtempSync(path.join(os.tmpdir(), "crew-4-8-ac5-smoke-"));
   pluginRoot = path.join(tmpRoot, "plugin");
 
   // .crew state dirs
@@ -161,7 +153,7 @@ beforeEach(async () => {
       `acceptance_criteria:`,
       `  - text: "Given the dev has completed implementation."`,
       `    kind: integration`,
-      `title: "Smoke Story — Post Reviewer Comments"`,
+      `title: "Smoke Story — Apply Reviewer Labels"`,
       `narrative: "As an operator, I want target-file.txt to exist."`,
       `withdrawn: false`,
       `claimed_by: "${SESSION_ULID}"`,
@@ -172,7 +164,7 @@ beforeEach(async () => {
   await fs.mkdir(path.join(tmpRoot, "docs"), { recursive: true });
   await atomicWriteFile(path.join(tmpRoot, "docs", "standards.md"), SMOKE_STANDARDS);
 
-  // Persona files
+  // Persona files (required by runReviewerSession indirectly via permissions loading)
   await fs.mkdir(path.join(tmpRoot, "team", "generalist-dev"), { recursive: true });
   await fs.mkdir(path.join(tmpRoot, "team", "generalist-reviewer"), { recursive: true });
 
@@ -261,7 +253,7 @@ beforeEach(async () => {
     reviewerPersona,
   );
 
-  // Plugin permissions for postReviewerComments
+  // Plugin permissions for postReviewerComments and applyReviewerLabels
   await fs.mkdir(path.join(pluginRoot, "permissions"), { recursive: true });
 
   await atomicWriteFile(
@@ -269,6 +261,7 @@ beforeEach(async () => {
     `entries:\n  - exit_code: 4\n    stderr_regex: "API rate limit exceeded"\n    class: defer\n`,
   );
 
+  // generalist-reviewer.yaml — production state after Task 1 (no pr-comment, no pr-review)
   await atomicWriteFile(
     path.join(pluginRoot, "permissions", "generalist-reviewer.yaml"),
     [
@@ -289,7 +282,7 @@ beforeEach(async () => {
   mockDeriveSourceBaseline.mockResolvedValue({
     sourceHash: "a".repeat(64),
     sourceFields: {
-      title: "Smoke Story — Post Reviewer Comments",
+      title: "Smoke Story — Apply Reviewer Labels",
       narrative: "As an operator, I want target-file.txt to exist.",
       acceptance_criteria: [
         { text: "Given the dev has completed implementation.", kind: "integration" },
@@ -299,7 +292,6 @@ beforeEach(async () => {
       withdrawn: false,
     },
   });
-
 });
 
 afterEach(() => {
@@ -308,12 +300,12 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// AC5 (user-surface): post-reviewer step inserts a PR review with inline comments
+// AC5 (user-surface): applyReviewerLabels applies two labels on NEEDS CHANGES
 // ---------------------------------------------------------------------------
 
-describe("AC5 (user-surface): postReviewerComments posts a PR review with inline comments and summary verdict", () => {
+describe("AC5 (user-surface): applyReviewerLabels applies reviewed-by-agent + needs-human on NEEDS CHANGES", () => {
   it(
-    "dev claims handoff without artifact → runReviewerSession detects ENOENT → postReviewerComments posts review with inline comment → processReviewerTranscript stamps manifest",
+    "dev claims handoff without artifact → runReviewerSession detects ENOENT → postReviewerComments posts review → processReviewerTranscript stamps manifest → applyReviewerLabels posts two labels",
     async () => {
       // -----------------------------------------------------------------------
       // Step 1: Dev handoff (rubber-stamp — no artifact)
@@ -329,11 +321,11 @@ describe("AC5 (user-surface): postReviewerComments posts a PR review with inline
 
       expect(devResult.next).toBe("spawn-reviewer");
       if (devResult.next !== "spawn-reviewer") return;
-      expect(devResult.prNumber).toBe(99);
+      const prNumber = devResult.prNumber;
+      expect(prNumber).toBe(99);
 
       // -----------------------------------------------------------------------
       // Step 2: runReviewerSession — target-file.txt missing → NEEDS CHANGES
-      // (stub provides the diff WITH the artifact path for the inline-comment anchor)
       // -----------------------------------------------------------------------
       const reviewerSessionStub = vi.fn().mockImplementation(
         async (cmd: string, _args: string[], _opts?: unknown) => {
@@ -351,30 +343,18 @@ describe("AC5 (user-surface): postReviewerComments posts a PR review with inline
         targetRepoRoot: tmpRoot,
         sessionUlid: SESSION_ULID,
         ref: SMOKE_STORY_REF,
-        prNumber: devResult.prNumber,
+        prNumber,
         execaImpl: reviewerSessionStub,
       });
 
-      // AC1 must fail (target-file.txt absent)
-      const ac1 = sessionResult.acResults[1];
-      expect(ac1!.applicability).toBe("runnable-artifact-check");
-      if (ac1!.applicability !== "runnable-artifact-check") return;
-      expect(ac1!.status).toBe("fail");
-      expect(ac1!.reason).toContain(SMOKE_ARTIFACT_PATH);
-      expect(ac1!.reason).toContain("ENOENT");
-
-      // Verdict must be NEEDS CHANGES
       expect(sessionResult.recommendedVerdict).toBe("NEEDS CHANGES");
 
       // -----------------------------------------------------------------------
-      // Step 3: postReviewerComments — first run (no prior verdict)
-      // GET returns empty list → POST creates new review
-      // (spec §5b and AC4 Story 4.7 assertions)
+      // Step 3: postReviewerComments (required prior step in the inner cycle)
       // -----------------------------------------------------------------------
-      const reviewsUrl = `/repos/jackmcintyre/crew/pulls/${devResult.prNumber}/reviews`;
+      const reviewsUrl = `/repos/jackmcintyre/crew/pulls/${prNumber}/reviews`;
 
-      let capturedPostInput: string | undefined;
-      const firstPostStub = makeGhExecaStub({
+      const postStub = makeGhExecaStub({
         prDiff: { stdout: FAKE_PR_DIFF_WITH_ARTIFACT },
         apiRoutes: [
           {
@@ -385,123 +365,23 @@ describe("AC5 (user-surface): postReviewerComments posts a PR review with inline
           {
             url: reviewsUrl,
             method: "POST",
-            response: { stdout: JSON.stringify({ id: 1001 }), exitCode: 0 },
-            onCall: (input) => { capturedPostInput = input; },
+            response: { stdout: JSON.stringify({ id: 2001 }), exitCode: 0 },
           },
         ],
       });
 
-      const firstPostResult = await postReviewerComments({
+      const postResult = await postReviewerComments({
         targetRepoRoot: tmpRoot,
         sessionUlid: SESSION_ULID,
-        execaImpl: firstPostStub,
+        execaImpl: postStub,
         pluginRootOverride: pluginRoot,
         pluginVersionOverride: SMOKE_PLUGIN_VERSION,
       });
 
-      // (5b): Tool must have posted
-      expect(firstPostResult.next).toBe("posted");
-      if (firstPostResult.next !== "posted") return;
-
-      // First run: POST path
-      expect(firstPostResult.wasEdit).toBe(false);
-      expect(firstPostResult.priorReviewId).toBeNull();
-
-      // Parse the captured gh api body
-      const firstApiBody = JSON.parse(capturedPostInput!) as {
-        event: string;
-        body: string;
-        comments: Array<{ path: string; line: number; body: string }>;
-      };
-
-      // (AC4 4b): version tokens present in POST body
-      expect(firstApiBody.body).toContain("standards_version:");
-      expect(firstApiBody.body).toContain("plugin_version:");
-      expect(firstApiBody.body).toContain("<!-- crew:verdict:");
-
-      // (AC4 4b): footer marker is absolute last line
-      const footerMarker = `<!-- crew:verdict:${SMOKE_PLUGIN_VERSION}:${SMOKE_STORY_REF} -->`;
-      expect(firstApiBody.body.split("\n").at(-1)).toBe(footerMarker);
-
-      // (5b): verdict is in body (not necessarily last line after Story 4.7)
-      expect(firstApiBody.body).toContain("**Verdict: NEEDS CHANGES** [1 issues, 0 questions]");
-
-      // (5b): comments array has length 1 (failing artifact in diff)
-      expect(firstApiBody.comments).toHaveLength(1);
-
-      // (5b): Inline comment body contains target-file.txt and ENOENT
-      const inlineComment = firstApiBody.comments[0]!;
-      expect(inlineComment.body).toContain(SMOKE_ARTIFACT_PATH);
-      expect(inlineComment.body).toContain("ENOENT");
-
-      // (5b): event is COMMENT
-      expect(firstApiBody.event).toBe("COMMENT");
+      expect(postResult.next).toBe("posted");
 
       // -----------------------------------------------------------------------
-      // Step 3b: Second postReviewerComments — rerun scenario (AC4 Story 4.7)
-      // GET returns prior verdict with footer marker → PATCH, not POST
-      // -----------------------------------------------------------------------
-      const priorBody = firstApiBody.body; // body from first run (has footer marker)
-
-      let capturedPatchInput: string | undefined;
-      const secondPostStub = makeGhExecaStub({
-        prDiff: { stdout: FAKE_PR_DIFF_WITH_ARTIFACT },
-        apiRoutes: [
-          {
-            url: reviewsUrl,
-            method: "GET",
-            response: {
-              stdout: JSON.stringify([{ id: 1001, body: priorBody }]),
-              exitCode: 0,
-            },
-          },
-          {
-            url: new RegExp(`${reviewsUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/1001$`),
-            method: "PATCH",
-            response: { stdout: JSON.stringify({ id: 1001 }), exitCode: 0 },
-            onCall: (input) => { capturedPatchInput = input; },
-          },
-        ],
-      });
-
-      const secondPostResult = await postReviewerComments({
-        targetRepoRoot: tmpRoot,
-        sessionUlid: SESSION_ULID,
-        execaImpl: secondPostStub,
-        pluginRootOverride: pluginRoot,
-        pluginVersionOverride: SMOKE_PLUGIN_VERSION,
-      });
-
-      // (AC4 4a): second run: PATCH path taken, not POST
-      expect(secondPostResult.next).toBe("posted");
-      if (secondPostResult.next !== "posted") return;
-      expect(secondPostResult.wasEdit).toBe(true);
-      expect(secondPostResult.priorReviewId).toBe(1001);
-      expect(secondPostResult.inlineCommentCount).toBeNull();
-
-      // (AC4 4b): PATCH body also contains version tokens and footer marker
-      expect(capturedPatchInput).toBeDefined();
-      const patchPayload = JSON.parse(capturedPatchInput!) as { body: string };
-      expect(patchPayload.body).toContain("standards_version:");
-      expect(patchPayload.body).toContain("plugin_version:");
-      expect(patchPayload.body.split("\n").at(-1)).toBe(footerMarker);
-
-      // (AC4 4a): POST stub called exactly once, PATCH stub called exactly once on second run
-      type RawCall = [cmd: string, args: string[], ...rest: unknown[]];
-      const secondRunApiCalls = vi.mocked(secondPostStub).mock.calls as unknown as RawCall[];
-      const secondRunPostCalls = secondRunApiCalls.filter(
-        ([cmd, args]) => cmd === "gh" && args?.[0] === "api" && args?.includes("POST"),
-      );
-      expect(secondRunPostCalls).toHaveLength(0); // no POST on second run
-
-      const secondRunPatchCalls = secondRunApiCalls.filter(
-        ([cmd, args]) => cmd === "gh" && args?.[0] === "api" && args?.includes("PATCH"),
-      );
-      expect(secondRunPatchCalls).toHaveLength(1);
-
-      // -----------------------------------------------------------------------
-      // Step 4: processReviewerTranscript — reads same file, stamps manifest
-      // (spec §5c: manifest stays in in-progress/ with blocked_by)
+      // Step 4: processReviewerTranscript — stamps manifest
       // -----------------------------------------------------------------------
       const reviewerResult = await processReviewerTranscript({
         targetRepoRoot: tmpRoot,
@@ -518,6 +398,66 @@ describe("AC5 (user-surface): postReviewerComments posts a PR review with inline
       // (5c): blocked_by is stamped
       const manifestContent = await fs.readFile(manifestPath, "utf8");
       expect(manifestContent).toContain("blocked_by: reviewer-verdict-needs-changes");
+
+      // -----------------------------------------------------------------------
+      // Step 5: applyReviewerLabels — assert two sequential label calls
+      // (5a, 5b): captured input fields on the gh api stub
+      // -----------------------------------------------------------------------
+      const labelsUrl = `/repos/jackmcintyre/crew/issues/${prNumber}/labels`;
+      const LABELS_URL_PATTERN = /\/labels$/;
+
+      const capturedInputs: string[] = [];
+      const labelsStub = makeGhExecaStub({
+        apiRoutes: [
+          {
+            url: LABELS_URL_PATTERN,
+            method: "POST",
+            response: {
+              stdout: JSON.stringify([
+                { id: 1, name: "reviewed-by-agent", color: "0075ca" },
+                { id: 2, name: "needs-human", color: "e4e669" },
+              ]),
+              exitCode: 0,
+            },
+            onCall: (input) => {
+              capturedInputs.push(input ?? "");
+            },
+          },
+        ],
+      });
+
+      const labelsResult = await applyReviewerLabels({
+        targetRepoRoot: tmpRoot,
+        sessionUlid: SESSION_ULID,
+        pluginRootOverride: pluginRoot,
+        execaImpl: labelsStub,
+      });
+
+      // (5b): Return value is { next: "applied", labelsApplied: [...] }
+      expect(labelsResult).toEqual({
+        next: "applied",
+        labelsApplied: ["reviewed-by-agent", "needs-human"],
+      });
+
+      // (5b): Exactly two sequential gh api POST /labels calls
+      expect(capturedInputs).toHaveLength(2);
+      expect(JSON.parse(capturedInputs[0]!)).toEqual({ labels: ["reviewed-by-agent"] });
+      expect(JSON.parse(capturedInputs[1]!)).toEqual({ labels: ["needs-human"] });
+
+      // Verify labelsUrl was actually used (via stub call inspection)
+      type RawCall = [cmd: string, args: string[], ...rest: unknown[]];
+      const stubCalls = vi.mocked(labelsStub).mock.calls as unknown as RawCall[];
+      const labelApiCalls = stubCalls.filter(
+        ([cmd, args]) =>
+          cmd === "gh" &&
+          args?.[0] === "api" &&
+          typeof args?.[1] === "string" &&
+          (args[1] as string).endsWith("/labels"),
+      );
+      expect(labelApiCalls).toHaveLength(2);
+
+      // (5c): Manifest STILL in in-progress after labels applied (non-regression)
+      await assertManifestStaysInProgress(tmpRoot, SMOKE_STORY_REF);
     },
     30000, // 30s timeout for smoke test
   );
