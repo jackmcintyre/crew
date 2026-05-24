@@ -1,7 +1,7 @@
 ---
 name: crew:start
 description: "Claim the next ready story from the backlog, spawn a clean-context generalist-dev subagent, and drain the queue until empty."
-allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, runReviewerSession, Task]
+allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, runReviewerSession, postReviewerComments, Task]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/4-2-start-skill-and-per-story-dev-subagent-spawn.md § Behavioural contract -->
@@ -87,6 +87,11 @@ After a story is claimed, the inner cycle manages the dev spawn → handoff pars
 
 9. When the `Task` tool returns, the reviewer subagent's session result is already persisted to `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` by `runReviewerSession`. No transcript capture is needed — the verdict transport is the file, not the chat.
 
+9a. invoke postReviewerComments({ targetRepoRoot, sessionUlid }). This tool reads `reviewer-result.json` and posts a PR review with a deterministic summary body and inline comments via `gh api`. Switch on the `next` field:
+   - `skipped-no-session-result` → log the chat line `post-reviewer-comments skipped — no reviewer-result.json (the missing-file case will be handled by processReviewerTranscript next)` and proceed to step 10.
+   - `posted` → log a chat line `posted PR review ${postedReviewId} — ${inlineCommentCount} inline comment(s), verdict: ${verdictLine}` and proceed to step 10.
+   - If `postReviewerComments` throws (`GhRecoverableError`, `GhApiResponseShapeError`, `ReviewerResultFileMalformedError`, or any other error): surface the error verbatim and halt the inner cycle. Do NOT proceed to step 10.
+
 10. invoke processReviewerTranscript({ targetRepoRoot, sessionUlid, ref, manifestPath }). The tool reads `reviewer-result.json` and switches on its `recommendedVerdict` field to drive all manifest mutations.
 
 11. Surface every entry of the returned `chatLog` to the operator in order, before any subsequent call.
@@ -125,6 +130,10 @@ The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as th
 - **`done-blocked-no-session-result`** / `blocked_by: reviewer-no-session-result`: The reviewer subagent ran but did not call `runReviewerSession`; `reviewer-result.json` was not persisted. The in-progress manifest is stamped by `processReviewerTranscript`. Operator must inspect the reviewer's transcript to understand why the mandatory tool invocation was skipped. This is the rubber-stamp protection — a reviewer that skipped `runReviewerSession` cannot have verified the ACs. Recovery: clear `blocked_by` on the manifest and re-run `/crew:start` after diagnosing the reviewer's behaviour.
 
 - **`ReviewerResultFileMalformedError`**: `reviewer-result.json` exists but fails JSON parse or shape validation (missing/invalid `recommendedVerdict` field). This is a bug in `runReviewerSession`; the file should always be schema-valid when present. Surface the error verbatim and stop.
+
+- **`GhApiResponseShapeError`** (from `postReviewerComments`): `gh api` or `gh pr view` returned a response that could not be parsed as the expected JSON shape. Surface the error verbatim and halt the inner cycle. Do NOT proceed to `processReviewerTranscript`.
+
+- **`postReviewerComments` raising `GhRecoverableError`**: The `gh pr diff` or `gh api` call within `postReviewerComments` failed with a recoverable class (rate-limit, auth, network). Surface the error verbatim and halt the inner cycle — a posting failure indicates an environmental problem worth pausing for. Do NOT proceed to `processReviewerTranscript`.
 
 - **`completeStory` raising `WrongClaimantError` or `InProgressHandEditError`**: On the `READY FOR MERGE` branch, `processReviewerTranscript` calls `completeStory` internally. If the in-progress manifest has been hand-edited since claim (FR14a) OR the session ULID does not match `claimed_by` (FR19), `completeStory` raises `InProgressHandEditError` or `WrongClaimantError` respectively. These errors propagate verbatim THROUGH `processReviewerTranscript` to the prose layer, which surfaces them and exits — the outer loop does NOT advance to the next `claimNextStory` call. Recovery is operator inspection of the in-progress manifest plus a fresh `/crew:start` invocation.
 

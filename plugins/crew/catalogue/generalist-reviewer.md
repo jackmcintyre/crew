@@ -12,6 +12,7 @@ gh_allow:
   - pr-comment
   - pr-review
   - pr-diff
+  - api
 locked_phrases:
   handoff: "Handoff to generalist-dev — verdict recorded"
   yield: "This sits in <role>'s domain — handing off"

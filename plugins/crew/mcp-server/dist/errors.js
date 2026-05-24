@@ -869,6 +869,50 @@ export class ReviewerResultFileMalformedError extends DomainError {
     }
 }
 /**
+ * A `gh api` subcommand returned a response body that could not be parsed
+ * as JSON or did not match the expected shape. Raised by
+ * `postReviewerComments` when `gh api .../reviews` returns non-JSON stdout
+ * or when `gh pr view --json baseRepository` returns an unexpected shape.
+ *
+ * Fields:
+ * - `subcommand` — the kebab-cased subcommand (e.g. `"api"`, `"pr-view"`).
+ * - `url` — the API URL path (only present for `api` calls).
+ * - `cause` — the raw parse/validation error.
+ *
+ * Story 4.6b Task 6.1
+ */
+export class GhApiResponseShapeError extends DomainError {
+    subcommand;
+    url;
+    cause;
+    constructor(opts) {
+        super(`gh ${opts.subcommand} returned an unexpected response shape${opts.url ? " at " + opts.url : ""}. ` +
+            `Cause: ${opts.cause}. This is either a gh CLI change or a stub mismatch in tests.`);
+        this.subcommand = opts.subcommand;
+        this.url = opts.url;
+        this.cause = opts.cause;
+    }
+}
+/**
+ * `composeVerdictLine` reached the BLOCKED branch but `acResults` is neither
+ * empty nor contains a `manual-check-required` entry. Per Story 4.6 §3f this
+ * state is unreachable in a non-mutated `reviewer-result.json` — reaching it
+ * means the persisted file was mutated out-of-band (e.g. hand-edited). Raised
+ * to refuse fabricating a reason string that would violate AC2's enumerated
+ * grammar.
+ *
+ * Story 4.6b Task 6.2
+ */
+export class UnreachableBlockedReasonError extends DomainError {
+    acResultKeys;
+    constructor(opts) {
+        super(`composeVerdictLine reached the BLOCKED branch but acResults is neither empty ` +
+            `nor contains a manual-check-required entry. Per Story 4.6 §3f this is unreachable ` +
+            `in a non-mutated reviewer-result.json. acResults keys: ${Object.keys(opts.acResults).join(", ")}.`);
+        this.acResultKeys = Object.keys(opts.acResults);
+    }
+}
+/**
  * `buildBranchSlug` produced a slug that had no alphanumeric characters
  * after the `story/` prefix (e.g. a title composed entirely of Unicode
  * / punctuation). Thrown BEFORE any subprocess spawn. (Story 4.4

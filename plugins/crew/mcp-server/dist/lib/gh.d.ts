@@ -43,4 +43,6 @@ export declare function gh(opts: {
     args?: readonly string[];
     execaImpl?: typeof defaultExeca;
     pluginRootOverride?: string;
+    /** Optional stdin body piped to the subprocess. Supported by execa natively. */
+    input?: string;
 }): Promise<GhCallResult>;

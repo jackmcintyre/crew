@@ -269,3 +269,54 @@ describe("gh wrapper — post-result recoverable-error classification (Story 4.5
         expect(spy).not.toHaveBeenCalled();
     });
 });
+// ---------------------------------------------------------------------------
+// Task 4a.2–4a.3: input field forwarding (Story 4.6b)
+// ---------------------------------------------------------------------------
+describe("gh() input field — Story 4.6b Task 4a", () => {
+    const permissions = {
+        role: "generalist-reviewer",
+        tools_allow: [],
+        gh_allow: ["api"],
+        gh_allow_args: {},
+        sourcePath: "/fake/permissions/generalist-reviewer.yaml",
+    };
+    it("4a.2 — NOT passing input does not break existing path (stub called without 3rd arg)", async () => {
+        await writeV1Map();
+        const stub = vi.fn(async () => ({
+            stdout: '{"id":1}',
+            stderr: "",
+            exitCode: 0,
+        }));
+        const result = await gh({
+            role: "generalist-reviewer",
+            permissions,
+            subcommand: "api",
+            args: ["/repos/owner/repo/pulls/1/reviews", "--method", "POST"],
+            execaImpl: stub,
+            pluginRootOverride: fakePluginRoot,
+            // No input
+        });
+        expect(result.exitCode).toBe(0);
+        // Called with exactly 2 positional args (no 3rd options object)
+        expect(stub).toHaveBeenCalledWith("gh", ["api", "/repos/owner/repo/pulls/1/reviews", "--method", "POST"]);
+    });
+    it("4a.3 — passing input forwards it as the { input } option to execaImpl", async () => {
+        await writeV1Map();
+        const capturedOpts = [];
+        const stub = vi.fn(async (_cmd, _args, opts) => {
+            capturedOpts.push(opts);
+            return { stdout: '{"id":99}', stderr: "", exitCode: 0 };
+        });
+        const jsonBody = '{"event":"COMMENT","body":"test","comments":[]}';
+        await gh({
+            role: "generalist-reviewer",
+            permissions,
+            subcommand: "api",
+            args: ["/repos/owner/repo/pulls/1/reviews", "--method", "POST", "--input", "-"],
+            execaImpl: stub,
+            pluginRootOverride: fakePluginRoot,
+            input: jsonBody,
+        });
+        expect(capturedOpts[0]).toEqual({ input: jsonBody });
+    });
+});

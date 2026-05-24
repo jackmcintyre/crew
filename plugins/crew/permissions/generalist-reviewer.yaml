@@ -6,4 +6,5 @@ gh_allow:
   - pr-comment
   - pr-review
   - pr-diff
+  - api
 gh_allow_args: {}

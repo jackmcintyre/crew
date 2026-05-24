@@ -100,7 +100,15 @@ $SH record <story_key> worktree_ready --data '{"path":"..."}'
 
 ### Step 4 — Author the story spec (subagent: bmad-create-story)
 
-Spawn ONE subagent with `model: opus`. Prompt:
+**Pre-authored spec check.** Before spawning, check whether `<spec_path>` already exists on disk. If it does, an upstream authoring path (the spec-authoring routine, an `/author-next` run, or a hand-written draft) has produced it. **Skip the authoring subagent entirely** and proceed to the verify/status/record block below. Step 5's validation is the gate that decides whether the pre-authored spec is usable — if it's malformed or mis-tagged, validation halts the run with `SPEC_VALIDATION_FAILED` exactly as it would for a freshly-authored spec. Record the reuse:
+
+```bash
+$SH record <story_key> spec_reused
+```
+
+Then jump to the `Verify <spec_path> exists` block below.
+
+Otherwise (the common case — no spec on disk), spawn ONE subagent with `model: opus`. Prompt:
 
 > Run the `bmad-create-story` skill (action: `create`) for story key `<story_key>`. The epic source is `<epic_file>`. Output the spec to `<spec_path>`. Do NOT implement code — spec only. Do NOT modify `sprint-status.yaml` or any other status/state file — the orchestrator owns status transitions. Do NOT pause for clarifying questions; make reasonable defaults and proceed.
 >
