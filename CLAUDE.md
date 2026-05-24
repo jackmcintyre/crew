@@ -31,6 +31,7 @@ The repo previously hosted a `sprint-orchestrator` plugin which was used to dog-
 
 Folders:
 - `_bmad-output/planning-artifacts/` — the active PRD (sharded under `prd-crew-v1/`), epics, architecture, and validation reports. **Tracked in git** so remote agents and future readers can ground in them. Its internal `archive/` subfolder is gitignored.
+- `_bmad-output/implementation-artifacts/` — authored story specs, `sprint-status.yaml`, and per-epic retros. **Tracked in git** so cloud routines (e.g. `spec-author-topup`) and remote agents can read the backlog state and recently-shipped specs.
 - `_bmad-output/_archive/` — superseded briefs, PRDs, sprint backlogs, and the historical record of the sprint-orchestrator era. **Gitignored**.
 - `.claude/skills/bmad-*/` — installed BMad skills used for planning. Gitignored.
 - `_bmad/` — BMad config/scripts. Gitignored.
@@ -38,6 +39,7 @@ Folders:
 ## Process notes
 
 - **Planning lives in `_bmad-output/planning-artifacts/`.** The authoritative PRD (sharded under `prd-crew-v1/`), epics, and architecture all sit here and are tracked in git. Older briefs and backlogs are in `_bmad-output/_archive/`, which stays gitignored.
+- **Implementation artifacts live in `_bmad-output/implementation-artifacts/`.** Story specs (one `.md` per story), `sprint-status.yaml`, and per-epic retros all sit here and are tracked in git. The cloud spec-authoring routine reads this folder to compute queue depth and find recently-shipped specs for grounding.
 - **The plugin lives under `plugins/crew/`.** Epic 1 (plugin foundation) is in progress.
 - **Discipline rules (inherited from sprint-orchestrator era):** the five planning-discipline rules from `_archive/planning-discipline.md` are the bar for every story we author. They're inherited by the new PRD even though the standalone file is archived.
 - **Deferred work tracker:** captured inside the relevant brief or PRD's deferred section, with reasoning. Promote to a follow-up workstream when ready.
