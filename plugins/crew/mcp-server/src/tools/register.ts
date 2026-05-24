@@ -26,6 +26,7 @@ import { processReviewerTranscript } from "./process-reviewer-transcript.js";
 import { runDevTerminalAction } from "./run-dev-terminal-action.js";
 import { runReviewerSession } from "./run-reviewer-session.js";
 import { postReviewerComments } from "./post-reviewer-comments.js";
+import { applyReviewerLabels } from "./apply-reviewer-labels.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -908,6 +909,55 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         .parse(args);
       try {
         const result = await postReviewerComments(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.8 — applyReviewerLabels: applies GitHub labels to a PR after a reviewer pass.
+  // Reads reviewer-result.json, resolves owner/repo, and calls gh api POST /labels.
+  // Always applies `reviewed-by-agent`; also applies `needs-human` on non-green verdicts.
+  // Accepts `verdictOverride: "reviewer-failure"` for use in the SKILL.md error handler.
+  server.registerTool({
+    name: "applyReviewerLabels",
+    description:
+      "Apply GitHub labels to the PR after a completed reviewer cycle. " +
+      "Always applies `reviewed-by-agent`; also applies `needs-human` on NEEDS CHANGES, BLOCKED, or reviewer-failure verdicts. " +
+      "Returns { next: 'skipped-no-session-result' } when reviewer-result.json is absent, " +
+      "or { next: 'applied', labelsApplied: string[] } on success. " +
+      "Propagates GhRecoverableError, GhApiResponseShapeError, and ReviewerResultFileMalformedError uncaught. " +
+      "Story 4.8 (FR36, FR37, FR38).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        sessionUlid: { type: "string" },
+        verdictOverride: { type: "string", enum: ["reviewer-failure"] },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "sessionUlid"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          sessionUlid: z.string().min(1),
+          verdictOverride: z.literal("reviewer-failure").optional(),
+          role: z.string().optional(),
+        })
+        .parse(args);
+      try {
+        const result = await applyReviewerLabels(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

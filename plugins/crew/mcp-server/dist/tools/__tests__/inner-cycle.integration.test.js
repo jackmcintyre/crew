@@ -455,7 +455,7 @@ describe("AC4(f): reviewer BLOCKED → done-blocked-reviewer-blocked (revision 2
 // AC4(g): Tool count — 21 tools, contains new tools, does NOT contain runDevSession
 // ---------------------------------------------------------------------------
 describe("AC4(g): tool count and required tools present", () => {
-    it("registered tool list has exactly 23 entries and contains the required tools but NOT runDevSession", async () => {
+    it("registered tool list has exactly 25 entries and contains the required tools but NOT runDevSession", async () => {
         const server = createServer();
         registerAllTools(server);
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -473,7 +473,8 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("runReviewerSession");
             expect(toolNames).toContain("postReviewerComments");
             expect(toolNames).not.toContain("runDevSession");
-            expect(toolNames.length).toBe(24);
+            expect(toolNames).toContain("applyReviewerLabels");
+            expect(toolNames.length).toBe(25);
         }
         finally {
             await client.close();

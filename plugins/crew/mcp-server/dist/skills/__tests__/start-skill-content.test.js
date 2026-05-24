@@ -81,7 +81,7 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
     it("name field is exactly 'crew:start'", () => {
         expect(frontmatter["name"]).toBe("crew:start");
     });
-    it("AC6(i) / AC3(vii) — allowed_tools contains the required tools (no completeStory; Story 4.6 adds runReviewerSession; Story 4.6b adds postReviewerComments)", () => {
+    it("AC6(i) / AC3(vii) — allowed_tools contains the required tools (no completeStory; Story 4.6 adds runReviewerSession; Story 4.6b adds postReviewerComments; Story 4.8 adds applyReviewerLabels)", () => {
         const allowedTools = new Set(frontmatter["allowed_tools"]);
         const expected = new Set([
             "getStatus",
@@ -93,6 +93,7 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
             "Task",
             "runReviewerSession", // Story 4.6: added to allowed_tools
             "postReviewerComments", // Story 4.6b: added to allowed_tools
+            "applyReviewerLabels", // Story 4.8: added to allowed_tools
         ]);
         // Set equality: every expected tool is present.
         for (const tool of expected) {
@@ -102,8 +103,8 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
         for (const tool of allowedTools) {
             expect(expected, `Unexpected tool '${tool}' in allowed_tools`).toContain(tool);
         }
-        // Story 4.6b adds postReviewerComments as the 9th tool.
-        expect(allowedTools.size).toBe(9);
+        // Story 4.8 adds applyReviewerLabels as the 10th tool.
+        expect(allowedTools.size).toBe(10);
     });
     it("AC6(ii) — body contains the H1 or H2 heading 'Inner cycle: dev → reviewer → rework'", () => {
         expect(body).toMatch(/^#{1,2} Inner cycle: dev → reviewer → rework/m);

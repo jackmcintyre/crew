@@ -147,8 +147,6 @@ beforeEach(async () => {
         "  - runReviewerSession",
         "gh_allow:",
         "  - pr-view",
-        "  - pr-comment",
-        "  - pr-review",
         "  - pr-diff",
         "  - api",
         "gh_allow_args: {}",
