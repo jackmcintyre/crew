@@ -21,14 +21,20 @@ export interface GhCallResult {
  * string match — no template substitution. Shipped v1 specs leave
  * `gh_allow_args` empty.
  *
- * This wrapper does NOT classify recoverable errors (NFR18 /
- * `gh-error-map.yaml` lands in a later story), does NOT retry, does
- * NOT handle auth (we inherit the user's `gh` auth), does NOT write
- * telemetry. Single-purpose.
+ * This wrapper classifies recoverable errors via `gh-error-map.yaml` (NFR18 /
+ * Story 4.5). On a mapped failure it raises `GhRecoverableError`. On an unmapped
+ * non-zero exit it returns the raw result (callers like `runDevTerminalAction`
+ * inspect `exitCode` and raise their own typed errors). Does NOT retry, does
+ * NOT handle auth (we inherit the user's `gh` auth), does NOT write telemetry.
+ * Single-purpose.
  *
  * The `execaImpl` option is a test seam — production callers do not
  * pass it. Tests inject a `vi.fn()` to verify zero-spawn behaviour
  * on negative paths and to stub success on positive paths.
+ *
+ * The `pluginRootOverride` option is a test seam for `loadGhErrorMap` —
+ * production callers do not pass it. Tests inject a path pointing to a
+ * fixture `gh-error-map.yaml`.
  */
 export declare function gh(opts: {
     role: string;
@@ -36,4 +42,5 @@ export declare function gh(opts: {
     subcommand: string;
     args?: readonly string[];
     execaImpl?: typeof defaultExeca;
+    pluginRootOverride?: string;
 }): Promise<GhCallResult>;

@@ -1,6 +1,21 @@
 # gh-error-map.yaml — NFR18 error-class table.
-# Story 4.5 (Epic 4) will populate `entries` with
-# `(exit_code, stderr_regex) → defer | retry | needs-human` rows.
-# Story 2.2 ships the file so the path resolves and AC1's
-# "one YAML per role plus gh-error-map.yaml" count holds.
-entries: []
+# See _bmad-output/implementation-artifacts/4-5-gh-error-map-yaml-and-recoverable-error-classification.md
+# § Behavioural contract for entry semantics and match precedence.
+entries:
+  # Auth expiry — `gh` returns exit 4 with this stderr when the
+  # cached token is invalid. Operator must run `gh auth login`.
+  - exit_code: 4
+    stderr_regex: "requires authentication|gh auth login"
+    class: needs-human
+
+  # Rate limit — `gh` returns exit 4 with API rate limit stderr.
+  # Operator waits for window reset, then re-runs.
+  - exit_code: 4
+    stderr_regex: "API rate limit exceeded|secondary rate limit"
+    class: defer
+
+  # Network blip — `gh` returns exit 1 with a connection error.
+  # Transient; v1 blocks (v2 will retry).
+  - exit_code: 1
+    stderr_regex: "dial tcp|connection reset|could not resolve host|i/o timeout|network is unreachable"
+    class: retry
