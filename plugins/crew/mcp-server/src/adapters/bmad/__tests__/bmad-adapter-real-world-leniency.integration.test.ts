@@ -5,6 +5,7 @@
  * The fixture at `fixtures/sample-real-world-repo/` mirrors the organic
  * deviations present in this repo's own BMad backlog:
  *   - `3-1-canonical-story.md`        — happy path (Status: backlog)
+ *   - `4-8-no-suffix-followup.md`     — no-suffix companion for sort-order coverage
  *   - `4-8b-follow-up-story.md`       — letter-suffixed story ID (Status: backlog)
  *   - `5-1-no-status.md`              — no Status line (defaults to backlog)
  *   - `5-2-free-text-status.md`       — Status: revised — re-implement per 4.6 retro
@@ -12,9 +13,9 @@
  *   - `sprint-status.yaml`            — non-.md file, must be silently skipped
  *
  * AC6 sub-assertions:
- *   1. listSourceStories() returns exactly 4 stories (bmad:3.1, bmad:4.8b,
- *      bmad:5.1, bmad:5.2) — retro and YAML not included.
- *   2. Manifests for bmad:3.1, bmad:4.8b, bmad:5.1 land under to-do/.
+ *   1. listSourceStories() returns exactly 5 stories (bmad:3.1, bmad:4.8,
+ *      bmad:4.8b, bmad:5.1, bmad:5.2) — retro and YAML not included.
+ *   2. Manifests for bmad:3.1, bmad:4.8, bmad:4.8b, bmad:5.1 land under to-do/.
  *   3. Manifest for bmad:5.2 lands under blocked/.
  *   4. Exactly one warning names 5-2-free-text-status.md and the raw value.
  *   5. No error thrown; scan completes end-to-end.
@@ -102,15 +103,16 @@ describe("BMad adapter real-world leniency (Story 3.8 AC6)", () => {
     await fs.rm(scratch, { recursive: true, force: true });
   });
 
-  it("AC6 sub-assertion 1: listSourceStories returns exactly 4 stories", async () => {
+  it("AC6 sub-assertion 1: listSourceStories returns exactly 5 stories", async () => {
     configureBmadAdapter({
       targetRepo: path.join(scratch, "repo"),
       storiesRoot: FIXTURE_STORIES_ROOT,
     });
     const stories = await BmadAdapter.listSourceStories();
     const refs = stories.map((s) => s.ref);
-    expect(refs).toHaveLength(4);
+    expect(refs).toHaveLength(5);
     expect(refs).toContain("bmad:3.1");
+    expect(refs).toContain("bmad:4.8");
     expect(refs).toContain("bmad:4.8b");
     expect(refs).toContain("bmad:5.1");
     expect(refs).toContain("bmad:5.2");
@@ -126,12 +128,13 @@ describe("BMad adapter real-world leniency (Story 3.8 AC6)", () => {
     // AC6.5: no error thrown.
     const result = await scanSources({ targetRepoRoot: root });
 
-    // AC6.1: exactly 4 stories (3 in to-do, 1 blocked = 3 created + 1 blocked).
+    // AC6.1: exactly 5 stories (4 in to-do, 1 blocked = 4 created + 1 blocked).
     const totalHandled = result.createdRefs.length + result.blockedRefs.length;
-    expect(totalHandled).toBe(4);
+    expect(totalHandled).toBe(5);
 
-    // AC6.2: manifests for 3.1, 4.8b, 5.1 land in to-do/.
+    // AC6.2: manifests for 3.1, 4.8, 4.8b, 5.1 land in to-do/.
     expect(await existsInState(root, "to-do", "bmad:3.1")).toBe(true);
+    expect(await existsInState(root, "to-do", "bmad:4.8")).toBe(true);
     expect(await existsInState(root, "to-do", "bmad:4.8b")).toBe(true);
     expect(await existsInState(root, "to-do", "bmad:5.1")).toBe(true);
 
@@ -167,8 +170,8 @@ describe("BMad adapter real-world leniency (Story 3.8 AC6)", () => {
       // May not exist if zero stories were created (not expected here).
     }
     const toDoRefs = toDoFiles.filter((f) => f.endsWith(".yaml")).map((f) => f.replace(".yaml", ""));
-    // Only the 3 expected to-do refs should appear.
-    expect(toDoRefs.sort()).toEqual(["bmad:3.1", "bmad:4.8b", "bmad:5.1"].sort());
+    // Only the 4 expected to-do refs should appear.
+    expect(toDoRefs.sort()).toEqual(["bmad:3.1", "bmad:4.8", "bmad:4.8b", "bmad:5.1"].sort());
   });
 
   it("AC5: detect() returns true when currentContext points at the fixture stories root", async () => {
@@ -191,21 +194,22 @@ describe("BMad adapter real-world leniency (Story 3.8 AC6)", () => {
   });
 
   it("Sort order: bmad:4.8 sorts before bmad:4.8b in listSourceStories", async () => {
-    // We don't have a 4-8-... fixture but we verify the 4.8b story appears
-    // after any hypothetical 4.8 story by checking sort returns 4.8b where
-    // expected (between 3.1 and 5.x). Also directly test the sort logic via
-    // two parseBmadStory calls.
+    // The fixture now includes both 4-8-no-suffix-followup.md (bmad:4.8) and
+    // 4-8b-follow-up-story.md (bmad:4.8b), directly exercising the
+    // no-suffix-before-letter-suffix branch in index.ts.
     configureBmadAdapter({
       targetRepo: path.join(scratch, "repo"),
       storiesRoot: FIXTURE_STORIES_ROOT,
     });
     const stories = await BmadAdapter.listSourceStories();
     const refs = stories.map((s) => s.ref);
-    // 3.1 must come before 4.8b, which must come before 5.x.
+    // 3.1 < 4.8 < 4.8b < 5.1 — no-suffix sorts before letter-suffix within same numeric.
     const idx31 = refs.indexOf("bmad:3.1");
+    const idx48 = refs.indexOf("bmad:4.8");
     const idx48b = refs.indexOf("bmad:4.8b");
     const idx51 = refs.indexOf("bmad:5.1");
-    expect(idx31).toBeLessThan(idx48b);
+    expect(idx31).toBeLessThan(idx48);
+    expect(idx48).toBeLessThan(idx48b);
     expect(idx48b).toBeLessThan(idx51);
   });
 });

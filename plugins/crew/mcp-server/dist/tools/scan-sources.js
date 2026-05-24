@@ -240,7 +240,49 @@ export async function scanSources(opts) {
             // Source hash changed (operator edited the story) — re-run discipline.
             const disciplineResult = activeAdapter.validateAgainstDiscipline(story);
             if (!("kind" in disciplineResult) || disciplineResult.kind !== "discipline-violation") {
-                // Story now passes discipline — promote from blocked/ to to-do/.
+                // Story now passes discipline — but check for unknown Status before promoting.
+                // A story edited to fix discipline could simultaneously have introduced (or
+                // retained) an unknown Status value; in that case we must block it with
+                // status-vocabulary-unknown rather than silently promoting to to-do/.
+                const statusUnknownOnPromotion = story.raw_frontmatter["status_unknown"];
+                if (statusUnknownOnPromotion !== undefined) {
+                    const blockedManifestRaw = stripUndefined({
+                        ref: story.ref,
+                        status: "blocked",
+                        adapter: activeAdapterName,
+                        source_path: repoRelativePath(story.raw_path, targetRepoRoot),
+                        source_hash: story.source_hash,
+                        depends_on: story.depends_on,
+                        acceptance_criteria: story.acceptance_criteria,
+                        title: story.title,
+                        narrative: story.narrative,
+                        implementation_notes: story.implementation_notes,
+                        withdrawn: false,
+                        blocked_by: "status-vocabulary-unknown",
+                    });
+                    const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
+                    const yamlText = yamlStringify(blockedManifest, { lineWidth: 0 });
+                    await writeManagedFile({
+                        absPath: absBlockedPath,
+                        contents: yamlText,
+                        targetRepoRoot,
+                        mcpToolContext: { toolName: "scanSources", role: "operator" },
+                    });
+                    result.blockedRefs.push(story.ref);
+                    result.skippedRefs.push({
+                        ref: story.ref,
+                        reason: "discipline-violation",
+                        detail: `status-vocabulary-unknown: "${statusUnknownOnPromotion.raw}"`,
+                    });
+                    const warnMessage = `Story \`${story.ref}\` at \`${story.raw_path}\` has a Status value (\`${statusUnknownOnPromotion.raw}\`) ` +
+                        `that is not one of the known BMad statuses (backlog, ready-for-dev, in-progress, done, optional, contexted). ` +
+                        `The story has been blocked with reason \`status-vocabulary-unknown\` so the scan can continue. ` +
+                        `Edit the spec's Status line or remove it (Status defaults to \`backlog\`) and re-run /crew:scan.`;
+                    result.warnings.push({ path: story.raw_path, message: warnMessage });
+                    console.warn(`[scanSources] ${warnMessage}`);
+                    continue;
+                }
+                // Story passes discipline and has a known Status — promote from blocked/ to to-do/.
                 // NOTE: This sequence is non-atomic: the to-do/ manifest is written
                 // first, then the blocked/ manifest is deleted. If the unlink fails
                 // (e.g. a mid-flight crash or permission error), both manifests will
@@ -297,9 +339,13 @@ export async function scanSources(opts) {
             }
             continue;
         }
-        // Step 4b: Story 3.8 AC3 — status-vocabulary-unknown gate.
-        // If the parser flagged an unknown Status value, route the story to blocked/
-        // immediately (before discipline). The scan continues — no throw.
+        // Step 4b: Story 3.8 AC3 — status-vocabulary-unknown gate (first scan only).
+        // If the parser flagged an unknown Status value and no manifest exists yet
+        // (currentState === null), route the story to blocked/ immediately (before
+        // discipline). Re-scan paths (blocked→to-do promotion and to-do hash-changed
+        // update) each perform their own status_unknown check earlier in the loop so
+        // they are already handled via `continue` before reaching this point.
+        // The scan continues — no throw.
         const statusUnknown = story.raw_frontmatter["status_unknown"];
         if (statusUnknown !== undefined && currentState === null) {
             const absBlockedPath = path.join(stateRoot, "blocked", `${story.ref}.yaml`);
@@ -416,9 +462,54 @@ export async function scanSources(opts) {
                 throw err;
             }
             if (existingManifest.source_hash !== story.source_hash) {
-                // Hash changed → rewrite with new hash and source_path; preserve all other fields.
-                // Operator hand-edits to narrative, acceptance_criteria, withdrawn etc. are preserved
-                // per Story 3.7's hand-edit allowance.
+                // Hash changed — check for unknown Status before updating.
+                // If the operator edited the story and introduced an unknown Status value,
+                // move the manifest to blocked/ rather than silently writing a to-do/ update.
+                const statusUnknownOnUpdate = story.raw_frontmatter["status_unknown"];
+                if (statusUnknownOnUpdate !== undefined) {
+                    const absBlockedPath = path.join(stateRoot, "blocked", `${story.ref}.yaml`);
+                    const blockedManifestRaw = stripUndefined({
+                        ref: story.ref,
+                        status: "blocked",
+                        adapter: activeAdapterName,
+                        source_path: repoRelativePath(story.raw_path, targetRepoRoot),
+                        source_hash: story.source_hash,
+                        depends_on: story.depends_on,
+                        acceptance_criteria: story.acceptance_criteria,
+                        title: story.title,
+                        narrative: story.narrative,
+                        implementation_notes: story.implementation_notes,
+                        withdrawn: false,
+                        blocked_by: "status-vocabulary-unknown",
+                    });
+                    const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
+                    const blockedYaml = yamlStringify(blockedManifest, { lineWidth: 0 });
+                    await writeManagedFile({
+                        absPath: absBlockedPath,
+                        contents: blockedYaml,
+                        targetRepoRoot,
+                        mcpToolContext: { toolName: "scanSources", role: "operator" },
+                    });
+                    // Remove the stale to-do/ manifest so the startup guard doesn't have to.
+                    await fs.unlink(absToDoPath);
+                    result.blockedRefs.push(story.ref);
+                    result.skippedRefs.push({
+                        ref: story.ref,
+                        reason: "discipline-violation",
+                        detail: `status-vocabulary-unknown: "${statusUnknownOnUpdate.raw}"`,
+                    });
+                    const warnMessage = `Story \`${story.ref}\` at \`${story.raw_path}\` has a Status value (\`${statusUnknownOnUpdate.raw}\`) ` +
+                        `that is not one of the known BMad statuses (backlog, ready-for-dev, in-progress, done, optional, contexted). ` +
+                        `The story has been blocked with reason \`status-vocabulary-unknown\` so the scan can continue. ` +
+                        `Edit the spec's Status line or remove it (Status defaults to \`backlog\`) and re-run /crew:scan.`;
+                    result.warnings.push({ path: story.raw_path, message: warnMessage });
+                    console.warn(`[scanSources] ${warnMessage}`);
+                    continue;
+                }
+                // Hash changed and Status is known → rewrite with new hash and source_path;
+                // preserve all other fields. Operator hand-edits to narrative,
+                // acceptance_criteria, withdrawn etc. are preserved per Story 3.7's hand-edit
+                // allowance.
                 const updatedManifest = {
                     ...existingManifest,
                     source_hash: story.source_hash,

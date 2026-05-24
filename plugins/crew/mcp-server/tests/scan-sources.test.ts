@@ -435,3 +435,131 @@ describe("AC4 (Story 3.5) — scan-sources blocked manifest on discipline violat
     expect(manifest["ref"]).toBe("bmad:2.1");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story 3.8 — status_unknown leak paths (Issue 1 reviewer fix)
+// ---------------------------------------------------------------------------
+
+describe("Story 3.8 — status_unknown gate fires on re-scan paths (not only first scan)", () => {
+  // Minimal valid story template. Discipline-compliant (has an integration AC).
+  const STORY_TEMPLATE = (status: string) =>
+    `# Story 2.2: Status-unknown leak path fixture
+
+Status: ${status}
+
+## Story
+
+As a **fixture story**,
+I want **to test status_unknown re-routing**,
+so that **the status-vocabulary-unknown gate fires on re-scan paths too**.
+
+## Acceptance Criteria
+
+**AC1 (integration):**
+**Given** this story is scanned,
+**When** a re-scan path fires,
+**Then** the unknown Status is caught and blocked.
+
+## Dev Notes
+
+Fixture for the status_unknown leak path unit tests.
+`;
+
+  let leakScratch: string;
+
+  beforeEach(async () => {
+    // Build a minimal crew workspace by copying the base fixture and adding a
+    // fresh story file — so we get the .crew/config.yaml wiring for free.
+    leakScratch = await fs.mkdtemp(path.join(os.tmpdir(), "crew-scan-leak-"));
+    await fs.cp(FIXTURE_DIR, leakScratch, { recursive: true });
+
+    // Write a discipline-compliant story with a VALID status to start with.
+    const storiesDir = path.join(leakScratch, "_bmad-output", "planning-artifacts", "stories");
+    await fs.writeFile(path.join(storiesDir, "2-2-status-unknown-leak.md"), STORY_TEMPLATE("ready-for-dev"), "utf8");
+  });
+
+  afterEach(async () => {
+    await fs.rm(leakScratch, { recursive: true, force: true });
+  });
+
+  it("blocked→to-do promotion branch: unknown Status prevents promotion and keeps story in blocked/", async () => {
+    const storiesDir = path.join(leakScratch, "_bmad-output", "planning-artifacts", "stories");
+    const storyFile = path.join(storiesDir, "2-2-status-unknown-leak.md");
+
+    // First scan — story has a valid Status ("ready-for-dev" maps to
+    // "backlog" in execution; what matters is it is not flagged unknown).
+    // The story is discipline-compliant so it goes straight to to-do/.
+    const result1 = await scanSources({ targetRepoRoot: leakScratch });
+    // 2.2 should be created (to-do/), 1.1 and 1.2 also created.
+    expect(result1.createdRefs).toContain("bmad:2.2");
+
+    const toDoPath = path.join(leakScratch, ".crew", "state", "to-do", "bmad:2.2.yaml");
+    const blockedPath = path.join(leakScratch, ".crew", "state", "blocked", "bmad:2.2.yaml");
+
+    // Delete the to-do manifest manually to simulate a story that was
+    // previously blocked (by writing directly to blocked/).
+    await fs.unlink(toDoPath);
+    const blockedRaw = `ref: "bmad:2.2"\nstatus: blocked\nadapter: bmad\nsource_path: _bmad-output/planning-artifacts/stories/2-2-status-unknown-leak.md\nsource_hash: "deadbeef"\nblocked_by: planning-discipline\ntitle: Status-unknown leak path fixture\nwithdrawn: false\n`;
+    await fs.mkdir(path.dirname(blockedPath), { recursive: true });
+    await fs.writeFile(blockedPath, blockedRaw, "utf8");
+
+    // Now edit the story to introduce an unknown Status value and change the
+    // hash so the blocked-re-eval branch fires (operator edited the file).
+    await fs.writeFile(storyFile, STORY_TEMPLATE("wip-unknown-status"), "utf8");
+
+    // Second scan — blocked branch fires; discipline now passes (has integration AC),
+    // but status_unknown should intercept before promotion and keep story in blocked/.
+    const result2 = await scanSources({ targetRepoRoot: leakScratch });
+
+    // Story must remain blocked (not promoted to to-do/).
+    expect(result2.blockedRefs).toContain("bmad:2.2");
+    expect(result2.createdRefs).not.toContain("bmad:2.2");
+    await expect(fs.stat(toDoPath)).rejects.toThrow();
+    await expect(fs.stat(blockedPath)).resolves.toBeTruthy();
+    const manifest = yamlParse(await fs.readFile(blockedPath, "utf8")) as Record<string, unknown>;
+    expect(manifest["blocked_by"]).toBe("status-vocabulary-unknown");
+
+    // Exactly one warning referencing the unknown value.
+    const warns = result2.warnings.filter((w) => w.path.includes("2-2-status-unknown-leak.md"));
+    expect(warns.length).toBe(1);
+    expect(warns[0]!.message).toContain("wip-unknown-status");
+    expect(warns[0]!.message).toContain("status-vocabulary-unknown");
+  });
+
+  it("to-do re-scan branch: unknown Status introduced by edit moves story from to-do/ to blocked/", async () => {
+    const storiesDir = path.join(leakScratch, "_bmad-output", "planning-artifacts", "stories");
+    const storyFile = path.join(storiesDir, "2-2-status-unknown-leak.md");
+
+    // First scan — valid status, story lands in to-do/.
+    const result1 = await scanSources({ targetRepoRoot: leakScratch });
+    expect(result1.createdRefs).toContain("bmad:2.2");
+
+    const toDoPath = path.join(leakScratch, ".crew", "state", "to-do", "bmad:2.2.yaml");
+    const blockedPath = path.join(leakScratch, ".crew", "state", "blocked", "bmad:2.2.yaml");
+
+    // Verify to-do manifest exists, blocked does not.
+    await expect(fs.stat(toDoPath)).resolves.toBeTruthy();
+    await expect(fs.stat(blockedPath)).rejects.toThrow();
+
+    // Edit the story in place to introduce an unknown Status value.
+    // The hash changes so the to-do re-scan update branch fires.
+    await fs.writeFile(storyFile, STORY_TEMPLATE("wip-unknown-status"), "utf8");
+
+    // Second scan — to-do re-scan branch fires; story now has unknown Status.
+    const result2 = await scanSources({ targetRepoRoot: leakScratch });
+
+    // Story must be moved to blocked/, not updated in to-do/.
+    expect(result2.blockedRefs).toContain("bmad:2.2");
+    expect(result2.updatedRefs).not.toContain("bmad:2.2");
+    await expect(fs.stat(toDoPath)).rejects.toThrow();
+    await expect(fs.stat(blockedPath)).resolves.toBeTruthy();
+    const manifest = yamlParse(await fs.readFile(blockedPath, "utf8")) as Record<string, unknown>;
+    expect(manifest["blocked_by"]).toBe("status-vocabulary-unknown");
+
+    // Exactly one warning referencing the unknown value.
+    const warns = result2.warnings.filter((w) => w.path.includes("2-2-status-unknown-leak.md"));
+    expect(warns.length).toBe(1);
+    expect(warns[0]!.message).toContain("wip-unknown-status");
+    expect(warns[0]!.message).toContain("status-vocabulary-unknown");
+  });
+});

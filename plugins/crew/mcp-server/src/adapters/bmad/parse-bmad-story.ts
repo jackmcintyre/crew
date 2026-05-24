@@ -25,7 +25,8 @@ export function parseBmadStory(absPath: string, fileContents: string): SourceSto
     });
   }
   const epicFromName = filenameMatch[1]!;
-  // Story 3.8 Task 1.3: combine number + optional letter suffix.
+  // Story 3.8 Task 1.3: combine story-number + optional letter suffix
+  // (e.g. "8" + "b" → "8b"; epic is added later to form the full ref).
   const storyFromName = filenameMatch[2]! + (filenameMatch[3] ?? "");
   const slug = filenameMatch[4]!;
 
