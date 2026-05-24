@@ -96,11 +96,14 @@ After a story is claimed, the inner cycle manages the dev spawn → handoff pars
      - Surface the original error verbatim and halt the inner cycle. Do NOT proceed to step 10.
 
 10. invoke processReviewerTranscript({ targetRepoRoot, sessionUlid, ref, manifestPath }). The tool reads `reviewer-result.json` and switches on its `recommendedVerdict` field to drive all manifest mutations.
+   - If `processReviewerTranscript` throws (`ReviewerResultFileMalformedError`, `WrongClaimantError`, `InProgressHandEditError`, or any other error):
+     - Best-effort: call `applyReviewerLabels({ targetRepoRoot, sessionUlid, verdictOverride: "reviewer-failure" })` in its own try/catch. If this label call also fails, log `apply-reviewer-labels failed in error handler: <secondaryError.message>` but do NOT let it replace the original error.
+     - Surface the original error verbatim and halt the inner cycle. Do NOT proceed to step 10a.
 
-10a. invoke applyReviewerLabels({ targetRepoRoot, sessionUlid }). Switch on the `next` field:
+10a. invoke applyReviewerLabels({ targetRepoRoot, sessionUlid }). This call is best-effort: wrap it in a try/catch. Switch on the `next` field:
    - `skipped-no-session-result` → log the chat line `apply-reviewer-labels skipped — no reviewer-result.json` and proceed to step 11.
    - `applied` → log the chat line `reviewer labels applied: ${result.labelsApplied.join(", ")} on PR #${prNumber}` and proceed to step 11.
-   - If `applyReviewerLabels` throws: surface the error verbatim and halt.
+   - If `applyReviewerLabels` throws: log `apply-reviewer-labels failed after processReviewerTranscript: <error.message>` but do NOT halt. The manifest has already been mutated by `processReviewerTranscript`; halting here would leave the operator without a clear recovery path. Labels are best-effort; proceed to step 11.
 
 11. Surface every entry of the returned `chatLog` to the operator in order, before any subsequent call.
 
@@ -141,7 +144,7 @@ The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as th
 
 - **`GhApiResponseShapeError`** (from `postReviewerComments`): `gh api` or `gh pr view` returned a response that could not be parsed as the expected JSON shape. Surface the error verbatim and halt the inner cycle. Do NOT proceed to `processReviewerTranscript`.
 
-- **`GhApiResponseShapeError` or `GhRecoverableError`** (from `applyReviewerLabels`): the label-posting `gh api` call failed. Surface the error verbatim and halt the inner cycle after step 10a.
+- **`GhApiResponseShapeError` or `GhRecoverableError`** (from `applyReviewerLabels` at step 10a): the label-posting `gh api` call failed after a successful `processReviewerTranscript`. This is best-effort: log the failure and proceed to step 11 — do NOT halt. If `applyReviewerLabels` fails in the step-10 or step-9a error handlers (as a secondary best-effort call), log the secondary failure and surface the original error unchanged.
 
 - **`postReviewerComments` raising `GhRecoverableError`**: The `gh pr diff` or `gh api` call within `postReviewerComments` failed with a recoverable class (rate-limit, auth, network). Surface the error verbatim and halt the inner cycle — a posting failure indicates an environmental problem worth pausing for. Do NOT proceed to `processReviewerTranscript`.
 

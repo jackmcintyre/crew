@@ -98,7 +98,7 @@ export async function applyReviewerLabels(
   const permissions = await loadRolePermissions({ role, pluginRoot });
 
   // Step 2: Resolve prNumber from the result file.
-  const prNumber = (resultFile as unknown as Record<string, unknown>).prNumber as number;
+  const prNumber = resultFile.prNumber;
 
   // Step 3: Resolve owner/repo via `gh pr view --json baseRepository`.
   const prViewResult = await gh({
