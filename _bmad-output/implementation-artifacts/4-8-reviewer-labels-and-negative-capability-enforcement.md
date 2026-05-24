@@ -44,6 +44,7 @@ Story 4.8 closes both gaps: (1) adds label-posting via a new `applyReviewerLabel
 ### Deferred work
 
 - **`api` URL / method narrowing.** `gh_allow_args["api"]` in `generalist-reviewer.yaml` remains `{}` (no restriction). The reviewer can call `gh api` with any URL and any `--method`. Closing this requires extending the `gh_allow_args` enforcement in `gh.ts` to support regex patterns or prefix matching; v1's exact-string match cannot represent dynamic PR URLs (`/repos/{owner}/{repo}/pulls/{n}/reviews/{id}`). Follow-up story: add `gh_allow_args` regex mode and restrict `api` to the reviews and labels endpoints used by `postReviewerComments` and `applyReviewerLabels`.
+  - **Scope renegotiation note:** Story 4.7's § DOES NOT (n) explicitly flagged this narrowing as a Story 4.8 MUST. This spec consciously renegotiates that to defer, because the enforcement primitive (`gh_allow_args` regex or prefix matching) doesn't exist yet — adding it is its own engineering work and would double the surface area of Story 4.8. The negative-capability gap is partially closed by Task 1's subcommand removals; full closure waits on the follow-up story that adds the primitive. This is a deliberate scope call, not an oversight.
 
 ---
 
@@ -59,7 +60,7 @@ Story 4.8 closes both gaps: (1) adds label-posting via a new `applyReviewerLabel
 <!-- Not user-surface: AC1 describes the tool's internal label-posting logic. AC4 carries the operator-observable contract. -->
 
 **AC2:**
-**Given** `applyReviewerLabels` is called with any non-green outcome — `recommendedVerdict` is `"NEEDS CHANGES"`, `"BLOCKED"`, or the caller passes `verdictOverride: "reviewer-failure"`,
+**Given** `applyReviewerLabels` is called with any non-green outcome — `recommendedVerdict` is `"NEEDS CHANGES"` or `"BLOCKED"`, OR the caller passes `verdictOverride: "reviewer-failure"` (which takes precedence over `recommendedVerdict` regardless of the file's value, including when `recommendedVerdict === "READY FOR MERGE"`),
 **When** the tool runs,
 **Then** it makes two `gh api POST` calls in sequence: first adds `reviewed-by-agent`, then adds `needs-human`. Both calls use the same endpoint shape as AC1 (`POST /repos/{owner}/{repo}/issues/{prNumber}/labels`). The two calls are sequential, not batched — the `needs-human` call runs only if `reviewed-by-agent` succeeds, and any `GhApiResponseShapeError` or `GhRecoverableError` on either call propagates uncaught. _(FR36)_
 
@@ -137,7 +138,12 @@ Implementation order is load-bearing.
 - [ ] **Task 1: Remove unused subcommands from `generalist-reviewer.yaml`** (AC: #3)
   - [ ] 1.1 Open `plugins/crew/permissions/generalist-reviewer.yaml`. Remove `- pr-comment` and `- pr-review` from `gh_allow`. After this change `gh_allow` contains exactly: `pr-view`, `pr-diff`, `api`. Preserve `gh_allow_args: {}` — empty, unchanged.
   - [ ] 1.2 Verify no existing tool under `plugins/crew/mcp-server/src/tools/` calls `gh({ subcommand: "pr-comment", ... })` or `gh({ subcommand: "pr-review", ... })` with role `"generalist-reviewer"` — grep for both strings in the tools directory to confirm zero callers. If a caller is found, STOP and surface the conflict — do not remove the subcommand.
-  - [ ] 1.3 Run `pnpm build` to confirm the YAML change does not break any TypeScript that imports the permission schema.
+  - [ ] 1.3 **Update test fixtures that hand-write `generalist-reviewer.yaml` content.** Two test files contain literal `pr-comment` / `pr-review` lines in their fixture YAML; they will silently drift from production after Task 1.1 unless updated in the same change. After updating, the fixtures must match production's 3-entry `gh_allow` shape (`pr-view`, `pr-diff`, `api`).
+    - `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (around lines 148-153 — the multi-line `gh_allow` block).
+    - `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` (around lines 267-272).
+    - Do NOT touch `plugins/crew/mcp-server/src/tools/__tests__/build-persona-spawn-prompt.test.ts` — its `pr-comment` line is on the `generalist-dev` persona fixture, NOT `generalist-reviewer`, and is unrelated to this story.
+    - Rationale: AC3 asserts the production YAML is loaded via `loadRolePermissions` and the removed subcommands are denied. Hand-written fixtures with stale entries would pass under green ACs while production drifts — exactly the bugfix-1 failure mode this project's planning discipline guards against.
+  - [ ] 1.4 Run `pnpm build` to confirm the YAML change does not break any TypeScript that imports the permission schema.
 
 - [ ] **Task 2: Add `GhApiResponseShapeError` call site for label response** (AC: #1, #2)
   - [ ] 2.1 Confirm `GhApiResponseShapeError` (added in Story 4.6b, `errors.ts`) accepts the shape `{ subcommand: string; url?: string; cause: unknown }`. No change needed if it does — this task is a precondition check.
