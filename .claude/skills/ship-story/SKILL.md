@@ -432,7 +432,7 @@ This step is **not** auto-run at the end of Step 11 — merge timing is unbounde
    ```bash
    $SH cleanup <story_key>
    ```
-   This atomically does: verify PR is merged via `gh pr view`, status → `done` (idempotent — under the post-2026-05-24 flow the merge already brought the flip in via Step 8's bookkeeping commit, so this is usually a no-op verification), fast-forward local `main`, `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, `git push origin --delete story/<story_key>` (best-effort — silent if GitHub already auto-deleted), tidy `/tmp/ship-<story_key>.*`, re-point the Claude Code plugin cache back at main via `pnpm --dir plugins/crew dev:install` (defensive: silently skipped if the script is missing), append `cleaned` event to the run log.
+   This atomically does: verify PR is merged via `gh pr view`, **fetch + fast-forward local `main` FIRST** (so the Step 8 bookkeeping commit's `status: done` flip lands without colliding with a redundant local write — the race that surfaced cleaning up PR #122), then idempotent `status → done` (no-op verification under the post-2026-05-24 flow; write fallback for legacy stories shipped before bookkeeping commits existed), `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, `git push origin --delete story/<story_key>` (best-effort — silent if GitHub already auto-deleted), tidy `/tmp/ship-<story_key>.*`, re-point the Claude Code plugin cache back at main via `pnpm --dir plugins/crew dev:install` (defensive: silently skipped if the script is missing), append `cleaned` event to the run log.
 
 3. **Report.** One line per story cleaned, plus any of the halt codes below.
 
