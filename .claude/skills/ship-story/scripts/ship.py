@@ -383,13 +383,33 @@ _ALLOWED_STATUSES = {
 def cmd_set_status(args) -> None:
     if args.new_status not in _ALLOWED_STATUSES:
         die(f"illegal status '{args.new_status}'")
-    status = load_status()
-    if args.key not in status["development_status"]:
+    target = STATUS_FILE
+    if getattr(args, "worktree", None):
+        wt = Path(args.worktree)
+        if not wt.exists():
+            die(f"worktree path does not exist: {wt}")
+        target = wt / "_bmad-output/implementation-artifacts/sprint-status.yaml"
+        if not target.exists():
+            die(f"sprint-status.yaml not found in worktree: {target}")
+    data = yaml.safe_load(target.read_text())
+    if args.key not in data["development_status"]:
         die(f"unknown key '{args.key}'")
-    old = status["development_status"][args.key]
-    status["development_status"][args.key] = args.new_status
-    save_status(status)
-    print(json.dumps({"key": args.key, "from": old, "to": args.new_status}))
+    old = data["development_status"][args.key]
+    if old == args.new_status:
+        print(json.dumps({
+            "key": args.key, "from": old, "to": args.new_status,
+            "noop": True, "target": str(target),
+        }))
+        return
+    data["development_status"][args.key] = args.new_status
+    data["last_updated"] = dt.date.today().isoformat()
+    tmp = target.with_suffix(".yaml.tmp")
+    tmp.write_text(yaml.safe_dump(data, sort_keys=False))
+    tmp.replace(target)
+    print(json.dumps({
+        "key": args.key, "from": old, "to": args.new_status,
+        "target": str(target),
+    }))
 
 
 # ---------------------------------------------------------------- AC gate
@@ -1018,6 +1038,14 @@ def main() -> None:
     s = sub.add_parser("set-status")
     s.add_argument("key")
     s.add_argument("new_status")
+    s.add_argument(
+        "--worktree",
+        help=(
+            "path to worktree; when given, mutates the worktree's "
+            "sprint-status.yaml instead of the main repo's (so the flip "
+            "ships in the story PR rather than landing on main)"
+        ),
+    )
     s.set_defaults(func=cmd_set_status)
 
     v = sub.add_parser("verify-ac-table")
