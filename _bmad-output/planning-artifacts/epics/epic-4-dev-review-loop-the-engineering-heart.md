@@ -209,6 +209,20 @@ So that the reviewer cannot accidentally take a destructive action.
 
 **AC3 (integration):** vitest covers each label branch and each refused negative capability.
 
+## Story 4.8b: Deterministic seam hardening — handoff parser and PR URL extraction
+
+As a plugin maintainer,
+I want the dev → reviewer handoff to source `prNumber` from a tool-written state file rather than scanning the dev's chat transcript with a regex,
+So that the seam survives prose drift in the dev agent's narration.
+
+**Acceptance Criteria:**
+
+**Given** `runDevTerminalAction` completes a successful `gh pr create`, **When** the tool returns, **Then** it atomically writes `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/dev-outcome.json` containing `{ prUrl, prNumber, branch, commitSha }`. _(seam reliability; replaces LLM-text extraction)_
+
+**Given** `processDevTranscript` runs after a successful handoff parse, **When** `dev-outcome.json` exists and validates, **Then** the tool reads `prNumber` from the file and skips the `PR_URL_RE` regex scan; on ENOENT it falls back to the existing transcript regex unchanged; on malformed/invalid JSON it throws `DevOutcomeFileMalformedError` with NO transcript fallback. _(robust primary path + back-compat fallback + fail-loud on write-seam bugs)_
+
+**AC3 (integration):** vitest covers (a) write path on success, (b) file-present read path with no PR URL in transcript, (c) fallback to transcript scan when file absent, (d) malformed-file error without fallback, (e) non-regression on Story 4.3 / 4.3b / 4.5 / 4.6 branches.
+
 ## Story 4.9: Risk-tiering spec format and override resolution
 
 As a plugin maintainer,
