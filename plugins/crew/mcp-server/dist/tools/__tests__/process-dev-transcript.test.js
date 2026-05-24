@@ -422,11 +422,10 @@ describe("Story 4.6 (m) — PR URL extraction: no URL → PrUrlNotFoundInDevTran
 // ---------------------------------------------------------------------------
 const SESSION_DIR_PATH = `.crew/state/sessions/${SESSION_ULID}`;
 async function writeDevOutcomeFile(root, content) {
-    const dir = path.join(root, ".crew", "state", "sessions", SESSION_ULID);
-    await fs.mkdir(dir, { recursive: true });
-    const filePath = path.join(dir, "dev-outcome.json");
+    const filePath = path.join(root, ".crew", "state", "sessions", SESSION_ULID, "dev-outcome.json");
     const raw = typeof content === "string" ? content : JSON.stringify(content, null, 2);
-    await fs.writeFile(filePath, raw, "utf8");
+    // atomicWriteFile creates parent dirs internally; no fs.mkdir needed
+    await atomicWriteFile(filePath, raw);
     return filePath;
 }
 describe("Story 4.8b (5b) — file-present path: reads prNumber from dev-outcome.json", () => {
