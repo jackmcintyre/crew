@@ -23,6 +23,7 @@
 export type ProcessDevTranscriptResult = {
     next: "spawn-reviewer";
     reviewerPrompt: string;
+    prNumber: number;
     chatLog: string[];
 } | {
     next: "done-blocked-handoff-grammar";

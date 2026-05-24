@@ -24,6 +24,7 @@ import { claimNextStory } from "./claim-next-story.js";
 import { processDevTranscript } from "./process-dev-transcript.js";
 import { processReviewerTranscript } from "./process-reviewer-transcript.js";
 import { runDevTerminalAction } from "./run-dev-terminal-action.js";
+import { runReviewerSession } from "./run-reviewer-session.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -764,17 +765,19 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     },
   });
 
-  // Story 4.3b — processReviewerTranscript: parse the reviewer subagent's final transcript.
-  // The SKILL.md prose calls this after capturing the reviewer Task tool's return value.
+  // Story 4.3b / Story 4.6 revision 2 — processReviewerTranscript:
+  // Reads `reviewer-result.json` written by `runReviewerSession` and routes
+  // on its `recommendedVerdict` field. The `reviewerTranscript` parameter has
+  // been DROPPED — the reviewer's chat is no longer the verdict transport.
   server.registerTool({
     name: "processReviewerTranscript",
     description:
-      "Parse the reviewer subagent's final transcript for the verdict sentinel. " +
-      "Returns { next: 'rework-dev', devPrompt, reworkIteration, chatLog } on NEEDS CHANGES (increments rework_count), " +
-      "{ next: 'done-ready-for-merge', chatLog } on READY FOR MERGE, " +
-      "{ next: 'done-blocked-reviewer-verdict', chatLog } on BLOCKED, or " +
-      "{ next: 'done-blocked-reviewer-grammar', chatLog } on grammar drift (stamps blocked_by). " +
-      "MUST be called with the verbatim full transcript — no summarisation. Story 4.3b.",
+      "Read the persisted reviewer-result.json (written by runReviewerSession) and route on its recommendedVerdict. " +
+      "Returns { next: 'done-ready-for-merge', completed: true, chatLog } on READY FOR MERGE (calls completeStory internally), " +
+      "{ next: 'done-blocked-reviewer-needs-changes', chatLog } on NEEDS CHANGES (stamps blocked_by), " +
+      "{ next: 'done-blocked-reviewer-blocked', chatLog } on BLOCKED (stamps blocked_by), " +
+      "{ next: 'done-blocked-no-session-result', chatLog } when reviewer-result.json is absent. " +
+      "Story 4.3b / Story 4.6 revision 2.",
     inputSchema: {
       type: "object",
       properties: {
@@ -782,9 +785,8 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         sessionUlid: { type: "string" },
         ref: { type: "string" },
         manifestPath: { type: "string" },
-        reviewerTranscript: { type: "string" },
       },
-      required: ["targetRepoRoot", "sessionUlid", "ref", "manifestPath", "reviewerTranscript"],
+      required: ["targetRepoRoot", "sessionUlid", "ref", "manifestPath"],
     },
     handler: async (args) => {
       const parsed = z
@@ -793,7 +795,6 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           sessionUlid: z.string().min(1),
           ref: z.string().min(1),
           manifestPath: z.string().min(1),
-          reviewerTranscript: z.string(),
         })
         .parse(args);
       try {
@@ -860,6 +861,59 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         .parse(args);
       try {
         const result = await runDevTerminalAction(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.6 — runReviewerSession: composite tool for the reviewer subagent.
+  // Performs the three mandatory reads (source story → PR diff → standards)
+  // in fixed sequential order, runs every AC via the applicability classifier,
+  // and returns ReviewerSessionResult carrying structured acResults.
+  server.registerTool({
+    name: "runReviewerSession",
+    description:
+      "Composite reviewer-session tool. Reads the source story (via active adapter), " +
+      "the PR diff (via gh pr diff), and docs/standards.md in fixed sequential order. " +
+      "Runs every AC against the applicability classifier (artifact-check, vitest, or manual-check-required). " +
+      "Derives a `recommendedVerdict` literal (READY FOR MERGE | NEEDS CHANGES | BLOCKED) from acResults " +
+      "and persists the full ReviewerSessionResult to " +
+      "`<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json` as a side-effect before returning. " +
+      "Returns ReviewerSessionResult with sourceStory, prDiff, standards, standardsByCriterionId, acResults, and recommendedVerdict. " +
+      "All read and execution errors propagate uncaught. MUST be the reviewer persona's FIRST action. Story 4.6.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        sessionUlid: { type: "string" },
+        ref: { type: "string" },
+        prNumber: { type: "number" },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "sessionUlid", "ref", "prNumber"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          sessionUlid: z.string().min(1),
+          ref: z.string().min(1),
+          prNumber: z.number().int().positive(),
+          role: z.string().optional(),
+        })
+        .parse(args);
+      try {
+        const result = await runReviewerSession(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

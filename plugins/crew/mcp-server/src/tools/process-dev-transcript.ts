@@ -25,13 +25,14 @@ import * as path from "node:path";
 import { parseHandoff } from "../skills/handoff-parser.js";
 import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
+import { PrUrlNotFoundInDevTranscriptError } from "../errors.js";
 
 // ---------------------------------------------------------------------------
 // Return type
 // ---------------------------------------------------------------------------
 
 export type ProcessDevTranscriptResult =
-  | { next: "spawn-reviewer"; reviewerPrompt: string; chatLog: string[] }
+  | { next: "spawn-reviewer"; reviewerPrompt: string; prNumber: number; chatLog: string[] }
   | { next: "done-blocked-handoff-grammar"; chatLog: string[] }
   | { next: "done-handoff-but-no-review-yet"; chatLog: string[] } // v1: unreachable; declared for ABI stability
   | { next: "done-blocked-gh-defer"; chatLog: string[] }
@@ -56,6 +57,14 @@ export interface ProcessDevTranscriptOptions {
 
 const RECOVERABLE_ERROR_RE =
   /^gh-recoverable: class=(defer|retry|needs-human) subcommand=([a-z0-9-]+) exit=(\d+)/m;
+
+// ---------------------------------------------------------------------------
+// PR URL extraction regex
+// (Story 4.6 Task 6.1)
+// Matches the rightmost GitHub PR URL in a transcript and extracts the PR number.
+// ---------------------------------------------------------------------------
+
+const PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)/g;
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -149,6 +158,25 @@ export async function processDevTranscript(
     return { next: "done-blocked-handoff-grammar", chatLog };
   }
 
+  // ---------------------------------------------------------------------------
+  // Story 4.6 Task 6.1–6.3: Extract the PR number from the dev transcript.
+  // Takes the rightmost PR URL match (the dev may mention multiple URLs).
+  // ---------------------------------------------------------------------------
+
+  let lastMatch: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  const prUrlReClone = new RegExp(PR_URL_RE.source, PR_URL_RE.flags);
+  while ((m = prUrlReClone.exec(devTranscript)) !== null) {
+    lastMatch = m;
+  }
+
+  if (lastMatch === null) {
+    const tail = devTranscript.slice(-500);
+    throw new PrUrlNotFoundInDevTranscriptError({ ref, transcriptTail: tail });
+  }
+
+  const prNumber = parseInt(lastMatch[1]!, 10);
+
   // Handoff parsed OK — compute the reviewer spawn prompt.
   const { systemPrompt: reviewerPrompt } = await buildPersonaSpawnPrompt({
     targetRepoRoot,
@@ -159,7 +187,7 @@ export async function processDevTranscript(
     `handoff received — story ${ref} — spawning generalist-reviewer subagent (clean context)`,
   );
 
-  return { next: "spawn-reviewer", reviewerPrompt, chatLog };
+  return { next: "spawn-reviewer", reviewerPrompt, prNumber, chatLog };
 }
 
 // ---------------------------------------------------------------------------

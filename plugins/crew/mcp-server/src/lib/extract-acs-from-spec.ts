@@ -13,6 +13,18 @@ export interface AcEntry {
   index: number;
   /** First non-blank line of the AC body, truncated to 120 chars. */
   firstLine: string;
+  /**
+   * Parenthetical tag from the AC heading, without parens.
+   * E.g. `"user-surface"` for `**AC1 (user-surface):**`, `null` for `**AC2:**`.
+   * (Story 4.6 Task 1.2)
+   */
+  tag: string | null;
+  /**
+   * All body lines of the AC (from the line after the heading until the next
+   * AC heading or end of file). Lines are verbatim — not trimmed.
+   * (Story 4.6 Task 1.3 — needed by the applicability classifier)
+   */
+  body: string[];
 }
 
 /**
@@ -46,18 +58,31 @@ export async function extractAcsFromSpec(specPath: string): Promise<AcEntry[]> {
 
     const index = parseInt(headingMatch[1]!, 10);
 
-    // Find the first non-blank line after the heading.
+    // Extract the parenthetical tag from the AC heading (Story 4.6 Task 1.2).
+    // headingMatch[2] is e.g. " (user-surface)" — strip parens + trim.
+    const rawTag = headingMatch[2];
+    const tag = rawTag ? rawTag.replace(/^\s*\(/, "").replace(/\)\s*$/, "").trim() : null;
+
+    // Collect all body lines after the heading (Story 4.6 Task 1.3).
+    // Body runs until the next AC heading, the next level-2 section heading
+    // (## ), or end of file. Stopping at ## prevents prose under sections like
+    // "## Implementation Notes" from being picked up as AC body (M2 fix).
+    const body: string[] = [];
     let firstLine = "";
     for (let j = i + 1; j < lines.length; j++) {
-      const candidate = lines[j]!.trim();
-      if (candidate.length === 0) continue;
-      // Stop if we hit another AC heading (no body between consecutive ACs).
-      if (AC_HEADING_RE.test(candidate)) break;
-      firstLine = candidate.slice(0, 120);
-      break;
+      const candidate = lines[j]!;
+      // Stop if we hit another AC heading.
+      if (AC_HEADING_RE.test(candidate.trim())) break;
+      // Stop if we hit any level-2 (or higher) markdown section heading.
+      if (/^##+ /.test(candidate)) break;
+      body.push(candidate);
+      // Find first non-blank line for firstLine (original logic preserved).
+      if (firstLine === "" && candidate.trim().length > 0) {
+        firstLine = candidate.trim().slice(0, 120);
+      }
     }
 
-    results.push({ index, firstLine });
+    results.push({ index, firstLine, tag, body });
   }
 
   // Sort numerically (specs are usually in order, but be defensive).

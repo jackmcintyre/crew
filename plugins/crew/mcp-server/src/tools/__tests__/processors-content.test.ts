@@ -1,5 +1,6 @@
 /**
- * Content-structure tests for AC6 anchors — Story 4.3b Task 11.2.
+ * Content-structure tests for AC6 anchors — Story 4.3b Task 11.2;
+ * updated for Story 4.6 revision 2 (deterministic-verdict-transport).
  *
  * Reads the source files for the two new transcript-processor tools and
  * register.ts, asserting the verbatim anchor strings required by AC6(ix)–(xi).
@@ -7,14 +8,16 @@
  * AC6(ix):  `process-dev-transcript.ts` contains `handoff received — story`
  *           and `handoff grammar drift — story`, but NOT
  *           `re-spawning generalist-dev subagent (rework iteration`.
- * AC6(x):   `process-reviewer-transcript.ts` contains
- *           `re-spawning generalist-dev subagent (rework iteration`,
- *           `reviewer verdict: READY FOR MERGE`,
- *           `reviewer verdict: BLOCKED`,
- *           `reviewer grammar drift — story`.
+ * AC6(x):   `process-reviewer-transcript.ts` (revision 2):
+ *           - contains `reviewer verdict: READY FOR MERGE`
+ *           - contains `reviewer verdict: NEEDS CHANGES`
+ *           - contains `reviewer verdict: BLOCKED`
+ *           - contains `reviewer-no-session-result` (new rubber-stamp protection)
+ *           - does NOT contain `reviewer grammar drift` (retired in revision 2)
+ *           - does NOT contain `re-spawning generalist-dev` (rework-dev path retired)
  * AC6(xi):  `register.ts` contains zero occurrences of the literal `"runDevSession"`.
  *
- * Story 4.3b Task 11.2.
+ * Story 4.3b Task 11.2; Story 4.6 revision 2.
  */
 
 import { beforeAll, describe, expect, it } from "vitest";
@@ -49,27 +52,35 @@ describe("AC6(ix) — process-dev-transcript.ts content structure", () => {
   });
 });
 
-describe("AC6(x) — process-reviewer-transcript.ts content structure", () => {
+describe("AC6(x) — process-reviewer-transcript.ts content structure (revision 2)", () => {
   let source: string;
 
   beforeAll(async () => {
     source = await fs.readFile(PROCESS_REVIEWER_FILE, "utf8");
   });
 
-  it("contains the verbatim substring 're-spawning generalist-dev subagent (rework iteration'", () => {
-    expect(source).toContain("re-spawning generalist-dev subagent (rework iteration");
-  });
-
   it("contains the verbatim substring 'reviewer verdict: READY FOR MERGE'", () => {
     expect(source).toContain("reviewer verdict: READY FOR MERGE");
+  });
+
+  it("contains the verbatim substring 'reviewer verdict: NEEDS CHANGES'", () => {
+    expect(source).toContain("reviewer verdict: NEEDS CHANGES");
   });
 
   it("contains the verbatim substring 'reviewer verdict: BLOCKED'", () => {
     expect(source).toContain("reviewer verdict: BLOCKED");
   });
 
-  it("contains the verbatim substring 'reviewer grammar drift — story'", () => {
-    expect(source).toContain("reviewer grammar drift — story");
+  it("contains the verbatim substring 'reviewer-no-session-result' (rubber-stamp protection)", () => {
+    expect(source).toContain("reviewer-no-session-result");
+  });
+
+  it("does NOT contain 'reviewer grammar drift' (retired in revision 2)", () => {
+    expect(source).not.toContain("reviewer grammar drift");
+  });
+
+  it("does NOT contain 're-spawning generalist-dev subagent' (rework-dev path retired in revision 2)", () => {
+    expect(source).not.toContain("re-spawning generalist-dev subagent");
   });
 });
 

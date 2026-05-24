@@ -38,6 +38,8 @@ import type { ExecutionManifest } from "../../schemas/execution-manifest.js";
 const STORY_REF = "native:01J9P0K2N3MZX0YV4S5RTQ4ABC";
 const SESSION_ULID = "01HZSESSION00000000000001";
 const HANDOFF_PHRASE = `Handoff to reviewer — story ${STORY_REF} ready for review.`;
+// A valid GitHub PR URL to include in happy-path transcripts (Story 4.6 Task 6.1)
+const FIXTURE_PR_URL = "https://github.com/test-org/test-repo/pull/42";
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -182,12 +184,13 @@ async function readOnDiskManifest(): Promise<ExecutionManifest> {
 // ---------------------------------------------------------------------------
 
 describe("(a) happy handoff → spawn-reviewer", () => {
-  it("returns next: 'spawn-reviewer', reviewerPrompt populated, manifest NOT mutated", async () => {
+  it("returns next: 'spawn-reviewer', reviewerPrompt populated, prNumber extracted, manifest NOT mutated", async () => {
     const result = await processDevTranscript({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
       ref: STORY_REF,
-      devTranscript: `Some output\n${HANDOFF_PHRASE}`,
+      // Story 4.6: transcript must include a GitHub PR URL
+      devTranscript: `Some output\nCreated PR: ${FIXTURE_PR_URL}\n${HANDOFF_PHRASE}`,
     });
 
     expect(result.next).toBe("spawn-reviewer");
@@ -196,6 +199,9 @@ describe("(a) happy handoff → spawn-reviewer", () => {
     // reviewerPrompt is a non-empty string (assemblePrompt result).
     expect(result.reviewerPrompt.length).toBeGreaterThan(0);
     expect(result.reviewerPrompt).toContain("Generalist Reviewer");
+
+    // Story 4.6: prNumber extracted from the PR URL
+    expect(result.prNumber).toBe(42);
 
     // chatLog contains the AC1 verbatim line.
     expect(result.chatLog).toContain(
@@ -284,11 +290,12 @@ describe("regression: no spawn", () => {
     // If processDevTranscript tried to spawn something, this test would fail
     // because no Task-spawn seam is provided. The mere fact it compiles and runs
     // without one is the assertion.
+    // Story 4.6: include a PR URL so the new prNumber extraction succeeds.
     const result = await processDevTranscript({
       targetRepoRoot: tmpRoot,
       sessionUlid: SESSION_ULID,
       ref: STORY_REF,
-      devTranscript: HANDOFF_PHRASE,
+      devTranscript: `${FIXTURE_PR_URL}\n${HANDOFF_PHRASE}`,
     });
 
     // It should have succeeded (happy path) without needing any Task fake.
@@ -434,5 +441,75 @@ describe("(j) manifest read-modify-written exactly once per recoverable-error br
     const onDisk = await readOnDiskManifest();
     // Overwrites the previous handoff-grammar value (AC2h)
     expect(onDisk.blocked_by).toBe("gh-needs-human");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story 4.6 Task 6.5: PR URL extraction from dev transcript
+// ---------------------------------------------------------------------------
+
+describe("Story 4.6 (k) — PR URL extraction: single URL → prNumber returned", () => {
+  it("extracts prNumber from a transcript with one GitHub PR URL", async () => {
+    const transcript = `Some output\nhttps://github.com/test-org/test-repo/pull/42\n${HANDOFF_PHRASE}`;
+    const result = await processDevTranscript({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      ref: STORY_REF,
+      devTranscript: transcript,
+    });
+
+    expect(result.next).toBe("spawn-reviewer");
+    if (result.next !== "spawn-reviewer") return;
+    expect(result.prNumber).toBe(42);
+  });
+});
+
+describe("Story 4.6 (l) — PR URL extraction: multiple URLs → rightmost wins", () => {
+  it("when transcript mentions two PR URLs, takes the rightmost one", async () => {
+    // Earlier URL is 1, later URL is 99 — rightmost should win
+    const transcript =
+      `Created draft PR: https://github.com/test-org/test-repo/pull/1\n` +
+      `Updated PR: https://github.com/test-org/test-repo/pull/99\n` +
+      HANDOFF_PHRASE;
+    const result = await processDevTranscript({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      ref: STORY_REF,
+      devTranscript: transcript,
+    });
+
+    expect(result.next).toBe("spawn-reviewer");
+    if (result.next !== "spawn-reviewer") return;
+    expect(result.prNumber).toBe(99);
+  });
+});
+
+describe("Story 4.6 (m) — PR URL extraction: no URL → PrUrlNotFoundInDevTranscriptError", () => {
+  it("throws PrUrlNotFoundInDevTranscriptError when no PR URL is in the transcript", async () => {
+    const transcript = `Some work done\n${HANDOFF_PHRASE}`;
+    await expect(
+      processDevTranscript({
+        targetRepoRoot: tmpRoot,
+        sessionUlid: SESSION_ULID,
+        ref: STORY_REF,
+        devTranscript: transcript,
+      }),
+    ).rejects.toThrow("Could not parse a GitHub PR URL");
+  });
+
+  it("error message contains the ref and 'https://github.com'", async () => {
+    try {
+      await processDevTranscript({
+        targetRepoRoot: tmpRoot,
+        sessionUlid: SESSION_ULID,
+        ref: STORY_REF,
+        devTranscript: `No PR here\n${HANDOFF_PHRASE}`,
+      });
+      expect.fail("should have thrown");
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain(STORY_REF);
+      expect(msg).toContain("https://github.com");
+    }
   });
 });

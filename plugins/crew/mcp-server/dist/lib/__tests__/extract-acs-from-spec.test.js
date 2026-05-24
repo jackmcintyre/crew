@@ -79,6 +79,41 @@ describe("extractAcsFromSpec", () => {
         // AC3
         expect(acs[2].firstLine).toBe("vitest runs the terminal action against a fixture repo.");
     });
+    // ---------------------------------------------------------------------------
+    // Story 4.6 Task 1.5: tag and body fields
+    // ---------------------------------------------------------------------------
+    it("Story 4.6: extracts parenthetical tag from AC heading (user-surface, integration, null for untagged)", async () => {
+        const specPath = await writeTmp(FIXTURE_SPEC);
+        const acs = await extractAcsFromSpec(specPath);
+        expect(acs[0].tag).toBe("user-surface"); // **AC1 (user-surface):**
+        expect(acs[1].tag).toBeNull(); // **AC2:**
+        expect(acs[2].tag).toBe("integration"); // **AC3 (integration):**
+    });
+    it("Story 4.6: body array contains verbatim lines after heading until next AC heading", async () => {
+        const specPath = await writeTmp(FIXTURE_SPEC);
+        const acs = await extractAcsFromSpec(specPath);
+        // AC1 body lines (verbatim)
+        expect(acs[0].body.some(l => l.includes("Given a user-facing feature,"))).toBe(true);
+        expect(acs[0].body.some(l => l.includes("When the action completes,"))).toBe(true);
+        expect(acs[0].body.some(l => l.includes("Then the result is visible."))).toBe(true);
+        // AC3 body
+        expect(acs[2].body.some(l => l.includes("vitest runs the terminal action"))).toBe(true);
+    });
+    it("Story 4.6: body field on AC with no body lines returns empty-ish array", async () => {
+        const spec = `## ACs\n\n**AC1:**\n\n**AC2:**\nSome body.\n`;
+        const specPath = await writeTmp(spec);
+        const acs = await extractAcsFromSpec(specPath);
+        // AC1 has no body before AC2 heading
+        expect(acs[0].body.every(l => l.trim() === "")).toBe(true);
+        // AC2 has a body
+        expect(acs[1].body.some(l => l.includes("Some body."))).toBe(true);
+    });
+    it("Story 4.6: body contains artifact: marker line verbatim (needed by classifier)", async () => {
+        const spec = `## ACs\n\n**AC1:**\nGiven something.\nartifact: hello-a.txt\n\n**AC2:**\nSecond.\n`;
+        const specPath = await writeTmp(spec);
+        const acs = await extractAcsFromSpec(specPath);
+        expect(acs[0].body.some(l => l.trim() === "artifact: hello-a.txt")).toBe(true);
+    });
     it("handles gaps in AC numbering — emits in order they appear", async () => {
         const specPath = await writeTmp(FIXTURE_GAP_SPEC);
         const acs = await extractAcsFromSpec(specPath);
@@ -106,5 +141,33 @@ describe("extractAcsFromSpec", () => {
         const specPath = await writeTmp("# No ACs here\n\nJust some prose.\n");
         const acs = await extractAcsFromSpec(specPath);
         expect(acs).toHaveLength(0);
+    });
+    // ---------------------------------------------------------------------------
+    // M2 fix: body collection stops at the next level-2 (## ) heading.
+    // A trap `artifact: trap.txt` in "## Implementation Notes" MUST NOT be
+    // picked up as part of the last AC's body.
+    // ---------------------------------------------------------------------------
+    it("M2: body stops at next ## heading — artifact in Implementation Notes is NOT captured", async () => {
+        const spec = `## Acceptance Criteria
+
+**AC1:**
+**Given** the AC body ends before the section heading,
+**Then** lines under the next section are not captured.
+artifact: real-file.txt
+
+## Implementation Notes
+
+This section describes something.
+artifact: trap.txt
+`;
+        const specPath = await writeTmp(spec);
+        const acs = await extractAcsFromSpec(specPath);
+        expect(acs).toHaveLength(1);
+        const ac1 = acs[0];
+        // The real artifact marker IS in the AC body.
+        expect(ac1.body.some(l => l.includes("artifact: real-file.txt"))).toBe(true);
+        // The trap artifact from ## Implementation Notes is NOT in the AC body.
+        expect(ac1.body.some(l => l.includes("artifact: trap.txt"))).toBe(false);
+        expect(ac1.body.some(l => l.includes("trap.txt"))).toBe(false);
     });
 });

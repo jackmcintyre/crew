@@ -1,22 +1,48 @@
 /**
- * `processReviewerTranscript` MCP tool — Story 4.3b Task 3; Story 4.3c Task 2.
+ * `processReviewerTranscript` MCP tool — Story 4.3b Task 3; Story 4.3c Task 2;
+ * **Story 4.6 revision 2 (deterministic-verdict-transport).**
  *
- * Receives the reviewer subagent's final transcript (captured by the SKILL.md
- * prose after the `Task` tool returns), parses the verdict sentinel, mutates
- * the in-progress manifest on rework or grammar drift, and returns the next
- * step for the prose layer.
+ * **Revision 2 architectural change (Story 4.6 revision 2):**
+ * The `reviewerTranscript` parameter has been DROPPED. The reviewer's chat is
+ * no longer the load-bearing verdict transport. Instead, this tool reads the
+ * persisted `reviewer-result.json` file written by `runReviewerSession` and
+ * switches on its `recommendedVerdict` field.
+ *
+ * Migration from revision 1:
+ *  - `reviewerTranscript` parameter removed from `ProcessReviewerTranscriptOptions`.
+ *  - `done-blocked-reviewer-verdict` and `done-blocked-reviewer-grammar` result
+ *    variants DELETED — no backward-compat path. `runReviewerSession` is now the
+ *    ONLY valid reviewer entrypoint; these variants are structurally subsumed by
+ *    the new variants below.
+ *  - New variants added: `done-blocked-reviewer-needs-changes`,
+ *    `done-blocked-reviewer-blocked`, `done-blocked-no-session-result`.
+ *  - `import { parseVerdict }` removed (no callers after revision 2).
+ *
+ * **New input shape:** `{ targetRepoRoot, sessionUlid, ref, manifestPath }`
+ * **File path read:** `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`
+ *
+ * **Result routing:**
+ *  - `recommendedVerdict === "READY FOR MERGE"` → calls `completeStory` internally,
+ *    returns `done-ready-for-merge` with `completed: true`. (4.3c semantics preserved.)
+ *  - `recommendedVerdict === "NEEDS CHANGES"` → stamps `blocked_by: "reviewer-verdict-needs-changes"`,
+ *    returns `done-blocked-reviewer-needs-changes`.
+ *  - `recommendedVerdict === "BLOCKED"` → stamps `blocked_by: "reviewer-verdict-blocked"`,
+ *    returns `done-blocked-reviewer-blocked`.
+ *  - File absent (ENOENT) → stamps `blocked_by: "reviewer-no-session-result"`,
+ *    returns `done-blocked-no-session-result`. This is the rubber-stamp protection:
+ *    if the reviewer subagent skipped `runReviewerSession`, the operator sees a
+ *    loud blocker rather than a silent rubber-stamp.
+ *  - File present but malformed/invalid → throws `ReviewerResultFileMalformedError`.
  *
  * **Behavioural contract sources:**
  * `_bmad-output/implementation-artifacts/4-3b-harness-task-spawn-seam-for-rundevsession.md § Behavioural contract`
  * `_bmad-output/implementation-artifacts/4-3c-call-completestory-after-ready-for-merge.md § Behavioural contract`
+ * `_bmad-output/implementation-artifacts/4-6-reviewer-subagent-read-sources-and-run-acs.md § Task 8b`
  *
  * On `READY FOR MERGE`: calls `completeStory` internally (via direct function
  * import from `./complete-story.js`) to atomically move the manifest to `done/`
- * BEFORE returning. The prose layer reads the `completed: true` flag on the
- * returned object to confirm the move and emit its informational chat line.
- * The `completeStory` call is NOT made through the MCP `register.ts` surface —
- * it is a plain Node import, so it does not need a permission entry in
- * SKILL.md's `allowed_tools`.
+ * BEFORE returning. The `completeStory` call is NOT made through the MCP
+ * `register.ts` surface — it is a plain Node import.
  *
  * This tool MUST NOT spawn anything. The MCP server runs over JSON-RPC stdio
  * and has no access to Claude Code's `Task` tool. Spawn responsibility belongs
@@ -25,59 +51,101 @@
  * Chat lines flow through the returned `chatLog: string[]` — no console.*.
  * Errors propagate as typed `DomainError`s; `register.ts` wraps them.
  *
- * Story 4.3b Task 3.1–3.5; Story 4.3c Task 2.1–2.7.
+ * Story 4.3b Task 3.1–3.5; Story 4.3c Task 2.1–2.7; Story 4.6 Task 8b.
  */
-import { parseVerdict } from "../skills/verdict-parser.js";
-import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
+import { promises as fs } from "node:fs";
+import * as path from "node:path";
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { completeStory } from "./complete-story.js";
+import { ReviewerResultFileMalformedError } from "../errors.js";
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+/**
+ * Read, parse, and validate the `reviewer-result.json` file written by
+ * `runReviewerSession`. Returns `null` when the file is absent (ENOENT).
+ * Throws `ReviewerResultFileMalformedError` on malformed JSON or unexpected shape.
+ */
+async function readReviewerResultFile(targetRepoRoot, sessionUlid) {
+    const filePath = path.join(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "reviewer-result.json");
+    let raw;
+    try {
+        raw = await fs.readFile(filePath, "utf8");
+    }
+    catch (err) {
+        const code = err.code;
+        if (code === "ENOENT") {
+            return null;
+        }
+        throw err;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch (cause) {
+        throw new ReviewerResultFileMalformedError({ path: filePath, cause });
+    }
+    // Minimal shape validation — just enough to confirm the fields we rely on.
+    if (typeof parsed !== "object" ||
+        parsed === null ||
+        typeof parsed.recommendedVerdict !== "string" ||
+        !["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED"].includes(parsed.recommendedVerdict)) {
+        throw new ReviewerResultFileMalformedError({
+            path: filePath,
+            cause: "missing or invalid 'recommendedVerdict' field — expected one of: READY FOR MERGE, NEEDS CHANGES, BLOCKED",
+        });
+    }
+    return parsed;
+}
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 /**
- * Process the reviewer subagent's final transcript.
+ * Process the reviewer subagent's session result.
  *
- * Calls `parseVerdict` exactly once. On grammar drift: stamps
- * `blocked_by: "reviewer-grammar"` on the in-progress manifest. On
- * `NEEDS CHANGES`: increments `rework_count`, writes to disk BEFORE composing
- * the dev re-spawn prompt, then returns the next dev prompt. On `READY FOR
- * MERGE`: calls `completeStory` internally to atomically move the manifest to
- * `done/` BEFORE returning; the returned object carries `completed: true` as a
- * literal-typed field confirming the move. On `BLOCKED`: pass-through (no
- * manifest mutation, no `completed` field).
+ * **Revision 2:** reads `reviewer-result.json` from
+ * `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`
+ * and switches on its `recommendedVerdict` field. The reviewer's chat
+ * transcript is no longer consulted.
+ *
+ * - Missing file → stamps `blocked_by: "reviewer-no-session-result"`, returns
+ *   `done-blocked-no-session-result`. The reviewer skipped `runReviewerSession`.
+ * - `recommendedVerdict === "READY FOR MERGE"` → calls `completeStory` internally;
+ *   manifest moves to `done/`; returns `done-ready-for-merge` with `completed: true`.
+ * - `recommendedVerdict === "NEEDS CHANGES"` → stamps `blocked_by: "reviewer-verdict-needs-changes"`;
+ *   returns `done-blocked-reviewer-needs-changes`.
+ * - `recommendedVerdict === "BLOCKED"` → stamps `blocked_by: "reviewer-verdict-blocked"`;
+ *   returns `done-blocked-reviewer-blocked`.
  *
  * The `completeStory` call errors (`InProgressHandEditError`, `WrongClaimantError`,
  * `ManifestNotFoundError`) propagate verbatim — no catch, no wrap. The
  * `register.ts` `DomainError` → `isError: true` path handles serialisation.
  *
- * The SKILL.md prose MUST pass `reviewerTranscript` verbatim — no
- * summarisation, no editing. The full final-message string is the contract.
- *
  * @param opts.targetRepoRoot - Absolute path to the target repository root.
  * @param opts.sessionUlid - ULID of the calling dev session.
  * @param opts.ref - Story ref (e.g. `"native:01HZ..."`).
  * @param opts.manifestPath - Absolute path to the in-progress manifest.
- * @param opts.reviewerTranscript - The reviewer subagent's complete final message, verbatim.
  */
 export async function processReviewerTranscript(opts) {
-    const { targetRepoRoot, ref, sessionUlid, manifestPath, reviewerTranscript } = opts;
+    const { targetRepoRoot, ref, sessionUlid, manifestPath } = opts;
     const chatLog = [];
-    // Parse the reviewer verdict exactly once.
-    const verdictResult = parseVerdict(reviewerTranscript);
-    if (!verdictResult.ok) {
-        // Grammar drift (drift, empty, or unknown-sentinel) — stamp the manifest.
+    // Read the persisted reviewer-result.json file.
+    const resultFile = await readReviewerResultFile(targetRepoRoot, sessionUlid);
+    if (resultFile === null) {
+        // File absent — reviewer skipped runReviewerSession (rubber-stamp protection).
         const currentManifest = await readManifest(manifestPath);
         await writeManifest(manifestPath, {
             ...currentManifest,
-            blocked_by: "reviewer-grammar",
+            blocked_by: "reviewer-no-session-result",
         });
-        chatLog.push(`reviewer grammar drift — story ${ref} blocked. expected verbatim final line: "**Verdict: <SENTINEL>**" where SENTINEL is one of READY FOR MERGE | NEEDS CHANGES | BLOCKED.`);
-        return { next: "done-blocked-reviewer-grammar", chatLog };
+        chatLog.push(`reviewer-result.json not found for session ${sessionUlid} — story ${ref} blocked. ` +
+            `The reviewer subagent did not invoke runReviewerSession. ` +
+            `Clear blocked_by on the manifest and re-run /crew:start.`);
+        return { next: "done-blocked-no-session-result", chatLog };
     }
-    const { sentinel } = verdictResult;
-    if (sentinel === "READY FOR MERGE") {
-        // Push the verdict chat line BEFORE calling completeStory so the operator
-        // sees the verdict even if the move throws (per behavioural contract).
+    const verdict = resultFile.recommendedVerdict;
+    if (verdict === "READY FOR MERGE") {
         chatLog.push(`reviewer verdict: READY FOR MERGE — story ${ref} ready for merge gate`);
         // Atomically move the manifest to done/ via internal function import.
         // Errors propagate verbatim — no try/catch (behavioural contract §
@@ -86,28 +154,26 @@ export async function processReviewerTranscript(opts) {
         await completeStory({ targetRepoRoot, ref, sessionUlid });
         return { next: "done-ready-for-merge", completed: true, chatLog };
     }
-    if (sentinel === "BLOCKED") {
-        // Pass-through — no manifest mutation.
-        chatLog.push(`reviewer verdict: BLOCKED — story ${ref} awaiting human`);
-        return { next: "done-blocked-reviewer-verdict", chatLog };
+    if (verdict === "NEEDS CHANGES") {
+        // Stamp blocked_by; return new variant. Manifest stays in in-progress/.
+        const currentManifest = await readManifest(manifestPath);
+        await writeManifest(manifestPath, {
+            ...currentManifest,
+            blocked_by: "reviewer-verdict-needs-changes",
+        });
+        chatLog.push(`reviewer verdict: NEEDS CHANGES — story ${ref} blocked. ` +
+            `reviewer-result.json carries recommendedVerdict NEEDS CHANGES. ` +
+            `Clear blocked_by on the manifest and re-run /crew:start after addressing the reviewer's findings.`);
+        return { next: "done-blocked-reviewer-needs-changes", chatLog };
     }
-    // NEEDS CHANGES — increment rework_count, write BEFORE composing dev prompt.
+    // verdict === "BLOCKED"
     const currentManifest = await readManifest(manifestPath);
-    const newReworkCount = (currentManifest.rework_count ?? 0) + 1;
     await writeManifest(manifestPath, {
         ...currentManifest,
-        rework_count: newReworkCount,
+        blocked_by: "reviewer-verdict-blocked",
     });
-    // Compute the dev re-spawn prompt.
-    const { systemPrompt: devPrompt } = await buildPersonaSpawnPrompt({
-        targetRepoRoot,
-        role: "generalist-dev",
-    });
-    chatLog.push(`reviewer verdict: NEEDS CHANGES — re-spawning generalist-dev subagent (rework iteration ${newReworkCount})`);
-    return {
-        next: "rework-dev",
-        devPrompt,
-        reworkIteration: newReworkCount,
-        chatLog,
-    };
+    chatLog.push(`reviewer verdict: BLOCKED — story ${ref} blocked. ` +
+        `reviewer-result.json carries recommendedVerdict BLOCKED (empty ACs or manual-check-required). ` +
+        `Human operator must review before this story can proceed.`);
+    return { next: "done-blocked-reviewer-blocked", chatLog };
 }
