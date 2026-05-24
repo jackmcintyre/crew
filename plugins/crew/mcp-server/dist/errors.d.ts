@@ -773,3 +773,27 @@ export declare class BranchSlugUnrenderableError extends DomainError {
         title: string;
     });
 }
+/**
+ * `processDevTranscript` found `dev-outcome.json` at the expected path but
+ * could not parse or validate it. This is a bug in `runDevTerminalAction`
+ * — the file should always be schema-valid when present.
+ *
+ * A malformed file is NOT silently fallen back to transcript scanning;
+ * it is a write-seam bug and must surface as a hard error.
+ *
+ * Fields:
+ * - `path` — the absolute path to the malformed file (encodes the session
+ *             via `.../sessions/<sessionUlid>/dev-outcome.json`).
+ * - `cause` — the raw parse/validation error or a descriptive string naming
+ *             the offending field.
+ *
+ * (Story 4.8b Task 2 / AC4)
+ */
+export declare class DevOutcomeFileMalformedError extends DomainError {
+    readonly path: string;
+    readonly cause: unknown;
+    constructor(opts: {
+        path: string;
+        cause: unknown;
+    });
+}

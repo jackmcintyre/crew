@@ -29,6 +29,7 @@ import {
   GhPrCreateFailedError,
 } from "../errors.js";
 import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
+import { atomicWriteFile } from "../lib/managed-fs.js";
 import { gh } from "../lib/gh.js";
 import {
   gitCommit,
@@ -88,6 +89,7 @@ export async function runDevTerminalAction(opts: {
     body,
     summary,
     manifestPath,
+    sessionUlid,
   } = opts;
   const execaImpl = opts.execaImpl;
 
@@ -182,7 +184,33 @@ export async function runDevTerminalAction(opts: {
     });
   }
 
-  // (ix) Return success.
+  // (ix) Extract prNumber from the PR URL.
+  const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+  if (!prNumberMatch) {
+    throw new GhPrCreateFailedError({
+      stderr: ghResult.stderr,
+      diagnostic: "PR URL stdout contained no /pull/<n> segment",
+    });
+  }
+  const prNumber = parseInt(prNumberMatch[1]!, 10);
+
+  // (x) Atomically write dev-outcome.json to the session directory.
+  // This must happen BEFORE return so the machine-authoritative PR number
+  // is available to processDevTranscript without relying on LLM-authored text.
+  const devOutcomePath = path.resolve(
+    targetRepoRoot,
+    ".crew",
+    "state",
+    "sessions",
+    sessionUlid,
+    "dev-outcome.json",
+  );
+  await atomicWriteFile(
+    devOutcomePath,
+    JSON.stringify({ prUrl, prNumber, branch, commitSha: commitResult.commitSha }, null, 2),
+  );
+
+  // (xi) Return success.
   return {
     ok: true,
     branch,

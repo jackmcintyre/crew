@@ -722,3 +722,101 @@ describe("runDevTerminalAction — ACs checklist mirroring (AC3i)", () => {
     expect(bodyArg).toContain("vitest runs the dev terminal action");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story 4.8b AC5a: dev-outcome.json write path
+// ---------------------------------------------------------------------------
+
+describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", () => {
+  it("(5a) writes dev-outcome.json to the session directory with correct content", async () => {
+    const targetPrUrl = "https://github.com/jackmcintyre/crew/pull/42";
+    const spy = makeStubExeca({ ghStdout: targetPrUrl });
+
+    const result = await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    // Confirm successful result
+    expect(result.ok).toBe(true);
+    expect(result.prUrl).toBe(targetPrUrl);
+
+    // dev-outcome.json must exist in the session directory
+    const devOutcomePath = path.join(
+      ctx.repoRoot,
+      ".crew",
+      "state",
+      "sessions",
+      SESSION_ULID,
+      "dev-outcome.json",
+    );
+    const raw = await fs.readFile(devOutcomePath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      prUrl: string;
+      prNumber: number;
+      branch: string;
+      commitSha: string;
+    };
+
+    expect(parsed.prUrl).toBe(targetPrUrl);
+    expect(parsed.prNumber).toBe(42);
+    expect(parsed.branch).toBe(result.branch);
+    expect(parsed.commitSha).toBe(result.commitSha);
+  });
+
+  it("(5a) prNumber is parsed correctly from PR URL with multi-digit number", async () => {
+    const targetPrUrl = "https://github.com/owner/repo/pull/123";
+    const spy = makeStubExeca({ ghStdout: targetPrUrl });
+
+    await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    const devOutcomePath = path.join(
+      ctx.repoRoot,
+      ".crew",
+      "state",
+      "sessions",
+      SESSION_ULID,
+      "dev-outcome.json",
+    );
+    const raw = await fs.readFile(devOutcomePath, "utf8");
+    const parsed = JSON.parse(raw) as { prNumber: number };
+    expect(parsed.prNumber).toBe(123);
+  });
+
+  it("(5a) GhPrCreateFailedError raised when PR URL has no /pull/<n> segment", async () => {
+    // A URL that passes startsWith("https://github.com/") but has no /pull/<n>
+    const malformedUrl = "https://github.com/owner/repo/issues/42";
+    const spy = makeStubExeca({ ghStdout: malformedUrl });
+
+    await expect(
+      runDevTerminalAction({
+        targetRepoRoot: ctx.repoRoot,
+        ref: REF,
+        title: TITLE,
+        type: TYPE,
+        body: BODY,
+        summary: SUMMARY,
+        manifestPath: ctx.manifestPath,
+        sessionUlid: SESSION_ULID,
+        execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+      }),
+    ).rejects.toBeInstanceOf(GhPrCreateFailedError);
+  });
+});
