@@ -70,10 +70,21 @@ export function composeVerdictLine(result: ReviewerResultFileShape): string {
 // Summary body composer
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Version info for composeSummaryBody
+// ---------------------------------------------------------------------------
+
+export interface ComposeSummaryBodyVersionInfo {
+  /** Semver version of the standards doc used to produce this verdict. */
+  standardsVersion: string;
+  /** Semver version of the crew plugin (from getPluginVersion()). */
+  pluginVersion: string;
+}
+
 /**
  * Compose the full PR review summary body from the persisted result.
  *
- * Body skeleton (Story 4.6b spec §2a):
+ * Body skeleton (Story 4.6b spec §2a, extended by Story 4.7):
  *   # Reviewer summary — ${ref}
  *   ## Acceptance criteria
  *   <per-AC lines>
@@ -81,9 +92,18 @@ export function composeVerdictLine(result: ReviewerResultFileShape): string {
  *   <per-criterion lines>
  *   [## Manual checks required before merge]  (only if any manual-check-required ACs)
  *   <verdict line>
+ *
+ *   `standards_version: <standardsVersion>` · `plugin_version: <pluginVersion>`
+ *   <!-- crew:verdict:<pluginVersion>:<ref> -->
+ *
+ * The footer marker is the absolute last line (no trailing newline).
  */
-export function composeSummaryBody(result: ReviewerResultFileShape): string {
+export function composeSummaryBody(
+  result: ReviewerResultFileShape,
+  versionInfo: ComposeSummaryBodyVersionInfo,
+): string {
   const { ref, acResults, standardsByCriterionId } = result;
+  const { standardsVersion, pluginVersion } = versionInfo;
 
   // --- Per-AC lines (spec §2b) ---
   const acEntries = Object.entries(acResults)
@@ -144,7 +164,15 @@ export function composeSummaryBody(result: ReviewerResultFileShape): string {
 
   parts.push(``, verdictLine);
 
-  return parts.join("\n");
+  // --- Version block and footer marker (Story 4.7) ---
+  const displayStandardsVersion = standardsVersion || "(unknown)";
+  const versionLine = `\`standards_version: ${displayStandardsVersion}\` · \`plugin_version: ${pluginVersion}\``;
+  const footerMarker = `<!-- crew:verdict:${pluginVersion}:${ref} -->`;
+
+  // Append blank line, version line, footer marker (no trailing newline after marker)
+  parts.push(``, versionLine);
+
+  return parts.join("\n") + "\n" + footerMarker;
 }
 
 // ---------------------------------------------------------------------------

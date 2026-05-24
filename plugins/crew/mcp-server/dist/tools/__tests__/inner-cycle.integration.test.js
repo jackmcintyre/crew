@@ -253,6 +253,7 @@ async function seedReviewerResultFile(targetRepoRoot, sessionUlid, ref, recommen
         standardsByCriterionId: {},
         sourceStoryRef: ref,
         prNumber: 99,
+        standardsVersion: "1.2.3",
     };
     await atomicWriteFile(filePath, JSON.stringify(content, null, 2));
 }

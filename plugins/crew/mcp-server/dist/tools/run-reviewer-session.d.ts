@@ -97,6 +97,8 @@ export interface ReviewerResultFileShape {
     standardsByCriterionId: Record<string, Criterion>;
     sourceStoryRef: string;
     prNumber: number;
+    /** Semver version of the standards doc used to produce this verdict (Story 4.7). */
+    standardsVersion: string;
 }
 export interface RunReviewerSessionOptions {
     targetRepoRoot: string;

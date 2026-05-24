@@ -29,6 +29,7 @@ import { composeVerdictLine } from "../../lib/compose-reviewer-summary.js";
 import { UnreachableBlockedReasonError } from "../../errors.js";
 import { makeGhExecaStub } from "../../__tests__/test-helpers/gh-execa-stub.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
+import { __resetPluginVersionCacheForTests } from "../../lib/plugin-version.js";
 import type { ReviewerResultFileShape, AcResult } from "../run-reviewer-session.js";
 
 // ---------------------------------------------------------------------------
@@ -94,6 +95,7 @@ function makeResult(
     standardsByCriterionId: {} as ReviewerResultFileShape["standardsByCriterionId"],
     sourceStoryRef: STORY_REF,
     prNumber: PR_NUMBER,
+    standardsVersion: "1.2.3",
   };
 }
 
@@ -104,8 +106,13 @@ function makeResult(
 let tmpRoot: string;
 let pluginRoot: string;
 
+const AC3_PLUGIN_VERSION = "1.0.0-test";
+// Reviews URL uses the PR_NUMBER from the makeResult fixture (99)
+const AC3_REVIEWS_URL = `/repos/jackmcintyre/crew/pulls/${PR_NUMBER}/reviews`;
+
 beforeEach(async () => {
   __resetGhErrorMapCacheForTests();
+  __resetPluginVersionCacheForTests();
 
   tmpRoot = mkdtempSync(path.join(os.tmpdir(), "crew-4-6b-ac3-"));
   pluginRoot = path.join(tmpRoot, "plugin");
@@ -241,12 +248,24 @@ describe("AC3(b): postReviewerComments produces AC2-grammar verdict with no LLM 
   ];
 
   for (const { label, data, expectedPattern } of verdictVariants) {
-    it(`${label} → posted body's final line matches AC2 grammar (no LLM parsing)`, async () => {
+    it(`${label} → posted body contains AC2 grammar verdict and footer marker is last line (no LLM parsing)`, async () => {
       await writeResultFile(data);
 
       let capturedInput: string | undefined;
       const stub = makeGhExecaStub({
-        onApiCall: (input) => { capturedInput = input; },
+        apiRoutes: [
+          {
+            url: AC3_REVIEWS_URL,
+            method: "GET",
+            response: { stdout: JSON.stringify([]), exitCode: 0 },
+          },
+          {
+            url: AC3_REVIEWS_URL,
+            method: "POST",
+            response: { stdout: JSON.stringify({ id: 12345 }), exitCode: 0 },
+            onCall: (input) => { capturedInput = input; },
+          },
+        ],
       });
 
       const result = await postReviewerComments({
@@ -254,6 +273,7 @@ describe("AC3(b): postReviewerComments produces AC2-grammar verdict with no LLM 
         sessionUlid: SESSION_ULID,
         execaImpl: stub,
         pluginRootOverride: pluginRoot,
+        pluginVersionOverride: AC3_PLUGIN_VERSION,
       });
 
       expect(result.next).toBe("posted");
@@ -263,13 +283,16 @@ describe("AC3(b): postReviewerComments produces AC2-grammar verdict with no LLM 
       expect(result.verdictLine).toMatch(expectedPattern);
       expect(matchesAc2Grammar(result.verdictLine), `verdictLine "${result.verdictLine}" does not match AC2 grammar`).toBe(true);
 
-      // (b-ii): Posted gh api body's final non-empty line matches AC2 grammar.
+      // (b-ii): Posted gh api body CONTAINS a verdict line matching AC2 grammar.
+      // (Note: after Story 4.7, the footer marker is the absolute last line — not the verdict.)
       const apiBody = JSON.parse(capturedInput!) as { body: string };
-      const bodyLines = apiBody.body.split("\n");
-      const lastNonEmpty = [...bodyLines].reverse().find((l) => l.trim().length > 0);
-      expect(lastNonEmpty).toBeDefined();
-      expect(lastNonEmpty!).toMatch(expectedPattern);
-      expect(matchesAc2Grammar(lastNonEmpty!), `posted body final line "${lastNonEmpty}" does not match AC2 grammar`).toBe(true);
+      const verdictLineInBody = apiBody.body.split("\n").find((l) => l.startsWith("**Verdict:"));
+      expect(verdictLineInBody).toBeDefined();
+      expect(verdictLineInBody!).toMatch(expectedPattern);
+      expect(matchesAc2Grammar(verdictLineInBody!), `posted body verdict line "${verdictLineInBody}" does not match AC2 grammar`).toBe(true);
+
+      // (b-iii) Story 4.7: footer marker is the absolute last line.
+      expect(apiBody.body.split("\n").at(-1)).toMatch(/^<!-- crew:verdict:/);
     });
   }
 });

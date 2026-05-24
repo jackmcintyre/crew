@@ -265,6 +265,7 @@ export async function runReviewerSession(opts) {
         standardsByCriterionId,
         sourceStoryRef: sourceStory.ref,
         prNumber,
+        standardsVersion: standards.version,
     };
     await atomicWriteFile(resultFilePath, JSON.stringify(fileProjection, null, 2));
     return {
