@@ -2,7 +2,7 @@
 
 story_shape: user-surface
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -135,59 +135,59 @@ vitest covers:
 
 Implementation order is load-bearing.
 
-- [ ] **Task 1: Remove unused subcommands from `generalist-reviewer.yaml`** (AC: #3)
-  - [ ] 1.1 Open `plugins/crew/permissions/generalist-reviewer.yaml`. Remove `- pr-comment` and `- pr-review` from `gh_allow`. After this change `gh_allow` contains exactly: `pr-view`, `pr-diff`, `api`. Preserve `gh_allow_args: {}` — empty, unchanged.
-  - [ ] 1.2 Verify no existing tool under `plugins/crew/mcp-server/src/tools/` calls `gh({ subcommand: "pr-comment", ... })` or `gh({ subcommand: "pr-review", ... })` with role `"generalist-reviewer"` — grep for both strings in the tools directory to confirm zero callers. If a caller is found, STOP and surface the conflict — do not remove the subcommand.
-  - [ ] 1.3 **Update test fixtures that hand-write `generalist-reviewer.yaml` content.** Two test files contain literal `pr-comment` / `pr-review` lines in their fixture YAML; they will silently drift from production after Task 1.1 unless updated in the same change. After updating, the fixtures must match production's 3-entry `gh_allow` shape (`pr-view`, `pr-diff`, `api`).
+- [x] **Task 1: Remove unused subcommands from `generalist-reviewer.yaml`** (AC: #3)
+  - [x] 1.1 Open `plugins/crew/permissions/generalist-reviewer.yaml`. Remove `- pr-comment` and `- pr-review` from `gh_allow`. After this change `gh_allow` contains exactly: `pr-view`, `pr-diff`, `api`. Preserve `gh_allow_args: {}` — empty, unchanged.
+  - [x] 1.2 Verify no existing tool under `plugins/crew/mcp-server/src/tools/` calls `gh({ subcommand: "pr-comment", ... })` or `gh({ subcommand: "pr-review", ... })` with role `"generalist-reviewer"` — grep for both strings in the tools directory to confirm zero callers. If a caller is found, STOP and surface the conflict — do not remove the subcommand.
+  - [x] 1.3 **Update test fixtures that hand-write `generalist-reviewer.yaml` content.** Two test files contain literal `pr-comment` / `pr-review` lines in their fixture YAML; they will silently drift from production after Task 1.1 unless updated in the same change. After updating, the fixtures must match production's 3-entry `gh_allow` shape (`pr-view`, `pr-diff`, `api`).
     - `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` (around lines 148-153 — the multi-line `gh_allow` block).
     - `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` (around lines 267-272).
     - Do NOT touch `plugins/crew/mcp-server/src/tools/__tests__/build-persona-spawn-prompt.test.ts` — its `pr-comment` line is on the `generalist-dev` persona fixture, NOT `generalist-reviewer`, and is unrelated to this story.
     - Rationale: AC3 asserts the production YAML is loaded via `loadRolePermissions` and the removed subcommands are denied. Hand-written fixtures with stale entries would pass under green ACs while production drifts — exactly the bugfix-1 failure mode this project's planning discipline guards against.
-  - [ ] 1.4 Run `pnpm build` to confirm the YAML change does not break any TypeScript that imports the permission schema.
+  - [x] 1.4 Run `pnpm build` to confirm the YAML change does not break any TypeScript that imports the permission schema.
 
-- [ ] **Task 2: Add `GhApiResponseShapeError` call site for label response** (AC: #1, #2)
-  - [ ] 2.1 Confirm `GhApiResponseShapeError` (added in Story 4.6b, `errors.ts`) accepts the shape `{ subcommand: string; url?: string; cause: unknown }`. No change needed if it does — this task is a precondition check.
+- [x] **Task 2: Add `GhApiResponseShapeError` call site for label response** (AC: #1, #2)
+  - [x] 2.1 Confirm `GhApiResponseShapeError` (added in Story 4.6b, `errors.ts`) accepts the shape `{ subcommand: string; url?: string; cause: unknown }`. No change needed if it does — this task is a precondition check.
 
-- [ ] **Task 3: Implement `applyReviewerLabels` MCP tool** (AC: #1, #2)
-  - [ ] 3.1 Create `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts`. Export `applyReviewerLabels(opts) → Promise<ApplyReviewerLabelsResult>` per AC1/AC2 unpacked signature.
-  - [ ] 3.2 Step 1 — read `reviewer-result.json` via `readReviewerResultFile`. On `null`, return `{ next: "skipped-no-session-result" }`.
-  - [ ] 3.3 Step 2 — resolve `prNumber` from `result.prNumber`. Load permissions via `loadRolePermissions(role, pluginRootOverride ?? getPluginRoot())`.
-  - [ ] 3.4 Step 3 — resolve `owner`/`repo` via `gh({ role, permissions, subcommand: "pr-view", args: [String(prNumber), "--json", "baseRepository"], execaImpl })`. Parse response. Raise `GhApiResponseShapeError` on parse failure (mirror `postReviewerComments` Task 4.4 pattern).
-  - [ ] 3.5 Step 4 — determine verdict: `verdictOverride ?? result.recommendedVerdict`. Map to label list:
+- [x] **Task 3: Implement `applyReviewerLabels` MCP tool** (AC: #1, #2)
+  - [x] 3.1 Create `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts`. Export `applyReviewerLabels(opts) → Promise<ApplyReviewerLabelsResult>` per AC1/AC2 unpacked signature.
+  - [x] 3.2 Step 1 — read `reviewer-result.json` via `readReviewerResultFile`. On `null`, return `{ next: "skipped-no-session-result" }`.
+  - [x] 3.3 Step 2 — resolve `prNumber` from `result.prNumber`. Load permissions via `loadRolePermissions(role, pluginRootOverride ?? getPluginRoot())`.
+  - [x] 3.4 Step 3 — resolve `owner`/`repo` via `gh({ role, permissions, subcommand: "pr-view", args: [String(prNumber), "--json", "baseRepository"], execaImpl })`. Parse response. Raise `GhApiResponseShapeError` on parse failure (mirror `postReviewerComments` Task 4.4 pattern).
+  - [x] 3.5 Step 4 — determine verdict: `verdictOverride ?? result.recommendedVerdict`. Map to label list:
     - `"READY FOR MERGE"` → `["reviewed-by-agent"]`
     - `"NEEDS CHANGES"` | `"BLOCKED"` | `"reviewer-failure"` → `["reviewed-by-agent", "needs-human"]`
-  - [ ] 3.6 Step 5 — for each label in the list (in order), call `gh({ role, permissions, subcommand: "api", args: ["/repos/${owner}/${repo}/issues/${prNumber}/labels", "--method", "POST", "--input", "-"], input: JSON.stringify({ labels: [label] }), execaImpl })`. Parse response as array; raise `GhApiResponseShapeError` on parse failure. Any `GhRecoverableError` propagates uncaught immediately (abort remaining label calls).
-  - [ ] 3.7 Step 6 — return `{ next: "applied", labelsApplied: <labels sent> }`.
-  - [ ] 3.8 Add top-of-file JSDoc citing this story spec.
+  - [x] 3.6 Step 5 — for each label in the list (in order), call `gh({ role, permissions, subcommand: "api", args: ["/repos/${owner}/${repo}/issues/${prNumber}/labels", "--method", "POST", "--input", "-"], input: JSON.stringify({ labels: [label] }), execaImpl })`. Parse response as array; raise `GhApiResponseShapeError` on parse failure. Any `GhRecoverableError` propagates uncaught immediately (abort remaining label calls).
+  - [x] 3.7 Step 6 — return `{ next: "applied", labelsApplied: <labels sent> }`.
+  - [x] 3.8 Add top-of-file JSDoc citing this story spec.
 
-- [ ] **Task 4: Register `applyReviewerLabels` as an MCP tool** (AC: #1, #2)
-  - [ ] 4.1 Open `plugins/crew/mcp-server/src/tools/register.ts`. Add the import. Register under tool name `"applyReviewerLabels"` with a Zod input schema mirroring the options (all fields optional except `targetRepoRoot` and `sessionUlid`).
-  - [ ] 4.2 Wrap the handler in the existing `DomainError → { isError: true, content: [...] }` envelope.
-  - [ ] 4.3 Verify via the existing register-suite tests that the tool is enumerated and callable. Update the tool-count assertion (if present) to include `applyReviewerLabels`.
+- [x] **Task 4: Register `applyReviewerLabels` as an MCP tool** (AC: #1, #2)
+  - [x] 4.1 Open `plugins/crew/mcp-server/src/tools/register.ts`. Add the import. Register under tool name `"applyReviewerLabels"` with a Zod input schema mirroring the options (all fields optional except `targetRepoRoot` and `sessionUlid`).
+  - [x] 4.2 Wrap the handler in the existing `DomainError → { isError: true, content: [...] }` envelope.
+  - [x] 4.3 Verify via the existing register-suite tests that the tool is enumerated and callable. Update the tool-count assertion (if present) to include `applyReviewerLabels`.
 
-- [ ] **Task 5: Update SKILL.md inner cycle to invoke `applyReviewerLabels`** (AC: #1, #2, #5)
-  - [ ] 5.1 Open `plugins/crew/skills/start/SKILL.md`. In the `allowed_tools` array, add `applyReviewerLabels`.
-  - [ ] 5.2 After the `processReviewerTranscript` call (which moves the manifest based on verdict), insert a new step: `applyReviewerLabels({ targetRepoRoot, sessionUlid })`. Log result to chat surface: `reviewer labels applied: ${result.labelsApplied.join(", ")} on PR #${prNumber}`.
-  - [ ] 5.3 In the error handler for the reviewer cycle (where `postReviewerComments` or `processReviewerTranscript` uncaught errors are surfaced): insert a best-effort `applyReviewerLabels({ targetRepoRoot, sessionUlid, verdictOverride: "reviewer-failure" })` call BEFORE surfacing the original error to the operator. Wrap this call in its own try/catch — if the label call also fails, log the secondary failure but surface the original error unchanged. (The label-on-failure call is best-effort; it MUST NOT mask the original failure.)
-  - [ ] 5.4 The `skipped-no-session-result` return from `applyReviewerLabels` — log a chat line "apply-reviewer-labels skipped — no reviewer-result.json" and proceed. Do NOT halt; the missing-file case is already surfaced by the prior `processReviewerTranscript` step.
+- [x] **Task 5: Update SKILL.md inner cycle to invoke `applyReviewerLabels`** (AC: #1, #2, #5)
+  - [x] 5.1 Open `plugins/crew/skills/start/SKILL.md`. In the `allowed_tools` array, add `applyReviewerLabels`.
+  - [x] 5.2 After the `processReviewerTranscript` call (which moves the manifest based on verdict), insert a new step: `applyReviewerLabels({ targetRepoRoot, sessionUlid })`. Log result to chat surface: `reviewer labels applied: ${result.labelsApplied.join(", ")} on PR #${prNumber}`.
+  - [x] 5.3 In the error handler for the reviewer cycle (where `postReviewerComments` or `processReviewerTranscript` uncaught errors are surfaced): insert a best-effort `applyReviewerLabels({ targetRepoRoot, sessionUlid, verdictOverride: "reviewer-failure" })` call BEFORE surfacing the original error to the operator. Wrap this call in its own try/catch — if the label call also fails, log the secondary failure but surface the original error unchanged. (The label-on-failure call is best-effort; it MUST NOT mask the original failure.)
+  - [x] 5.4 The `skipped-no-session-result` return from `applyReviewerLabels` — log a chat line "apply-reviewer-labels skipped — no reviewer-result.json" and proceed. Do NOT halt; the missing-file case is already surfaced by the prior `processReviewerTranscript` step.
 
-- [ ] **Task 6: Implement the integration test suite** (AC: #4)
-  - [ ] 6.1 Create `plugins/crew/mcp-server/src/tools/__tests__/apply-reviewer-labels.test.ts`.
-  - [ ] 6.2 Fixture: tmpdir per `beforeEach`; `reviewer-result.json` written per variant; `readReviewerResultFile` path resolved via `pluginRootOverride`.
-  - [ ] 6.3 Implement AC4 variants (4a)–(4e) as separate `it()` cases. Use `makeDiscriminatingStub` (Story 4.6b shared helper). Capture `input` option on the `gh api /labels` stub to assert the label payload.
-  - [ ] 6.4 Implement AC3 denial cases: load `generalist-reviewer.yaml` via `loadRolePermissions`, call `gh()` with each denied subcommand, assert `GhSubcommandDeniedError` with no execa call. Use `vi.spyOn(execaImpl, ...)` or a capturing stub to assert zero invocations.
-  - [ ] 6.5 Use `__resetGhErrorMapCacheForTests()` in `beforeEach`.
+- [x] **Task 6: Implement the integration test suite** (AC: #4)
+  - [x] 6.1 Create `plugins/crew/mcp-server/src/tools/__tests__/apply-reviewer-labels.test.ts`.
+  - [x] 6.2 Fixture: tmpdir per `beforeEach`; `reviewer-result.json` written per variant; `readReviewerResultFile` path resolved via `pluginRootOverride`.
+  - [x] 6.3 Implement AC4 variants (4a)–(4e) as separate `it()` cases. Use `makeDiscriminatingStub` (Story 4.6b shared helper). Capture `input` option on the `gh api /labels` stub to assert the label payload.
+  - [x] 6.4 Implement AC3 denial cases: load `generalist-reviewer.yaml` via `loadRolePermissions`, call `gh()` with each denied subcommand, assert `GhSubcommandDeniedError` with no execa call. Use `vi.spyOn(execaImpl, ...)` or a capturing stub to assert zero invocations.
+  - [x] 6.5 Use `__resetGhErrorMapCacheForTests()` in `beforeEach`.
 
-- [ ] **Task 7: Operator-smoke extension for AC5** (AC: #5)
-  - [ ] 7.1 Extend the Story 4.6b / 4.7 operator-smoke harness with the `applyReviewerLabels` call per AC5 unpacked (5a)–(5b).
-  - [ ] 7.2 Assert the two sequential label `gh api POST` calls (using captured `input` fields on the stub).
-  - [ ] 7.3 Non-regression: Story 4.6b / 4.7 manifest-state invariants still hold per AC5 (5c).
-  - [ ] 7.4 Tag the test file so it runs in the pre-PR smoke gate.
+- [x] **Task 7: Operator-smoke extension for AC5** (AC: #5)
+  - [x] 7.1 Extend the Story 4.6b / 4.7 operator-smoke harness with the `applyReviewerLabels` call per AC5 unpacked (5a)–(5b).
+  - [x] 7.2 Assert the two sequential label `gh api POST` calls (using captured `input` fields on the stub).
+  - [x] 7.3 Non-regression: Story 4.6b / 4.7 manifest-state invariants still hold per AC5 (5c).
+  - [x] 7.4 Tag the test file so it runs in the pre-PR smoke gate.
 
-- [ ] **Task 8: Build, vitest, dist** (AC: all)
-  - [ ] 8.1 `pnpm build` passes. Commit `dist/` per CLAUDE.md.
-  - [ ] 8.2 All vitest tests pass. Tool-count assertion updated for `applyReviewerLabels`.
-  - [ ] 8.3 Confirm `canonical-fs-guard.test.ts` still passes.
+- [x] **Task 8: Build, vitest, dist** (AC: all)
+  - [x] 8.1 `pnpm build` passes. Commit `dist/` per CLAUDE.md.
+  - [x] 8.2 All vitest tests pass. Tool-count assertion updated for `applyReviewerLabels`.
+  - [x] 8.3 Confirm `canonical-fs-guard.test.ts` still passes.
 
 ---
 
@@ -333,10 +333,39 @@ Pattern: Epic 4 commits follow `feat(4.X): <subject>`. Story 4.8's commit follow
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-sonnet-4-6
 
 ### Debug Log References
 
+None — implementation proceeded without blockers.
+
 ### Completion Notes List
 
+- Task 1: Removed `pr-comment` and `pr-review` from `generalist-reviewer.yaml` (permissions + catalogue). Zero production callers confirmed. Two test fixtures updated to match. `pnpm build` passes.
+- Task 2: Confirmed `GhApiResponseShapeError` accepts `{ subcommand: string; url?: string; cause: unknown }` — no change needed.
+- Task 3: Created `apply-reviewer-labels.ts`. Implements sequential label-posting via `gh api POST /issues/{prNumber}/labels`, one call per label. `verdictOverride: "reviewer-failure"` forces non-green treatment regardless of file content.
+- Task 4: Registered `applyReviewerLabels` in `register.ts`. Tool count assertions updated from 24 → 25 across three test files.
+- Task 5: Updated `SKILL.md` — `applyReviewerLabels` added to `allowed_tools`; step 10a inserted after `processReviewerTranscript`; error handler updated with best-effort label call in its own try/catch.
+- Task 6: Created `apply-reviewer-labels.test.ts` with all AC4 variants (4a–4e) and AC3 denial branches for `pr-comment`, `pr-review`, `pr-close`, `pr-merge`.
+- Task 7: Created `ac5-4-8-apply-reviewer-labels.smoke.test.ts` extending the 4.6b/4.7 smoke harness. Asserts two sequential label calls and non-regression of manifest-state invariants.
+- Task 8: All 949 tests pass. `dist/` rebuilt and included in commit.
+- Note: `permissions-enforcement.test.ts` positive guard for `pr-review` updated to assert `pr-view` and `api` present, and `pr-review`/`pr-comment` absent (correctly reflecting the new negative-capability enforcement).
+
 ### File List
+
+- `plugins/crew/permissions/generalist-reviewer.yaml` — removed `pr-comment`, `pr-review` from `gh_allow`
+- `plugins/crew/catalogue/generalist-reviewer.md` — removed `pr-comment`, `pr-review` from `gh_allow` (parity with permissions)
+- `plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts` — new tool
+- `plugins/crew/mcp-server/src/tools/register.ts` — added `applyReviewerLabels` import and registration
+- `plugins/crew/skills/start/SKILL.md` — added `applyReviewerLabels` to `allowed_tools`, inserted step 10a, updated error handler
+- `plugins/crew/mcp-server/src/tools/__tests__/apply-reviewer-labels.test.ts` — new test suite (AC4 + AC3 denial)
+- `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-8-apply-reviewer-labels.smoke.test.ts` — new smoke test (AC5)
+- `plugins/crew/mcp-server/src/tools/__tests__/post-reviewer-comments.test.ts` — fixture updated (removed `pr-comment`, `pr-review`)
+- `plugins/crew/mcp-server/src/__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` — fixture updated
+- `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts` — tool count 24 → 25
+- `plugins/crew/mcp-server/src/skills/__tests__/start-skill-content.test.ts` — `allowed_tools` set updated (9 → 10)
+- `plugins/crew/mcp-server/tests/ask-skill.test.ts` — tool count 24 → 25
+- `plugins/crew/mcp-server/tests/ask-mode-enforcement.test.ts` — tool count 24 → 25
+- `plugins/crew/mcp-server/tests/get-team-snapshot.test.ts` — tool count 24 → 25
+- `plugins/crew/mcp-server/tests/permissions-enforcement.test.ts` — positive guard updated (pr-view + api present; pr-review + pr-comment absent)
+- `plugins/crew/mcp-server/dist/` — rebuilt

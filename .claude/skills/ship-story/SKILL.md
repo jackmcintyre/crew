@@ -42,6 +42,8 @@ Notes:
 
 Let `SH=python3 .claude/skills/ship-story/scripts/ship.py` for brevity below.
 
+**Worktree-relative paths (read this once).** From Step 3 onward, every file path passed to a subagent — spec, sprint-status, anything under `_bmad-output/` — MUST be the **worktree-absolute** form: `<worktree_path>/<rel>`. Concretely: `ship.py resolve` returns `spec_path` as `_bmad-output/implementation-artifacts/<story_key>.md` (repo-relative); your prompts should pass `<worktree_path>/<spec_path>`. The same applies to every `$SH set-status` invocation during the in-flight phases — pass `--worktree <worktree_path>` so the flip lands inside the story branch and ships in the PR rather than as uncommitted drift on main. Bookkeeping committed in the story branch ships with the PR; bookkeeping written to the main repo's working tree does not, and turns into a "chore: mark X done" follow-up PR (the chore-PR pattern Jack flagged).
+
 ### Step 1 — Preflight
 
 ```bash
@@ -110,7 +112,7 @@ Then jump to the `Verify <spec_path> exists` block below.
 
 Otherwise (the common case — no spec on disk), spawn ONE subagent with `model: opus`. Prompt:
 
-> Run the `bmad-create-story` skill (action: `create`) for story key `<story_key>`. The epic source is `<epic_file>`. Output the spec to `<spec_path>`. Do NOT implement code — spec only. Do NOT modify `sprint-status.yaml` or any other status/state file — the orchestrator owns status transitions. Do NOT pause for clarifying questions; make reasonable defaults and proceed.
+> Run the `bmad-create-story` skill (action: `create`) for story key `<story_key>`. The epic source is `<worktree_path>/<epic_file>`. Output the spec to `<worktree_path>/<spec_path>` (worktree-absolute — do NOT write to the main repo's copy). Do NOT implement code — spec only. Do NOT modify `sprint-status.yaml` or any other status/state file — the orchestrator owns status transitions. Do NOT pause for clarifying questions; make reasonable defaults and proceed.
 >
 > **Story shape tag (required).** Immediately after the story title (the first `#` heading), add a line:
 > ```
@@ -135,20 +137,24 @@ Otherwise (the common case — no spec on disk), spawn ONE subagent with `model:
 > - Do NOT ask the user — make the judgement yourself per the standing "no clarifying questions" rule. Where the judgement is non-obvious, add a one-line HTML comment under the AC explaining your reasoning, e.g. `<!-- user-surface: AC2 names the /crew:status slash command, rubric (i). -->`.
 > - The numeric prefix (`AC1`, `AC2`, …) is canonical; the gate's regex is `^\*\*AC(\d+)\s*\(user-surface\)\s*:\*\*`. ACs naming only internal functions, schemas, MCP tools, or implementation files are NOT `user-surface`.
 
-Verify `<spec_path>` exists. Then:
+Verify `<worktree_path>/<spec_path>` exists. Then flip status inside the worktree and commit so the transition ships with the PR:
 
 ```bash
-$SH set-status <story_key> ready-for-dev
+$SH set-status <story_key> ready-for-dev --worktree <worktree_path>
+git -C <worktree_path> add _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/<story_key>.md
+git -C <worktree_path> diff --cached --quiet || git -C <worktree_path> commit -m "chore(<story_short>): scaffold story spec + mark ready-for-dev"
 $SH record <story_key> spec_authored
 ```
 
-**Status writes:** Only `ship.py set-status` mutates `sprint-status.yaml`. Every subagent prompt in this skill must include the "do not touch sprint-status.yaml" clause. If a subagent reports having moved status, the orchestrator's `set-status` call is the authoritative one — verify post-run via `$SH state <story_key>`.
+The `git diff --cached --quiet || commit` pattern is a no-op when nothing changed (e.g. the spec was already at `ready-for-dev` and was reused); when there is something to commit, it captures both the spec scaffold and the status flip in one bookkeeping commit.
+
+**Status writes:** Only `ship.py set-status` mutates `sprint-status.yaml`. Every subagent prompt in this skill must include the "do not touch sprint-status.yaml" clause. If a subagent reports having moved status, the orchestrator's `set-status` call is the authoritative one — verify post-run via `$SH state <story_key>`. Interim transitions (`in-progress`, `review`) are NOT written; the run log JSONL is the authoritative resume signal. Only `ready-for-dev` (Step 4) and `done` (Step 8 bookkeeping commit) hit sprint-status.
 
 ### Step 5 — Validate the spec (subagent: bmad-create-story validate)
 
 Cheap insurance — a malformed spec wastes a full dev+review cycle. Spawn ONE subagent with `model: sonnet`. Prompt:
 
-> Run the `bmad-create-story` skill with action `validate` against `<spec_path>`. Return the validation report verbatim and a single-word verdict: `pass` or `fail`. Do NOT modify `sprint-status.yaml`. Do NOT pause for clarifying questions.
+> Run the `bmad-create-story` skill with action `validate` against `<worktree_path>/<spec_path>` (worktree-absolute — do NOT read or modify the main repo's copy). Return the validation report verbatim and a single-word verdict: `pass` or `fail`. Do NOT modify `sprint-status.yaml`. Do NOT pause for clarifying questions.
 >
 > **In addition to the skill's own checks, verify that every example in the spec actually satisfies the rules it illustrates.** Examples: if the spec defines a commit-message regex AND gives a sample commit message, the sample must match the regex. If the spec defines a schema AND gives a sample event, the sample must validate. Flag any example-vs-rule contradiction as `fail` — these waste a full dev pass when the dev hits the contradiction at implementation time.
 >
@@ -170,17 +176,17 @@ $SH record <story_key> spec_validated
 
 Spawn ONE subagent with `model: sonnet`. Prompt:
 
-> Run `bmad-dev-story` against `<spec_path>`. Your working directory is the worktree at `<worktree_path>`. Implement code and unit tests. Run `pnpm install && pnpm build && pnpm test` (or the project's equivalent) from the relevant package directory and confirm all green before returning.
+> Run `bmad-dev-story` against `<worktree_path>/<spec_path>` (worktree-absolute — every read and write you do on the spec must hit the worktree copy, never the main repo's). Your working directory is the worktree at `<worktree_path>`. Implement code and unit tests. Run `pnpm install && pnpm build && pnpm test` (or the project's equivalent) from the relevant package directory and confirm all green before returning.
 >
 > **Before returning, commit your work to branch `story/<story_key>` using conventional-commit style (e.g. `feat(<story_short>): <one-line summary>`). Use a HEREDOC for the message. Do NOT push, do NOT open a PR, do NOT modify `sprint-status.yaml` or any other status/state file. Verify `git status` is clean and `git log --oneline origin/main..HEAD` shows your commit(s) before returning.**
 >
 > Do NOT pause for clarifying questions; make reasonable defaults and proceed. When done, return a one-paragraph summary including the commit SHA(s).
 
 ```bash
-$SH set-status <story_key> in-progress     # at spawn
-$SH set-status <story_key> review          # on return
 $SH record <story_key> implemented
 ```
+
+No sprint-status flip here. Interim states (`in-progress`, `review`) live in the run log JSONL; sprint-status only flips at `ready-for-dev` (Step 4) and `done` (Step 8 bookkeeping).
 
 If the returned summary reports no commit (or `git -C <worktree_path> log --oneline origin/main..HEAD` is empty), do NOT proceed to Step 7 — re-spawn the dev subagent with "your previous run left no commits on the branch; commit your scaffold per the prompt above." Burning a review pass on an empty diff is the failure mode this guard exists for.
 
@@ -213,13 +219,13 @@ Loop:
    If the reviewer returned no issues, omit `issues` (or pass `[]`).
 4. If `approve` → break; continue to Step 8.
 5. If `block` → halt with `REVIEW_BLOCKED`. No PR.
-If `request-changes` → spawn a fresh dev subagent with `model: sonnet` (running `bmad-dev-story`) with the issue list and `<spec_path>`: "Address each issue. Do not change scope beyond what was flagged. Commit your fixes to `story/<story_key>` before returning (do not push, do not touch sprint-status.yaml). Confirm tests still green." Then loop to step 1.
+If `request-changes` → spawn a fresh dev subagent with `model: sonnet` (running `bmad-dev-story`) with the issue list and `<worktree_path>/<spec_path>` (worktree-absolute): "Address each issue. Do not change scope beyond what was flagged. Commit your fixes to `story/<story_key>` before returning (do not push, do not touch sprint-status.yaml). Confirm tests still green." Then loop to step 1.
 
 ### Step 8 — Systematic AC verification (subagent: bmad-qa-generate-e2e-tests)
 
 Spawn ONE fresh subagent with `model: sonnet`. Prompt (with the AC list pasted verbatim from `/tmp/ship-<story_key>.resolve.json`):
 
-> Story: `<story_key>`. Spec at `<spec_path>`. Acceptance criteria:
+> Story: `<story_key>`. Spec at `<worktree_path>/<spec_path>` (worktree-absolute). Acceptance criteria:
 > <numbered AC list>
 >
 > Step 1 — Run the `bmad-qa-generate-e2e-tests` skill against the implemented code on branch `story/<story_key>`. Generate API/E2E tests that exhaustively cover every AC above. If an existing unit test already covers an AC, reuse it; do not duplicate.
@@ -249,6 +255,18 @@ $SH record <story_key> ac_verified
 ```
 
 After recording, verify the worktree is clean (`git -C <worktree_path> status --porcelain` empty). If any QA-generated files are still uncommitted, halt with `AC_VERIFICATION_FAILED` and surface the unstaged paths — never paper over by committing them yourself.
+
+Then write the **bookkeeping commit** so the `done` flip ships in the PR (rather than landing on main post-merge as a chore-PR):
+
+```bash
+$SH set-status <story_key> done --worktree <worktree_path>
+git -C <worktree_path> add _bmad-output/implementation-artifacts/sprint-status.yaml _bmad-output/implementation-artifacts/<story_key>.md
+git -C <worktree_path> diff --cached --quiet || git -C <worktree_path> commit -m "chore(<story_short>): mark <story_key> done in sprint-status"
+```
+
+The `diff --cached --quiet || commit` guard means: only commit if something actually changed. If the dev/QA agents already updated the spec's `Status:` field inside the worktree and `set-status` flipped sprint-status, you get one bookkeeping commit. If they didn't touch the spec (e.g. pre-authored spec already at `done`), you may get only the sprint-status delta. Either is fine.
+
+If sprint-status is already at `done` when you run `set-status` (idempotent no-op — script returns `"noop": true`), the `git add` may still stage the spec file's `Status:` flip from the dev agent. The guard handles both the "nothing to commit" and "only spec changed" cases cleanly.
 
 ### Step 8.5 — Pre-PR user-surface smoke gate
 
@@ -347,8 +365,8 @@ Mirrors Step 7's review/rework structure. Maintain a local counter `ci_passes = 
 4. If all required checks are `success` → break; continue to Step 11.
 5. If any required check is `failure`:
    - Pull failing-job logs: `gh run view <run_id> --log-failed` for each failing run.
-   - Spawn a fresh dev subagent with `model: sonnet` (running `bmad-dev-story`) with: the failing-check names, the captured logs, the spec path, and the worktree path. Prompt:
-     > CI failed on PR #<pr_number> for branch `story/<story_key>` (worktree `<worktree_path>`). Failures: <list>. Logs: <paste>. Diagnose the root cause, fix it inside the worktree, and re-run `pnpm install && pnpm build && pnpm test` locally to confirm green. **Before returning, commit your fix to `story/<story_key>` with a conventional-commit message (e.g. `fix(<story_short>): <one-line>`) and push to origin so CI re-runs. Do NOT modify `sprint-status.yaml`. Do NOT widen scope beyond what the failing checks demanded. Do NOT pause for clarifying questions.**
+   - Spawn a fresh dev subagent with `model: sonnet` (running `bmad-dev-story`) with: the failing-check names, the captured logs, the worktree-absolute spec path, and the worktree path. Prompt:
+     > CI failed on PR #<pr_number> for branch `story/<story_key>` (worktree `<worktree_path>`, spec at `<worktree_path>/<spec_path>`). Failures: <list>. Logs: <paste>. Diagnose the root cause, fix it inside the worktree, and re-run `pnpm install && pnpm build && pnpm test` locally to confirm green. **Before returning, commit your fix to `story/<story_key>` with a conventional-commit message (e.g. `fix(<story_short>): <one-line>`) and push to origin so CI re-runs. Do NOT modify `sprint-status.yaml`. Do NOT widen scope beyond what the failing checks demanded. Do NOT pause for clarifying questions.**
    - Then loop to step 1.
 
 When CI is green, record:
@@ -414,7 +432,7 @@ This step is **not** auto-run at the end of Step 11 — merge timing is unbounde
    ```bash
    $SH cleanup <story_key>
    ```
-   This atomically does: verify PR is merged via `gh pr view`, status → `done`, fast-forward local `main`, `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, `git push origin --delete story/<story_key>` (best-effort — silent if GitHub already auto-deleted), tidy `/tmp/ship-<story_key>.*`, re-point the Claude Code plugin cache back at main via `pnpm --dir plugins/crew dev:install` (defensive: silently skipped if the script is missing), append `cleaned` event to the run log.
+   This atomically does: verify PR is merged via `gh pr view`, status → `done` (idempotent — under the post-2026-05-24 flow the merge already brought the flip in via Step 8's bookkeeping commit, so this is usually a no-op verification), fast-forward local `main`, `git worktree remove .worktrees/<story_key>`, `git branch -D story/<story_key>`, `git push origin --delete story/<story_key>` (best-effort — silent if GitHub already auto-deleted), tidy `/tmp/ship-<story_key>.*`, re-point the Claude Code plugin cache back at main via `pnpm --dir plugins/crew dev:install` (defensive: silently skipped if the script is missing), append `cleaned` event to the run log.
 
 3. **Report.** One line per story cleaned, plus any of the halt codes below.
 
