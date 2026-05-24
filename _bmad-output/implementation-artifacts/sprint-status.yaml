@@ -58,7 +58,7 @@ development_status:
   4-9b-risk-tier-classifier-code-evidence-stamping-and-fallback: ready-for-dev
   4-10-agreement-metric-helper-compute-agreement: ready-for-dev
   4-10b-auto-merge-gate-medium-high-pause-and-user-override: backlog
-  4-11-yield-protocol-locked-phrase-domain-routing-in-domain-insistence: backlog
+  4-11-yield-protocol-locked-phrase-domain-routing-in-domain-insistence: ready-for-dev
   4-12-per-invocation-telemetry-and-runtime-soft-hard-limits: backlog
   4-13-typed-error-class-assertions-in-dev-outcome-tests: ready-for-dev
   epic-4-retrospective: optional
