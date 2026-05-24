@@ -1,20 +1,23 @@
 /**
- * Unit tests for `processReviewerTranscript` — Story 4.3b Task 9; Story 4.3c Task 5.
+ * Unit tests for `processReviewerTranscript` — Story 4.6 Task 9.7 (revision 2).
  *
- * Uses a real tmpdir with real `node:fs` ops. No mocking of imported modules.
+ * **Revision 2:** The suite is rewritten to cover the file-based verdict
+ * transport. All tests that scanned the reviewer's chat for `**Verdict:**`
+ * have been removed.
  *
- * Covers:
- *   (a) READY FOR MERGE → `next: "done-ready-for-merge"`, `completed: true`,
- *       manifest moved to done/ with `status: "done"` and preserved `claimed_by`.
- *       (AC3(ii) seam contract — Story 4.3c)
- *   (b) NEEDS CHANGES (first rework) → `next: "rework-dev"`, reworkIteration: 1,
- *       manifest `rework_count: 1`, devPrompt populated, no `completed` field.
- *   (c) NEEDS CHANGES (second rework) → reworkIteration: 2, manifest `rework_count: 2`.
- *   (d) BLOCKED → `next: "done-blocked-reviewer-verdict"`, manifest NOT mutated,
- *       no `completed` field. (AC3(iii) — Story 4.3c)
- *   (e) Drift / empty / unknown-sentinel → `next: "done-blocked-reviewer-grammar"`,
- *       manifest `blocked_by: "reviewer-grammar"`, no `completed` field. (AC3(iv) — Story 4.3c)
+ * Covers (per spec §4l, §4m):
+ *   (a) reviewer-result.json present with READY FOR MERGE → done-ready-for-merge,
+ *       completed: true, manifest moved to done/.
+ *   (b) reviewer-result.json present with NEEDS CHANGES → done-blocked-reviewer-needs-changes,
+ *       blocked_by: "reviewer-verdict-needs-changes".
+ *   (c) reviewer-result.json present with BLOCKED → done-blocked-reviewer-blocked,
+ *       blocked_by: "reviewer-verdict-blocked".
+ *   (d) reviewer-result.json absent → done-blocked-no-session-result,
+ *       blocked_by: "reviewer-no-session-result".
+ *   (e) reviewer-result.json present but malformed JSON → ReviewerResultFileMalformedError thrown.
+ *   (f) reviewer-result.json present but invalid shape (bad recommendedVerdict) →
+ *       ReviewerResultFileMalformedError thrown.
  *
- * Story 4.3b Task 9.1–9.2; Story 4.3c Task 5.1–5.5.
+ * Story 4.6 Task 8b; Story 4.3b Task 9.1–9.2; Story 4.3c Task 5.1–5.5.
  */
 export {};

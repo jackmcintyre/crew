@@ -10,14 +10,20 @@
  * extracted from the source spec against the applicability classifier and returns
  * structured `acResults` keyed by AC index.
  *
- * This tool is the structural anchor that closes the "reviewer rubber-stamp"
- * failure mode documented in Story 4.3c: the reviewer persona's verdict
- * composition is structurally required to consume the returned
- * `ReviewerSessionResult`, so it cannot skip a read or an AC check.
+ * **Revision 2 (deterministic-verdict-transport):** Before returning, this tool
+ * derives `recommendedVerdict` deterministically from `acResults` per the
+ * closed algorithm in spec §3f, then persists the result to
+ * `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`
+ * via `atomicWriteFile`. The verdict transport is the file, not the reviewer's
+ * chat output. `processReviewerTranscript` reads the file and switches on
+ * `recommendedVerdict` — the reviewer's chat is informational only.
+ *
+ * Same pattern as Story 4.3c's `completeStory` call inside
+ * `processReviewerTranscript`: load-bearing decisions live in the tool layer.
  *
  * The tool MUST NOT:
  *   - Spawn subagents (that is the SKILL.md prose layer's responsibility).
- *   - Mutate any manifest, state file, or canonical-state path.
+ *   - Mutate any manifest (only the sessions/reviewer-result.json file is written).
  *   - Swallow typed errors — all read/execution errors propagate uncaught.
  *
  * TODO(4.12): wire `agent.invoke` and `reviewer.verdict` telemetry events here.
@@ -48,12 +54,49 @@ export type AcResult = {
     applicability: "manual-check-required";
     reason: string;
 };
+/** The three recognized verdict literals — deterministically derived by the tool. */
+export type RecommendedVerdict = "READY FOR MERGE" | "NEEDS CHANGES" | "BLOCKED";
 export interface ReviewerSessionResult {
+    /** ULID of the calling session — carried on the result for the persisted file. */
+    sessionUlid: string;
+    /** Story ref (e.g. "native:01HZ...") — carried on the result for the persisted file. */
+    ref: string;
+    /** PR number passed to runReviewerSession — carried for the persisted file. */
+    prNumber: number;
     sourceStory: SourceStory;
+    /** Convenience copy of sourceStory.ref for the persisted file. */
+    sourceStoryRef: string;
     prDiff: string;
     standards: StandardsDoc;
     standardsByCriterionId: Record<string, Criterion>;
     acResults: Record<number, AcResult>;
+    /**
+     * Deterministically derived from `acResults` per spec §3f:
+     *  1. any-fail → "NEEDS CHANGES"
+     *  2. empty OR any-manual-check-required → "BLOCKED"
+     *  3. else → "READY FOR MERGE"
+     *
+     * The LLM does not decide this value — the tool does.
+     * This field is persisted to `reviewer-result.json` and read by
+     * `processReviewerTranscript` as the authoritative verdict transport.
+     */
+    recommendedVerdict: RecommendedVerdict;
+}
+/**
+ * The persisted-file projection shape written to
+ * `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`.
+ *
+ * Heavy in-memory fields (`sourceStory`, `prDiff`) are NOT persisted —
+ * only the verdict-relevant data needed by `processReviewerTranscript`.
+ */
+export interface ReviewerResultFileShape {
+    sessionUlid: string;
+    ref: string;
+    recommendedVerdict: RecommendedVerdict;
+    acResults: Record<number, AcResult>;
+    standardsByCriterionId: Record<string, Criterion>;
+    sourceStoryRef: string;
+    prNumber: number;
 }
 export interface RunReviewerSessionOptions {
     targetRepoRoot: string;
@@ -66,14 +109,4 @@ export interface RunReviewerSessionOptions {
     /** Plugin root override — test seam for loadRolePermissions. */
     pluginRootOverride?: string;
 }
-/**
- * Composite reviewer-session tool.
- *
- * Performs the three reads in fixed sequential order (source story →
- * PR diff → standards doc), builds `standardsByCriterionId`, runs every
- * AC via the applicability classifier, and returns `ReviewerSessionResult`.
- *
- * All errors from reads propagate uncaught — the tool does not retry or
- * swallow. The SKILL.md prose surfaces the error and exits the inner cycle.
- */
 export declare function runReviewerSession(opts: RunReviewerSessionOptions): Promise<ReviewerSessionResult>;

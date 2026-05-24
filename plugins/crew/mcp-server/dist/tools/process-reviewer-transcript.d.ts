@@ -1,22 +1,48 @@
 /**
- * `processReviewerTranscript` MCP tool — Story 4.3b Task 3; Story 4.3c Task 2.
+ * `processReviewerTranscript` MCP tool — Story 4.3b Task 3; Story 4.3c Task 2;
+ * **Story 4.6 revision 2 (deterministic-verdict-transport).**
  *
- * Receives the reviewer subagent's final transcript (captured by the SKILL.md
- * prose after the `Task` tool returns), parses the verdict sentinel, mutates
- * the in-progress manifest on rework or grammar drift, and returns the next
- * step for the prose layer.
+ * **Revision 2 architectural change (Story 4.6 revision 2):**
+ * The `reviewerTranscript` parameter has been DROPPED. The reviewer's chat is
+ * no longer the load-bearing verdict transport. Instead, this tool reads the
+ * persisted `reviewer-result.json` file written by `runReviewerSession` and
+ * switches on its `recommendedVerdict` field.
+ *
+ * Migration from revision 1:
+ *  - `reviewerTranscript` parameter removed from `ProcessReviewerTranscriptOptions`.
+ *  - `done-blocked-reviewer-verdict` and `done-blocked-reviewer-grammar` result
+ *    variants DELETED — no backward-compat path. `runReviewerSession` is now the
+ *    ONLY valid reviewer entrypoint; these variants are structurally subsumed by
+ *    the new variants below.
+ *  - New variants added: `done-blocked-reviewer-needs-changes`,
+ *    `done-blocked-reviewer-blocked`, `done-blocked-no-session-result`.
+ *  - `import { parseVerdict }` removed (no callers after revision 2).
+ *
+ * **New input shape:** `{ targetRepoRoot, sessionUlid, ref, manifestPath }`
+ * **File path read:** `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`
+ *
+ * **Result routing:**
+ *  - `recommendedVerdict === "READY FOR MERGE"` → calls `completeStory` internally,
+ *    returns `done-ready-for-merge` with `completed: true`. (4.3c semantics preserved.)
+ *  - `recommendedVerdict === "NEEDS CHANGES"` → stamps `blocked_by: "reviewer-verdict-needs-changes"`,
+ *    returns `done-blocked-reviewer-needs-changes`.
+ *  - `recommendedVerdict === "BLOCKED"` → stamps `blocked_by: "reviewer-verdict-blocked"`,
+ *    returns `done-blocked-reviewer-blocked`.
+ *  - File absent (ENOENT) → stamps `blocked_by: "reviewer-no-session-result"`,
+ *    returns `done-blocked-no-session-result`. This is the rubber-stamp protection:
+ *    if the reviewer subagent skipped `runReviewerSession`, the operator sees a
+ *    loud blocker rather than a silent rubber-stamp.
+ *  - File present but malformed/invalid → throws `ReviewerResultFileMalformedError`.
  *
  * **Behavioural contract sources:**
  * `_bmad-output/implementation-artifacts/4-3b-harness-task-spawn-seam-for-rundevsession.md § Behavioural contract`
  * `_bmad-output/implementation-artifacts/4-3c-call-completestory-after-ready-for-merge.md § Behavioural contract`
+ * `_bmad-output/implementation-artifacts/4-6-reviewer-subagent-read-sources-and-run-acs.md § Task 8b`
  *
  * On `READY FOR MERGE`: calls `completeStory` internally (via direct function
  * import from `./complete-story.js`) to atomically move the manifest to `done/`
- * BEFORE returning. The prose layer reads the `completed: true` flag on the
- * returned object to confirm the move and emit its informational chat line.
- * The `completeStory` call is NOT made through the MCP `register.ts` surface —
- * it is a plain Node import, so it does not need a permission entry in
- * SKILL.md's `allowed_tools`.
+ * BEFORE returning. The `completeStory` call is NOT made through the MCP
+ * `register.ts` surface — it is a plain Node import.
  *
  * This tool MUST NOT spawn anything. The MCP server runs over JSON-RPC stdio
  * and has no access to Claude Code's `Task` tool. Spawn responsibility belongs
@@ -25,7 +51,7 @@
  * Chat lines flow through the returned `chatLog: string[]` — no console.*.
  * Errors propagate as typed `DomainError`s; `register.ts` wraps them.
  *
- * Story 4.3b Task 3.1–3.5; Story 4.3c Task 2.1–2.7.
+ * Story 4.3b Task 3.1–3.5; Story 4.3c Task 2.1–2.7; Story 4.6 Task 8b.
  */
 export type ProcessReviewerTranscriptResult = {
     next: "rework-dev";
@@ -37,10 +63,19 @@ export type ProcessReviewerTranscriptResult = {
     completed: true;
     chatLog: string[];
 } | {
-    next: "done-blocked-reviewer-verdict";
+    /** Reviewer's `runReviewerSession` found one or more failing ACs. Dev must iterate. */
+    next: "done-blocked-reviewer-needs-changes";
     chatLog: string[];
 } | {
-    next: "done-blocked-reviewer-grammar";
+    /** Reviewer's `runReviewerSession` returned BLOCKED (empty ACs or manual-check-required). */
+    next: "done-blocked-reviewer-blocked";
+    chatLog: string[];
+} | {
+    /**
+     * `reviewer-result.json` was absent — the reviewer subagent skipped the
+     * mandatory `runReviewerSession` call. Rubber-stamp protection.
+     */
+    next: "done-blocked-no-session-result";
     chatLog: string[];
 };
 export interface ProcessReviewerTranscriptOptions {
@@ -48,31 +83,31 @@ export interface ProcessReviewerTranscriptOptions {
     sessionUlid: string;
     ref: string;
     manifestPath: string;
-    reviewerTranscript: string;
 }
 /**
- * Process the reviewer subagent's final transcript.
+ * Process the reviewer subagent's session result.
  *
- * Calls `parseVerdict` exactly once. On grammar drift: stamps
- * `blocked_by: "reviewer-grammar"` on the in-progress manifest. On
- * `NEEDS CHANGES`: increments `rework_count`, writes to disk BEFORE composing
- * the dev re-spawn prompt, then returns the next dev prompt. On `READY FOR
- * MERGE`: calls `completeStory` internally to atomically move the manifest to
- * `done/` BEFORE returning; the returned object carries `completed: true` as a
- * literal-typed field confirming the move. On `BLOCKED`: pass-through (no
- * manifest mutation, no `completed` field).
+ * **Revision 2:** reads `reviewer-result.json` from
+ * `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`
+ * and switches on its `recommendedVerdict` field. The reviewer's chat
+ * transcript is no longer consulted.
+ *
+ * - Missing file → stamps `blocked_by: "reviewer-no-session-result"`, returns
+ *   `done-blocked-no-session-result`. The reviewer skipped `runReviewerSession`.
+ * - `recommendedVerdict === "READY FOR MERGE"` → calls `completeStory` internally;
+ *   manifest moves to `done/`; returns `done-ready-for-merge` with `completed: true`.
+ * - `recommendedVerdict === "NEEDS CHANGES"` → stamps `blocked_by: "reviewer-verdict-needs-changes"`;
+ *   returns `done-blocked-reviewer-needs-changes`.
+ * - `recommendedVerdict === "BLOCKED"` → stamps `blocked_by: "reviewer-verdict-blocked"`;
+ *   returns `done-blocked-reviewer-blocked`.
  *
  * The `completeStory` call errors (`InProgressHandEditError`, `WrongClaimantError`,
  * `ManifestNotFoundError`) propagate verbatim — no catch, no wrap. The
  * `register.ts` `DomainError` → `isError: true` path handles serialisation.
  *
- * The SKILL.md prose MUST pass `reviewerTranscript` verbatim — no
- * summarisation, no editing. The full final-message string is the contract.
- *
  * @param opts.targetRepoRoot - Absolute path to the target repository root.
  * @param opts.sessionUlid - ULID of the calling dev session.
  * @param opts.ref - Story ref (e.g. `"native:01HZ..."`).
  * @param opts.manifestPath - Absolute path to the in-progress manifest.
- * @param opts.reviewerTranscript - The reviewer subagent's complete final message, verbatim.
  */
 export declare function processReviewerTranscript(opts: ProcessReviewerTranscriptOptions): Promise<ProcessReviewerTranscriptResult>;

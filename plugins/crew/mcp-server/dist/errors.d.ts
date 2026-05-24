@@ -702,6 +702,25 @@ export declare class PrUrlNotFoundInDevTranscriptError extends DomainError {
     });
 }
 /**
+ * `processReviewerTranscript` found `reviewer-result.json` at the expected
+ * path but could not parse or validate it. This is a bug in `runReviewerSession`
+ * — the file should always be schema-valid when present.
+ *
+ * Fields:
+ * - `path` — the absolute path to the malformed file.
+ * - `cause` — the raw parse/validation error.
+ *
+ * (Story 4.6 Task 8b.8 / revision 2)
+ */
+export declare class ReviewerResultFileMalformedError extends DomainError {
+    readonly path: string;
+    readonly cause: unknown;
+    constructor(opts: {
+        path: string;
+        cause: unknown;
+    });
+}
+/**
  * `buildBranchSlug` produced a slug that had no alphanumeric characters
  * after the `story/` prefix (e.g. a title composed entirely of Unicode
  * / punctuation). Thrown BEFORE any subprocess spawn. (Story 4.4

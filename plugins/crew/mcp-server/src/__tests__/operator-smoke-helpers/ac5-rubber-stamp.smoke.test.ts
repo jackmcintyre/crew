@@ -336,31 +336,46 @@ describe("AC5 (user-surface): rubber-stamp failure mode is closed by runReviewer
       expect(ac1Result!.reason).toContain("ENOENT");
 
       // -----------------------------------------------------------------------
-      // Step 3: Compose the reviewer transcript from the structured result.
-      // This simulates what the generalist-reviewer persona MUST emit under the
-      // Task 8.3 rules: no READY FOR MERGE when any acResults[*].status === "fail".
+      // Step 3 (revision 2): The reviewer-result.json was already written by
+      // runReviewerSession above. Verify the file exists with the correct shape.
+      // -----------------------------------------------------------------------
+      const resultFilePath = `${tmpRoot}/.crew/state/sessions/${SESSION_ULID}/reviewer-result.json`;
+      const resultFileRaw = await fs.readFile(resultFilePath, "utf8");
+      const resultFileParsed = JSON.parse(resultFileRaw) as {
+        recommendedVerdict: string;
+        acResults: Record<string, unknown>;
+      };
+
+      // Revision 2: file carries NEEDS CHANGES because AC1 failed (artifact missing).
+      expect(resultFileParsed.recommendedVerdict).toBe("NEEDS CHANGES");
+
+      // -----------------------------------------------------------------------
+      // Step 3b (revision 2 optional): Compose a reviewer transcript for the
+      // human-operator summary (informational only — no longer parsed).
       // -----------------------------------------------------------------------
       const reviewerTranscript = composeReviewerTranscript(sessionResult.acResults);
 
       // -----------------------------------------------------------------------
       // Step 4: Assert the verdict transcript satisfies the AC5 contract (spec §5b, 5d).
+      // The chat reference is now "best-effort" per revision 2 spec §5d — the file
+      // branch alone is sufficient, but the composed transcript still satisfies it.
       // -----------------------------------------------------------------------
       assertVerdictTranscriptContract(reviewerTranscript);
 
       // -----------------------------------------------------------------------
       // Step 5: Drive processReviewerTranscript to confirm the manifest stays
-      // in in-progress/ (spec §5c).
+      // in in-progress/ (spec §5c). Revision 2: reads the persisted file.
       // -----------------------------------------------------------------------
       const reviewerResult = await processReviewerTranscript({
         targetRepoRoot: tmpRoot,
         sessionUlid: SESSION_ULID,
         ref: SMOKE_STORY_REF,
         manifestPath,
-        reviewerTranscript,
       });
 
-      // NEEDS CHANGES → rework-dev (manifest stays in in-progress, rework_count incremented)
-      expect(reviewerResult.next).toBe("rework-dev");
+      // Revision 2: NEEDS CHANGES → done-blocked-reviewer-needs-changes
+      // (manifest stays in in-progress/ with blocked_by: "reviewer-verdict-needs-changes")
+      expect(reviewerResult.next).toBe("done-blocked-reviewer-needs-changes");
 
       // Manifest MUST NOT be in done/ (spec §5c)
       await assertManifestStaysInProgress(tmpRoot, SMOKE_STORY_REF);
@@ -403,7 +418,16 @@ describe("AC5 negative sanity: if artifact exists, READY FOR MERGE is not blocke
     // Artifact exists → pass
     expect(ac1Result!.status).toBe("pass");
 
-    // A passing result DOES permit READY FOR MERGE
+    // Revision 2: the file-based verdict is READY FOR MERGE (artifact present, no manual checks)
+    expect(sessionResult.recommendedVerdict).toBe("READY FOR MERGE");
+
+    // The persisted reviewer-result.json also reflects READY FOR MERGE
+    const resultFilePath = `${tmpRoot}/.crew/state/sessions/${SESSION_ULID}/reviewer-result.json`;
+    const resultFileRaw = await fs.readFile(resultFilePath, "utf8");
+    const resultFileParsed = JSON.parse(resultFileRaw) as { recommendedVerdict: string };
+    expect(resultFileParsed.recommendedVerdict).toBe("READY FOR MERGE");
+
+    // The composed transcript (human-operator nicety) also says READY FOR MERGE
     const reviewerTranscript = composeReviewerTranscript(sessionResult.acResults);
     expect(reviewerTranscript).toContain("**Verdict: READY FOR MERGE**");
   });

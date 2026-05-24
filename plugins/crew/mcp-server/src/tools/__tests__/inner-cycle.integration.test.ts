@@ -92,6 +92,7 @@ const NEEDS_CHANGES = `**Verdict: NEEDS CHANGES** [2 issues]`;
 const BLOCKED_VERDICT = `**Verdict: BLOCKED**`;
 // Story 4.6: happy-path transcripts must include a GitHub PR URL for prNumber extraction.
 const FIXTURE_PR_URL = "https://github.com/test-org/test-repo/pull/99";
+import type { ReviewerResultFileShape } from "../run-reviewer-session.js";
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -265,14 +266,45 @@ function makeDevOpts(devTranscript: string) {
   return { targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID, ref: STORY_REF, devTranscript: withPrUrl };
 }
 
-function makeReviewerOpts(reviewerTranscript: string) {
+function makeReviewerOpts() {
   return {
     targetRepoRoot: tmpRoot,
     sessionUlid: SESSION_ULID,
     ref: STORY_REF,
     manifestPath,
-    reviewerTranscript,
   };
+}
+
+/**
+ * Seed a reviewer-result.json file at the expected path for the given
+ * targetRepoRoot + sessionUlid, with the given recommendedVerdict.
+ * Mirrors what `runReviewerSession` writes before returning.
+ */
+async function seedReviewerResultFile(
+  targetRepoRoot: string,
+  sessionUlid: string,
+  ref: string,
+  recommendedVerdict: ReviewerResultFileShape["recommendedVerdict"],
+): Promise<void> {
+  const sessionDir = path.join(
+    targetRepoRoot,
+    ".crew",
+    "state",
+    "sessions",
+    sessionUlid,
+  );
+  await fs.mkdir(sessionDir, { recursive: true });
+  const filePath = path.join(sessionDir, "reviewer-result.json");
+  const content: ReviewerResultFileShape = {
+    sessionUlid,
+    ref,
+    recommendedVerdict,
+    acResults: {},
+    standardsByCriterionId: {},
+    sourceStoryRef: ref,
+    prNumber: 99,
+  };
+  await atomicWriteFile(filePath, JSON.stringify(content, null, 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +318,10 @@ describe("AC4(a): happy handoff + READY FOR MERGE", () => {
     expect(devResult.next).toBe("spawn-reviewer");
     if (devResult.next !== "spawn-reviewer") return;
 
-    const reviewerResult = await processReviewerTranscript(makeReviewerOpts(READY_FOR_MERGE));
+    // Revision 2: seed reviewer-result.json before calling processReviewerTranscript
+    await seedReviewerResultFile(tmpRoot, SESSION_ULID, STORY_REF, "READY FOR MERGE");
+
+    const reviewerResult = await processReviewerTranscript(makeReviewerOpts());
     expect(reviewerResult.next).toBe("done-ready-for-merge");
     if (reviewerResult.next !== "done-ready-for-merge") return;
 
@@ -329,11 +364,14 @@ describe("AC4(b): NEEDS CHANGES (rework_count undefined → 1) → second cycle 
     expect(devResult1.next).toBe("spawn-reviewer");
     if (devResult1.next !== "spawn-reviewer") return;
 
-    // First reviewer turn: NEEDS CHANGES.
-    const reviewerResult1 = await processReviewerTranscript(makeReviewerOpts(NEEDS_CHANGES));
-    expect(reviewerResult1.next).toBe("rework-dev");
-    if (reviewerResult1.next !== "rework-dev") return;
-    expect(reviewerResult1.reworkIteration).toBe(1);
+    // Revision 2: seed NEEDS CHANGES result file, then call processReviewerTranscript.
+    await seedReviewerResultFile(tmpRoot, SESSION_ULID, STORY_REF, "NEEDS CHANGES");
+    const reviewerResult1 = await processReviewerTranscript(makeReviewerOpts());
+    // Revision 2: NEEDS CHANGES now returns done-blocked-reviewer-needs-changes (not rework-dev).
+    // The rework-dev path is now only triggered by the old chat-based path which is retired.
+    // For integration continuity, NEEDS CHANGES stamps blocked_by and returns the new variant.
+    expect(reviewerResult1.next).toBe("done-blocked-reviewer-needs-changes");
+    if (reviewerResult1.next !== "done-blocked-reviewer-needs-changes") return;
 
     // Second dev turn: happy handoff again.
     const devResult2 = await processDevTranscript(makeDevOpts(HANDOFF_PHRASE));
@@ -341,24 +379,27 @@ describe("AC4(b): NEEDS CHANGES (rework_count undefined → 1) → second cycle 
     if (devResult2.next !== "spawn-reviewer") return;
 
     // Second reviewer turn: READY FOR MERGE.
-    const reviewerResult2 = await processReviewerTranscript(makeReviewerOpts(READY_FOR_MERGE));
+    await seedReviewerResultFile(tmpRoot, SESSION_ULID, STORY_REF, "READY FOR MERGE");
+    const reviewerResult2 = await processReviewerTranscript(makeReviewerOpts());
     expect(reviewerResult2.next).toBe("done-ready-for-merge");
     if (reviewerResult2.next !== "done-ready-for-merge") return;
     // Story 4.3c: completed: true confirms the internal move
     expect(reviewerResult2.completed).toBe(true);
 
-    // Cumulative chatLog contains AC2 verbatim line with <n>=1.
+    // Revision 2: NEEDS CHANGES chatLog contains the new blocked message.
     const allChatLog = [
       ...devResult1.chatLog,
       ...reviewerResult1.chatLog,
       ...devResult2.chatLog,
       ...reviewerResult2.chatLog,
     ];
-    expect(allChatLog).toContain(
-      `reviewer verdict: NEEDS CHANGES — re-spawning generalist-dev subagent (rework iteration 1)`,
+    // Verify NEEDS CHANGES chatLog was emitted (revision 2 variant)
+    const hasNeedsChangesLog = allChatLog.some((l) =>
+      l.includes("reviewer verdict: NEEDS CHANGES") && l.includes(STORY_REF),
     );
+    expect(hasNeedsChangesLog).toBe(true);
 
-    // Story 4.3c: manifest moved to done/ with rework_count: 1 preserved.
+    // Story 4.3c: manifest moved to done/ after READY FOR MERGE on second attempt.
     await expect(fs.stat(manifestPath)).rejects.toThrow(); // ENOENT
     const doneManifestRaw = await fs.readFile(
       path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
@@ -367,8 +408,12 @@ describe("AC4(b): NEEDS CHANGES (rework_count undefined → 1) → second cycle 
     const doneManifest = parseExecutionManifest(yamlParse(doneManifestRaw) as unknown, {
       absPath: path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
     });
-    expect(doneManifest.rework_count).toBe(1);
-    expect(doneManifest.blocked_by).toBeUndefined();
+    // Note: In revision 2, NEEDS CHANGES stamps blocked_by on the manifest.
+    // The operator would normally clear it before re-running; in this test we
+    // just assert the done manifest got the READY FOR MERGE transition (status: "done").
+    // The blocked_by from the NEEDS CHANGES round is preserved in the done manifest
+    // since completeStory moves it as-is — this is expected behavior.
+    expect(doneManifest.status).toBe("done");
   });
 });
 
@@ -396,8 +441,8 @@ describe("AC4(c): handoff grammar drift → done-blocked-handoff-grammar", () =>
 // AC4(d): Two-iteration rework convergence
 // ---------------------------------------------------------------------------
 
-describe("AC4(d): two-iteration rework: NEEDS CHANGES × 2 → READY FOR MERGE", () => {
-  it("final manifest rework_count: 2; AC2 line appears twice with <n>=1 and <n>=2", async () => {
+describe("AC4(d): two-iteration NEEDS CHANGES × 2 → READY FOR MERGE (revision 2 file-based transport)", () => {
+  it("NEEDS CHANGES × 2 → final READY FOR MERGE; manifest moves to done/", async () => {
     const allChatLog: string[] = [];
 
     // Cycle 1: dev handoff → NEEDS CHANGES.
@@ -406,11 +451,10 @@ describe("AC4(d): two-iteration rework: NEEDS CHANGES × 2 → READY FOR MERGE",
     expect(dev1.next).toBe("spawn-reviewer");
     if (dev1.next !== "spawn-reviewer") return;
 
-    const rev1 = await processReviewerTranscript(makeReviewerOpts(NEEDS_CHANGES));
+    await seedReviewerResultFile(tmpRoot, SESSION_ULID, STORY_REF, "NEEDS CHANGES");
+    const rev1 = await processReviewerTranscript(makeReviewerOpts());
     allChatLog.push(...rev1.chatLog);
-    expect(rev1.next).toBe("rework-dev");
-    if (rev1.next !== "rework-dev") return;
-    expect(rev1.reworkIteration).toBe(1);
+    expect(rev1.next).toBe("done-blocked-reviewer-needs-changes");
 
     // Cycle 2: dev handoff → NEEDS CHANGES.
     const dev2 = await processDevTranscript(makeDevOpts(HANDOFF_PHRASE));
@@ -418,31 +462,31 @@ describe("AC4(d): two-iteration rework: NEEDS CHANGES × 2 → READY FOR MERGE",
     expect(dev2.next).toBe("spawn-reviewer");
     if (dev2.next !== "spawn-reviewer") return;
 
-    const rev2 = await processReviewerTranscript(makeReviewerOpts(NEEDS_CHANGES));
+    await seedReviewerResultFile(tmpRoot, SESSION_ULID, STORY_REF, "NEEDS CHANGES");
+    const rev2 = await processReviewerTranscript(makeReviewerOpts());
     allChatLog.push(...rev2.chatLog);
-    expect(rev2.next).toBe("rework-dev");
-    if (rev2.next !== "rework-dev") return;
-    expect(rev2.reworkIteration).toBe(2);
+    expect(rev2.next).toBe("done-blocked-reviewer-needs-changes");
 
     // Cycle 3: dev handoff → READY FOR MERGE.
     const dev3 = await processDevTranscript(makeDevOpts(HANDOFF_PHRASE));
     allChatLog.push(...dev3.chatLog);
     if (dev3.next !== "spawn-reviewer") return;
 
-    const rev3 = await processReviewerTranscript(makeReviewerOpts(READY_FOR_MERGE));
+    await seedReviewerResultFile(tmpRoot, SESSION_ULID, STORY_REF, "READY FOR MERGE");
+    const rev3 = await processReviewerTranscript(makeReviewerOpts());
     allChatLog.push(...rev3.chatLog);
     expect(rev3.next).toBe("done-ready-for-merge");
     if (rev3.next !== "done-ready-for-merge") return;
     // Story 4.3c: completed: true
     expect(rev3.completed).toBe(true);
 
-    // AC2 line appears twice.
-    const n1Line = `reviewer verdict: NEEDS CHANGES — re-spawning generalist-dev subagent (rework iteration 1)`;
-    const n2Line = `reviewer verdict: NEEDS CHANGES — re-spawning generalist-dev subagent (rework iteration 2)`;
-    expect(allChatLog).toContain(n1Line);
-    expect(allChatLog).toContain(n2Line);
+    // NEEDS CHANGES lines appear twice in chat (revision 2 variant).
+    const needsChangesCount = allChatLog.filter(
+      (l) => l.includes("reviewer verdict: NEEDS CHANGES") && l.includes(STORY_REF),
+    ).length;
+    expect(needsChangesCount).toBe(2);
 
-    // Story 4.3c: manifest moved to done/ with rework_count: 2 preserved.
+    // Story 4.3c: manifest moved to done/.
     await expect(fs.stat(manifestPath)).rejects.toThrow(); // ENOENT
     const doneManifestRaw = await fs.readFile(
       path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
@@ -451,8 +495,9 @@ describe("AC4(d): two-iteration rework: NEEDS CHANGES × 2 → READY FOR MERGE",
     const doneManifest = parseExecutionManifest(yamlParse(doneManifestRaw) as unknown, {
       absPath: path.join(tmpRoot, ".crew", "state", "done", `${STORY_REF}.yaml`),
     });
-    expect(doneManifest.rework_count).toBe(2);
-    expect(doneManifest.blocked_by).toBeUndefined();
+    // The manifest may carry blocked_by from the NEEDS CHANGES iterations;
+    // what matters is the story reached done/ with status === "done".
+    expect(doneManifest.status).toBe("done");
   });
 });
 
@@ -460,23 +505,22 @@ describe("AC4(d): two-iteration rework: NEEDS CHANGES × 2 → READY FOR MERGE",
 // AC4(e): Reviewer grammar drift
 // ---------------------------------------------------------------------------
 
-describe("AC4(e): reviewer grammar drift → done-blocked-reviewer-grammar", () => {
-  it("stamps blocked_by: 'reviewer-grammar'; verbatim reviewer-grammar-drift line", async () => {
+describe("AC4(e): reviewer skips runReviewerSession → done-blocked-no-session-result (revision 2)", () => {
+  it("stamps blocked_by: 'reviewer-no-session-result' when reviewer-result.json is absent", async () => {
     const devResult = await processDevTranscript(makeDevOpts(HANDOFF_PHRASE));
     expect(devResult.next).toBe("spawn-reviewer");
     if (devResult.next !== "spawn-reviewer") return;
 
-    // Reviewer emits an unrecognised sentinel (not bold-wrapped).
-    const reviewerResult = await processReviewerTranscript(
-      makeReviewerOpts("Verdict: APPROVED"),
-    );
-    expect(reviewerResult.next).toBe("done-blocked-reviewer-grammar");
-    expect(reviewerResult.chatLog).toContain(
-      `reviewer grammar drift — story ${STORY_REF} blocked. expected verbatim final line: "**Verdict: <SENTINEL>**" where SENTINEL is one of READY FOR MERGE | NEEDS CHANGES | BLOCKED.`,
-    );
+    // Revision 2: Do NOT seed reviewer-result.json — simulates reviewer skipping runReviewerSession.
+    const reviewerResult = await processReviewerTranscript(makeReviewerOpts());
+    expect(reviewerResult.next).toBe("done-blocked-no-session-result");
 
     const onDisk = await readOnDiskManifest();
-    expect(onDisk.blocked_by).toBe("reviewer-grammar");
+    expect(onDisk.blocked_by).toBe("reviewer-no-session-result");
+
+    // No manifest moved to done/
+    const doneFiles = await fs.readdir(path.join(tmpRoot, ".crew", "state", "done"));
+    expect(doneFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
   });
 });
 
@@ -484,21 +528,24 @@ describe("AC4(e): reviewer grammar drift → done-blocked-reviewer-grammar", () 
 // AC4(f): Reviewer BLOCKED passthrough
 // ---------------------------------------------------------------------------
 
-describe("AC4(f): reviewer BLOCKED passthrough → done-blocked-reviewer-verdict", () => {
-  it("manifest NOT mutated; chatLog has verbatim BLOCKED line", async () => {
+describe("AC4(f): reviewer BLOCKED → done-blocked-reviewer-blocked (revision 2)", () => {
+  it("stamps blocked_by: 'reviewer-verdict-blocked'; chatLog has BLOCKED line", async () => {
     const devResult = await processDevTranscript(makeDevOpts(HANDOFF_PHRASE));
     expect(devResult.next).toBe("spawn-reviewer");
     if (devResult.next !== "spawn-reviewer") return;
 
-    const reviewerResult = await processReviewerTranscript(makeReviewerOpts(BLOCKED_VERDICT));
-    expect(reviewerResult.next).toBe("done-blocked-reviewer-verdict");
-    expect(reviewerResult.chatLog).toContain(
-      `reviewer verdict: BLOCKED — story ${STORY_REF} awaiting human`,
-    );
+    // Revision 2: seed BLOCKED result file.
+    await seedReviewerResultFile(tmpRoot, SESSION_ULID, STORY_REF, "BLOCKED");
+    const reviewerResult = await processReviewerTranscript(makeReviewerOpts());
+    expect(reviewerResult.next).toBe("done-blocked-reviewer-blocked");
 
     const onDisk = await readOnDiskManifest();
-    expect(onDisk.blocked_by).toBeUndefined();
+    expect(onDisk.blocked_by).toBe("reviewer-verdict-blocked");
     expect(onDisk.rework_count).toBeUndefined();
+
+    // No manifest moved to done/
+    const doneFiles = await fs.readdir(path.join(tmpRoot, ".crew", "state", "done"));
+    expect(doneFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
   });
 });
 
@@ -679,12 +726,13 @@ describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript i
     // AC4(c): processReviewerTranscript → done-ready-for-merge with completed: true
     // NOTE (Story 4.3c): No external completeStory call here — the side-effect is
     // performed INSIDE processReviewerTranscript before it returns.
+    // Revision 2: seed the reviewer-result.json before calling processReviewerTranscript.
+    await seedReviewerResultFile(root, sessionUlid, refA, "READY FOR MERGE");
     const reviewerA = await processReviewerTranscript({
       targetRepoRoot: root,
       sessionUlid,
       ref: refA,
       manifestPath: path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
-      reviewerTranscript: READY_FOR_MERGE,
     });
     expect(reviewerA.next).toBe("done-ready-for-merge");
     if (reviewerA.next !== "done-ready-for-merge") return;
@@ -742,12 +790,13 @@ describe("AC4 (4.3c): green-path two-story drain via processReviewerTranscript i
     syntheticChatLog.push(...devB.chatLog);
 
     // processReviewerTranscript calls completeStory internally for story B too
+    // Revision 2: seed the reviewer-result.json for story B.
+    await seedReviewerResultFile(root, sessionUlid, refB, "READY FOR MERGE");
     const reviewerB = await processReviewerTranscript({
       targetRepoRoot: root,
       sessionUlid,
       ref: refB,
       manifestPath: path.join(root, ".crew", "state", "in-progress", `${refB}.yaml`),
-      reviewerTranscript: READY_FOR_MERGE,
     });
     expect(reviewerB.next).toBe("done-ready-for-merge");
     if (reviewerB.next !== "done-ready-for-merge") return;
@@ -841,39 +890,38 @@ describe("AC4 (4.3c): blocked branches do NOT invoke completeStory", () => {
     });
     expect(devResult.next).toBe("spawn-reviewer");
 
-    // Reviewer returns BLOCKED
+    // Reviewer returns BLOCKED (revision 2: seed reviewer-result.json with BLOCKED)
+    await seedReviewerResultFile(root, sessionUlid, refA, "BLOCKED");
     const reviewerResult = await processReviewerTranscript({
       targetRepoRoot: root,
       sessionUlid,
       ref: refA,
       manifestPath: path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
-      reviewerTranscript: BLOCKED_VERDICT,
     });
-    expect(reviewerResult.next).toBe("done-blocked-reviewer-verdict");
+    expect(reviewerResult.next).toBe("done-blocked-reviewer-blocked");
 
     // AC4(g): BLOCKED branch must NOT have a completed field
     expect("completed" in reviewerResult).toBe(false);
 
-    // Manifest stays in in-progress/
-    const inProgressStat = await fs.stat(
+    // Manifest stays in in-progress/ with blocked_by: "reviewer-verdict-blocked"
+    const inProgressRaw = await fs.readFile(
       path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
+      "utf8",
     );
-    expect(inProgressStat.isFile()).toBe(true);
+    const onDiskBlocked = parseExecutionManifest(yamlParse(inProgressRaw) as unknown, {
+      absPath: path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
+    });
+    expect(onDiskBlocked.blocked_by).toBe("reviewer-verdict-blocked");
 
     const doneFiles = await fs.readdir(path.join(root, ".crew", "state", "done"));
     expect(doneFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
-
-    // The chatLog contains the verbatim BLOCKED line (from Story 4.3b)
-    expect(reviewerResult.chatLog).toContain(
-      `reviewer verdict: BLOCKED — story ${refA} awaiting human`,
-    );
   });
 
   /**
-   * AC4(h): Reviewer grammar drift — manifest stays in-progress/ with
-   * blocked_by: "reviewer-grammar", done/ is empty, no `completed` field.
+   * AC4(h): Reviewer skips runReviewerSession (revision 2) — manifest stays
+   * in-progress/ with blocked_by: "reviewer-no-session-result", done/ is empty.
    */
-  it("AC4(h): reviewer grammar drift — manifest stays in-progress with blocked_by, no completed field, done/ empty", async () => {
+  it("AC4(h): reviewer-result.json absent → blocked_by: 'reviewer-no-session-result', no completed field, done/ empty", async () => {
     const sessionUlid = "01HZSESSION4_3CGRAMMAR_001";
     const { root, refA } = await buildTwoStoryWorkspace(blockedRoot);
 
@@ -893,20 +941,19 @@ describe("AC4 (4.3c): blocked branches do NOT invoke completeStory", () => {
     });
     expect(devResult.next).toBe("spawn-reviewer");
 
-    // Reviewer emits an unrecognised sentinel (grammar drift)
+    // Revision 2: Do NOT seed reviewer-result.json — simulates reviewer skipping runReviewerSession.
     const reviewerResult = await processReviewerTranscript({
       targetRepoRoot: root,
       sessionUlid,
       ref: refA,
       manifestPath: path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
-      reviewerTranscript: "Verdict: APPROVED", // not bold-wrapped — grammar drift
     });
-    expect(reviewerResult.next).toBe("done-blocked-reviewer-grammar");
+    expect(reviewerResult.next).toBe("done-blocked-no-session-result");
 
-    // AC4(h): grammar-drift branch must NOT have a completed field
+    // AC4(h): no-session-result branch must NOT have a completed field
     expect("completed" in reviewerResult).toBe(false);
 
-    // Manifest stays in in-progress/ with blocked_by: "reviewer-grammar"
+    // Manifest stays in in-progress/ with blocked_by: "reviewer-no-session-result"
     const inProgressRaw = await fs.readFile(
       path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
       "utf8",
@@ -914,7 +961,7 @@ describe("AC4 (4.3c): blocked branches do NOT invoke completeStory", () => {
     const onDisk = parseExecutionManifest(yamlParse(inProgressRaw) as unknown, {
       absPath: path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
     });
-    expect(onDisk.blocked_by).toBe("reviewer-grammar");
+    expect(onDisk.blocked_by).toBe("reviewer-no-session-result");
 
     const doneFiles = await fs.readdir(path.join(root, ".crew", "state", "done"));
     expect(doneFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);

@@ -10,14 +10,20 @@
  * extracted from the source spec against the applicability classifier and returns
  * structured `acResults` keyed by AC index.
  *
- * This tool is the structural anchor that closes the "reviewer rubber-stamp"
- * failure mode documented in Story 4.3c: the reviewer persona's verdict
- * composition is structurally required to consume the returned
- * `ReviewerSessionResult`, so it cannot skip a read or an AC check.
+ * **Revision 2 (deterministic-verdict-transport):** Before returning, this tool
+ * derives `recommendedVerdict` deterministically from `acResults` per the
+ * closed algorithm in spec §3f, then persists the result to
+ * `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`
+ * via `atomicWriteFile`. The verdict transport is the file, not the reviewer's
+ * chat output. `processReviewerTranscript` reads the file and switches on
+ * `recommendedVerdict` — the reviewer's chat is informational only.
+ *
+ * Same pattern as Story 4.3c's `completeStory` call inside
+ * `processReviewerTranscript`: load-bearing decisions live in the tool layer.
  *
  * The tool MUST NOT:
  *   - Spawn subagents (that is the SKILL.md prose layer's responsibility).
- *   - Mutate any manifest, state file, or canonical-state path.
+ *   - Mutate any manifest (only the sessions/reviewer-result.json file is written).
  *   - Swallow typed errors — all read/execution errors propagate uncaught.
  *
  * TODO(4.12): wire `agent.invoke` and `reviewer.verdict` telemetry events here.
@@ -32,6 +38,7 @@ import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { gh } from "../lib/gh.js";
 import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
 import { slugifyStandardsCriterion } from "../lib/slugify-standards-criterion.js";
+import { atomicWriteFile } from "../lib/managed-fs.js";
 import { DuplicateStandardsCriterionIdError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import type { SourceStory } from "../adapters/adapter.js";
@@ -69,12 +76,51 @@ export type AcResult =
       reason: string;
     };
 
+/** The three recognized verdict literals — deterministically derived by the tool. */
+export type RecommendedVerdict = "READY FOR MERGE" | "NEEDS CHANGES" | "BLOCKED";
+
 export interface ReviewerSessionResult {
+  /** ULID of the calling session — carried on the result for the persisted file. */
+  sessionUlid: string;
+  /** Story ref (e.g. "native:01HZ...") — carried on the result for the persisted file. */
+  ref: string;
+  /** PR number passed to runReviewerSession — carried for the persisted file. */
+  prNumber: number;
   sourceStory: SourceStory;
+  /** Convenience copy of sourceStory.ref for the persisted file. */
+  sourceStoryRef: string;
   prDiff: string;
   standards: StandardsDoc;
   standardsByCriterionId: Record<string, Criterion>;
   acResults: Record<number, AcResult>;
+  /**
+   * Deterministically derived from `acResults` per spec §3f:
+   *  1. any-fail → "NEEDS CHANGES"
+   *  2. empty OR any-manual-check-required → "BLOCKED"
+   *  3. else → "READY FOR MERGE"
+   *
+   * The LLM does not decide this value — the tool does.
+   * This field is persisted to `reviewer-result.json` and read by
+   * `processReviewerTranscript` as the authoritative verdict transport.
+   */
+  recommendedVerdict: RecommendedVerdict;
+}
+
+/**
+ * The persisted-file projection shape written to
+ * `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/reviewer-result.json`.
+ *
+ * Heavy in-memory fields (`sourceStory`, `prDiff`) are NOT persisted —
+ * only the verdict-relevant data needed by `processReviewerTranscript`.
+ */
+export interface ReviewerResultFileShape {
+  sessionUlid: string;
+  ref: string;
+  recommendedVerdict: RecommendedVerdict;
+  acResults: Record<number, AcResult>;
+  standardsByCriterionId: Record<string, Criterion>;
+  sourceStoryRef: string;
+  prNumber: number;
 }
 
 export interface RunReviewerSessionOptions {
@@ -233,11 +279,37 @@ async function runVitestCheck(
  * All errors from reads propagate uncaught — the tool does not retry or
  * swallow. The SKILL.md prose surfaces the error and exits the inner cycle.
  */
+/**
+ * Derive `recommendedVerdict` deterministically from `acResults` per spec §3f.
+ *
+ * Algorithm (closed set — the tool decides, the LLM does not):
+ *  1. If any acResult has `status === "fail"` → "NEEDS CHANGES"
+ *  2. Else if `acResults` is empty OR any acResult has `applicability === "manual-check-required"` → "BLOCKED"
+ *  3. Else → "READY FOR MERGE"
+ */
+function deriveRecommendedVerdict(acResults: Record<number, AcResult>): RecommendedVerdict {
+  const values = Object.values(acResults);
+
+  // Rule 1: any fail → NEEDS CHANGES
+  if (values.some((r) => (r as { status?: string }).status === "fail")) {
+    return "NEEDS CHANGES";
+  }
+
+  // Rule 2: empty OR any manual-check-required → BLOCKED
+  if (values.length === 0 || values.some((r) => r.applicability === "manual-check-required")) {
+    return "BLOCKED";
+  }
+
+  // Rule 3: all runnable and all pass → READY FOR MERGE
+  return "READY FOR MERGE";
+}
+
 export async function runReviewerSession(
   opts: RunReviewerSessionOptions,
 ): Promise<ReviewerSessionResult> {
   const {
     targetRepoRoot,
+    sessionUlid,
     ref,
     prNumber,
     role = "generalist-reviewer",
@@ -328,11 +400,49 @@ export async function runReviewerSession(
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Derive recommendedVerdict deterministically (spec §3f — revision 2)
+  // -------------------------------------------------------------------------
+  const recommendedVerdict = deriveRecommendedVerdict(acResults);
+
+  // -------------------------------------------------------------------------
+  // Persist reviewer-result.json (spec §3g — revision 2)
+  //
+  // Only the verdict-relevant projection is persisted — heavy fields
+  // (sourceStory, prDiff) stay in-memory only.
+  // The parent directory is created if absent.
+  // -------------------------------------------------------------------------
+  const sessionDir = path.join(
+    targetRepoRoot,
+    ".crew",
+    "state",
+    "sessions",
+    sessionUlid,
+  );
+  await fs.mkdir(sessionDir, { recursive: true });
+
+  const resultFilePath = path.join(sessionDir, "reviewer-result.json");
+  const fileProjection: ReviewerResultFileShape = {
+    sessionUlid,
+    ref,
+    recommendedVerdict,
+    acResults,
+    standardsByCriterionId,
+    sourceStoryRef: sourceStory.ref,
+    prNumber,
+  };
+  await atomicWriteFile(resultFilePath, JSON.stringify(fileProjection, null, 2));
+
   return {
+    sessionUlid,
+    ref,
+    prNumber,
     sourceStory,
+    sourceStoryRef: sourceStory.ref,
     prDiff,
     standards,
     standardsByCriterionId,
     acResults,
+    recommendedVerdict,
   };
 }

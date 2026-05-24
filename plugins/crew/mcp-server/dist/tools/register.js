@@ -734,16 +734,18 @@ export function registerAllTools(server) {
             }
         },
     });
-    // Story 4.3b — processReviewerTranscript: parse the reviewer subagent's final transcript.
-    // The SKILL.md prose calls this after capturing the reviewer Task tool's return value.
+    // Story 4.3b / Story 4.6 revision 2 — processReviewerTranscript:
+    // Reads `reviewer-result.json` written by `runReviewerSession` and routes
+    // on its `recommendedVerdict` field. The `reviewerTranscript` parameter has
+    // been DROPPED — the reviewer's chat is no longer the verdict transport.
     server.registerTool({
         name: "processReviewerTranscript",
-        description: "Parse the reviewer subagent's final transcript for the verdict sentinel. " +
-            "Returns { next: 'rework-dev', devPrompt, reworkIteration, chatLog } on NEEDS CHANGES (increments rework_count), " +
-            "{ next: 'done-ready-for-merge', chatLog } on READY FOR MERGE, " +
-            "{ next: 'done-blocked-reviewer-verdict', chatLog } on BLOCKED, or " +
-            "{ next: 'done-blocked-reviewer-grammar', chatLog } on grammar drift (stamps blocked_by). " +
-            "MUST be called with the verbatim full transcript — no summarisation. Story 4.3b.",
+        description: "Read the persisted reviewer-result.json (written by runReviewerSession) and route on its recommendedVerdict. " +
+            "Returns { next: 'done-ready-for-merge', completed: true, chatLog } on READY FOR MERGE (calls completeStory internally), " +
+            "{ next: 'done-blocked-reviewer-needs-changes', chatLog } on NEEDS CHANGES (stamps blocked_by), " +
+            "{ next: 'done-blocked-reviewer-blocked', chatLog } on BLOCKED (stamps blocked_by), " +
+            "{ next: 'done-blocked-no-session-result', chatLog } when reviewer-result.json is absent. " +
+            "Story 4.3b / Story 4.6 revision 2.",
         inputSchema: {
             type: "object",
             properties: {
@@ -751,9 +753,8 @@ export function registerAllTools(server) {
                 sessionUlid: { type: "string" },
                 ref: { type: "string" },
                 manifestPath: { type: "string" },
-                reviewerTranscript: { type: "string" },
             },
-            required: ["targetRepoRoot", "sessionUlid", "ref", "manifestPath", "reviewerTranscript"],
+            required: ["targetRepoRoot", "sessionUlid", "ref", "manifestPath"],
         },
         handler: async (args) => {
             const parsed = z
@@ -762,7 +763,6 @@ export function registerAllTools(server) {
                 sessionUlid: z.string().min(1),
                 ref: z.string().min(1),
                 manifestPath: z.string().min(1),
-                reviewerTranscript: z.string(),
             })
                 .parse(args);
             try {
