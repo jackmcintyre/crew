@@ -17,6 +17,9 @@
  *   is the legacy seam, `blockedRefs` is the new operator-facing surface. On
  *   the second scan after a story is blocked, it appears in skippedRefs with
  *   `reason: "not-in-to-do"` (blocked manifests are owned state, not touched).
+ * - `warnings`: structured per-file warnings emitted during this scan (Story 3.8
+ *   AC3). Each entry names the path and the issue. The scan CONTINUES after
+ *   emitting a warning — warnings do NOT halt the run.
  */
 export interface ScanResult {
     targetRepoRoot: string;
@@ -31,6 +34,14 @@ export interface ScanResult {
     }>;
     /** Story 3.5: refs that failed planning-discipline and were written to blocked/. */
     blockedRefs: string[];
+    /**
+     * Story 3.8 AC3: per-file warnings emitted during the scan (e.g. unknown
+     * Status values). The scan continues after a warning — it does NOT halt.
+     */
+    warnings: Array<{
+        path: string;
+        message: string;
+    }>;
 }
 /**
  * Render a `ScanResult` as a human-readable text summary.

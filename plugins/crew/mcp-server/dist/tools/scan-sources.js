@@ -45,6 +45,14 @@ export function renderScanResult(result) {
     else {
         lines.push(`blocked:   0 ref(s)`);
     }
+    // Story 3.8 AC3: structured warnings (e.g. unknown Status values).
+    if ((result.warnings ?? []).length > 0) {
+        lines.push(``);
+        lines.push(`warnings (${result.warnings.length}):`);
+        for (const w of result.warnings) {
+            lines.push(`  [warn] ${w.message}`);
+        }
+    }
     return lines.join("\n");
 }
 /**
@@ -145,6 +153,7 @@ export async function scanSources(opts) {
         unchangedRefs: [],
         skippedRefs: [],
         blockedRefs: [],
+        warnings: [],
     };
     const stateRoot = path.join(targetRepoRoot, ".crew", "state");
     // Startup guard: resolve any refs that appear in both to-do/ and blocked/
@@ -286,6 +295,48 @@ export async function scanSources(opts) {
                 });
                 result.blockedRefs.push(story.ref);
             }
+            continue;
+        }
+        // Step 4b: Story 3.8 AC3 — status-vocabulary-unknown gate.
+        // If the parser flagged an unknown Status value, route the story to blocked/
+        // immediately (before discipline). The scan continues — no throw.
+        const statusUnknown = story.raw_frontmatter["status_unknown"];
+        if (statusUnknown !== undefined && currentState === null) {
+            const absBlockedPath = path.join(stateRoot, "blocked", `${story.ref}.yaml`);
+            const blockedManifestRaw = stripUndefined({
+                ref: story.ref,
+                status: "blocked",
+                adapter: activeAdapterName,
+                source_path: repoRelativePath(story.raw_path, targetRepoRoot),
+                source_hash: story.source_hash,
+                depends_on: story.depends_on,
+                acceptance_criteria: story.acceptance_criteria,
+                title: story.title,
+                narrative: story.narrative,
+                implementation_notes: story.implementation_notes,
+                withdrawn: false,
+                blocked_by: "status-vocabulary-unknown",
+            });
+            const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
+            const yamlText = yamlStringify(blockedManifest, { lineWidth: 0 });
+            await writeManagedFile({
+                absPath: absBlockedPath,
+                contents: yamlText,
+                targetRepoRoot,
+                mcpToolContext: { toolName: "scanSources", role: "operator" },
+            });
+            result.blockedRefs.push(story.ref);
+            result.skippedRefs.push({
+                ref: story.ref,
+                reason: "discipline-violation",
+                detail: `status-vocabulary-unknown: "${statusUnknown.raw}"`,
+            });
+            const warnMessage = `Story \`${story.ref}\` at \`${story.raw_path}\` has a Status value (\`${statusUnknown.raw}\`) ` +
+                `that is not one of the known BMad statuses (backlog, ready-for-dev, in-progress, done, optional, contexted). ` +
+                `The story has been blocked with reason \`status-vocabulary-unknown\` so the scan can continue. ` +
+                `Edit the spec's Status line or remove it (Status defaults to \`backlog\`) and re-run /crew:scan.`;
+            result.warnings.push({ path: story.raw_path, message: warnMessage });
+            console.warn(`[scanSources] ${warnMessage}`);
             continue;
         }
         // Step 5: validateAgainstDiscipline (Story 3.5 — real enforcement).

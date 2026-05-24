@@ -1,0 +1,5 @@
+sprint: 3
+started: 2026-05-01
+stories:
+  3-1-planningadapter-interface-and-adapter-registry: done
+  3-8-bmad-adapter-real-world-leniency: ready-for-dev

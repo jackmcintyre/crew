@@ -84,7 +84,10 @@ function absStoriesRoot(ctx: BmadContext): string {
     : path.join(ctx.targetRepo, ctx.storiesRoot);
 }
 
-const BMAD_FILENAME_RE = /^\d+-\d+-[a-z0-9-]+\.md$/;
+// Story 3.8: widened to accept letter-suffixed story IDs (e.g. 4-8b-...).
+// The optional [a-z] captures the single-letter suffix shape observed in this
+// repo (4-8b, 5-4b). Wider patterns risk colliding with the slug class.
+const BMAD_FILENAME_RE = /^\d+-\d+[a-z]?-[a-z0-9-]+\.md$/;
 
 async function readStoriesDir(absRoot: string): Promise<string[]> {
   // Returns absolute paths of BMad-shaped story files. Walks one level
@@ -150,16 +153,18 @@ function readStoriesDirSync(absRoot: string): string[] {
   return out;
 }
 
-function parseRef(ref: string): { epic: number; story: number } | null {
-  const m = /^bmad:(\d+)\.(\d+)$/.exec(ref);
+// Story 3.8: story field is now a string (e.g. "8b") to preserve letter suffixes.
+function parseRef(ref: string): { epic: number; story: string } | null {
+  const m = /^bmad:(\d+)\.(\d+[a-z]?)$/.exec(ref);
   if (!m) return null;
-  return { epic: parseInt(m[1]!, 10), story: parseInt(m[2]!, 10) };
+  return { epic: parseInt(m[1]!, 10), story: m[2]! };
 }
 
-function epicStoryFromFilename(file: string): { epic: number; story: number } | null {
-  const m = /^(\d+)-(\d+)-/.exec(path.basename(file));
+// Story 3.8: story field is now a string to preserve letter suffixes.
+function epicStoryFromFilename(file: string): { epic: number; story: string } | null {
+  const m = /^(\d+)-(\d+)([a-z]?)-/.exec(path.basename(file));
   if (!m) return null;
-  return { epic: parseInt(m[1]!, 10), story: parseInt(m[2]!, 10) };
+  return { epic: parseInt(m[1]!, 10), story: m[2]! + m[3]! };
 }
 
 function buildRefIndex(files: readonly string[], storiesRootAbs: string): Map<string, string> {
@@ -196,14 +201,27 @@ export const BmadAdapter: PlanningAdapter = {
   name: "bmad",
 
   async detect(targetRepo: string): Promise<boolean> {
-    const absRoot = path.join(targetRepo, DEFAULT_STORIES_ROOT);
-    let entries;
+    // Story 3.8 AC5: two-step contract.
+    //   1. If currentContext is bound to this targetRepo, use the configured
+    //      storiesRoot. This lets validateActiveAdapter (called after
+    //      configureBmadAdapter runs inside resolveWorkspace) see the
+    //      operator-configured root, suppressing the misleading (mismatched)
+    //      label.
+    //   2. Otherwise fall back to DEFAULT_STORIES_ROOT for first-run auto-detect.
+    const resolvedTarget = path.resolve(targetRepo);
+    let absRoot: string;
+    if (currentContext && path.resolve(currentContext.targetRepo) === resolvedTarget) {
+      absRoot = absStoriesRoot(currentContext);
+    } else {
+      absRoot = path.join(targetRepo, DEFAULT_STORIES_ROOT);
+    }
     try {
       const s = statSync(absRoot);
       if (!s.isDirectory()) return false;
     } catch {
       return false;
     }
+    let entries: string[];
     try {
       entries = await fs.readdir(absRoot);
     } catch {
@@ -235,13 +253,24 @@ export const BmadAdapter: PlanningAdapter = {
       if (status === "optional") continue;
       parsed.push(story);
     }
+    // Story 3.8: sort by (epic, storyNumericPart, storySuffix) so that e.g.
+    // "4.8" sorts before "4.8b" (numeric part equal, no-suffix < suffix).
     parsed.sort((a, b) => {
       const ea = a.raw_frontmatter["id"] as string;
       const eb = b.raw_frontmatter["id"] as string;
-      const [ae, as] = ea.split(".").map((n) => parseInt(n, 10)) as [number, number];
-      const [be, bs] = eb.split(".").map((n) => parseInt(n, 10)) as [number, number];
+      // id shape: "<epic>.<story>" where story may be "8" or "8b".
+      const [aeStr, asStr] = ea.split(".") as [string, string];
+      const [beStr, bsStr] = eb.split(".") as [string, string];
+      const ae = parseInt(aeStr, 10);
+      const be = parseInt(beStr, 10);
       if (ae !== be) return ae - be;
-      return as - bs;
+      // Extract numeric prefix and letter suffix from story part.
+      const [, asNum, asSuf] = /^(\d+)([a-z]?)$/.exec(asStr) ?? ["", "0", ""];
+      const [, bsNum, bsSuf] = /^(\d+)([a-z]?)$/.exec(bsStr) ?? ["", "0", ""];
+      const numDiff = parseInt(asNum!, 10) - parseInt(bsNum!, 10);
+      if (numDiff !== 0) return numDiff;
+      // Same numeric part — no suffix comes before letter suffix.
+      return (asSuf ?? "").localeCompare(bsSuf ?? "");
     });
     return parsed;
   },
@@ -253,6 +282,7 @@ export const BmadAdapter: PlanningAdapter = {
       throw new UnknownBmadRefError({ ref, storiesRoot: absStoriesRoot(ctx) });
     }
     const index = ensureRefIndex(ctx);
+    // parsedRef.story is already a string (e.g. "8b") — Story 3.8.
     const file = index.get(`bmad:${parsedRef.epic}.${parsedRef.story}`);
     if (!file) {
       throw new UnknownBmadRefError({ ref, storiesRoot: absStoriesRoot(ctx) });
@@ -268,6 +298,7 @@ export const BmadAdapter: PlanningAdapter = {
       throw new UnknownBmadRefError({ ref, storiesRoot: absStoriesRoot(ctx) });
     }
     const index = ensureRefIndex(ctx);
+    // parsedRef.story is already a string (e.g. "8b") — Story 3.8.
     const file = index.get(`bmad:${parsedRef.epic}.${parsedRef.story}`);
     if (!file) {
       throw new UnknownBmadRefError({ ref, storiesRoot: absStoriesRoot(ctx) });
