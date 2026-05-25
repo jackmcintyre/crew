@@ -74,12 +74,16 @@ Three reasons this is its own story rather than folded into Story 4.6, 4.8b, or 
 **When** it emits the locked yield phrase `This sits in <role>'s domain — handing off.`,
 **Then** the runtime looks up the role by exact-match domain, spawns the specialist reviewer subagent with a clean context, and routes the review. _(FR99, FR100, FR102)_
 
+vitest: yield parser routes to specialist
+
 <!-- User-surface: the spawn produces the verbatim chat line `yield routed: generalist-reviewer → <role> for domain "<domain>" — spawning specialist (clean context)` on the operator's `/crew:start` chat. -->
 
 **AC2:**
 **Given** a specialist asked to defer inside its own domain,
 **When** the specialist runs,
 **Then** it refuses to defer even when another agent has produced a contrary verdict (in-domain insistence). _(FR101)_
+
+vitest: specialist refuses to defer inside own domain
 
 <!-- Not user-surface: refusal is enforced at the routing layer; the specialist's verdict (which DOES surface via existing reviewer chat lines) is unchanged. No new chat line is emitted for the self-yield rejection. -->
 
@@ -88,12 +92,16 @@ Three reasons this is its own story rather than folded into Story 4.6, 4.8b, or 
 **When** the runtime looks up the domain,
 **Then** the yield surfaces as `[routing-failure] no hired role matches domain "<x>"` on the orchestration surface; the story is blocked with `blocked_by: routing-failure`. _(FR100)_
 
+vitest: yield surfaces routing-failure when no specialist matches
+
 <!-- User-surface: the verbatim `[routing-failure] no hired role matches domain "<x>"` line is operator-facing. -->
 
 **AC4:**
 **Given** any yield,
 **When** routing succeeds,
 **Then** a `yield.handoff` telemetry event records both roles and the triggering domain. _(FR103, NFR29)_
+
+vitest: yield.handoff telemetry event recorded
 
 <!-- Not user-surface: telemetry JSONL is operator-readable only via the planned `/crew:status` and retro tooling; this story does not surface telemetry to chat. -->
 
@@ -102,20 +110,28 @@ Three reasons this is its own story rather than folded into Story 4.6, 4.8b, or 
 **When** the generalist runs,
 **Then** the generalist handles the work without yield. _(FR104)_
 
+vitest: generalist handles no-yield happy path
+
 <!-- Not user-surface: this is the "happy path no-yield" case. No new chat line; the generalist's existing verdict line surfaces. -->
 
 **AC6 (integration):**
 vitest covers the five yield branches against a fixture with a hired security specialist.
+
+vitest: yield-protocol
 
 **AC7 (substrate):**
 **Given** `runDevTerminalAction` is invoked for an in-progress story,
 **When** the dev subagent attempts any tool write that touches the working tree,
 **Then** the tool first calls `assertOnWorktreeBranch({ targetRepoRoot, expectedStoryUlid })` which reads `git rev-parse --abbrev-ref HEAD` and `git worktree list --porcelain`, refuses with typed `WorktreeContractViolationError` if the current branch is `main` / `master` / the default branch OR if `cwd` is not a worktree path containing the expected story ULID in its basename, and otherwise returns `{ ok: true, worktreePath, branch }`. _(retro carry-forward #3 — see Retro Amendments below)_
 
+vitest: assertOnWorktreeBranch refuses main
+
 **AC8 (substrate):**
 **Given** `postReviewerComments` is called with a `prNumber` derived from `reviewer-result.json`,
 **When** the tool would invoke any `gh pr comment` / `gh pr review` / `gh pr edit` shell call,
 **Then** the tool first asserts the target `prNumber` matches `claim-manifest.prNumber` read from the story's in-progress manifest and refuses with typed `ReviewerPrScopeError` if they disagree. _(retro carry-forward #4 — see Retro Amendments below)_
+
+vitest: postReviewerComments asserts prNumber matches claim manifest
 
 ### Expanded acceptance specifics (folded into AC1–AC6 above; each clause maps to an AC for the AC-table gate)
 

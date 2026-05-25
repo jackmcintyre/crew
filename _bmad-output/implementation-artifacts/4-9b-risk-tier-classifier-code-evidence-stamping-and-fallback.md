@@ -71,12 +71,16 @@ This story explicitly DOES change the manifest schema (adds an optional `risk_ti
 **When** `classify-risk-tier` runs,
 **Then** it returns `{ tier: "low" | "medium" | "high", matched_rule: <rule-id>, evidence: { paths, change_types, diff_size } }`. _(FR40a)_
 
+vitest: classifyRiskTier returns tier and evidence
+
 <!-- Not user-surface: AC1 describes the return shape of an internal MCP tool / pure function. The operator does not invoke it directly. -->
 
 **AC2:**
 **Given** a diff matching no declared rule,
 **When** the classifier runs,
 **Then** it returns `tier: "medium"` with `matched_rule: "fallback"`. _(FR40a fallback)_
+
+vitest: classifyRiskTier falls back to medium
 
 <!-- Not user-surface: AC2 describes the fallback branch of the classifier; same internal surface as AC1. -->
 
@@ -85,10 +89,14 @@ This story explicitly DOES change the manifest schema (adds an optional `risk_ti
 **When** the result lands,
 **Then** `risk_tier` is stamped in the manifest and the evidence block is recorded in the verdict comment body. _(Pattern §11)_
 
+vitest: classifyRiskTier stamps manifest and verdict comment
+
 <!-- Not user-surface: AC3 describes two internal write surfaces — the YAML manifest file and the PR verdict comment composed by composeSummaryBody. The PR comment is operator-readable but is not a slash command, a verbatim-typed CLI command, an install-doc-cited path, or a Claude Code UI element per the user-surface-acs.md rubric. -->
 
 **AC4 (integration):**
 vitest covers four classification branches (path match, change-type match, size match, fallback) and asserts evidence is stamped both places.
+
+vitest: classify-risk-tier
 
 <!-- Not user-surface: vitest integration suite — internal harness only. -->
 

@@ -19,20 +19,28 @@ Context: surfaced as an Info-tier reviewer note on PR #122 (Story 4.8b's retro).
 **When** the test runs,
 **Then** the assertion uses `.rejects.toBeInstanceOf(DevOutcomeFileMalformedError)` instead of `.rejects.toThrow("dev-outcome.json")`, and `DevOutcomeFileMalformedError` is imported from `../../errors.js` at the top of the test file.
 
+vitest: processDevTranscript with dev-outcome.json containing malformed JSON throws DevOutcomeFileMalformedError
+
 **AC2:**
 **Given** the AC5e test case in the same file (`processDevTranscript with dev-outcome.json missing prNumber field throws DevOutcomeFileMalformedError`),
 **When** the test runs,
 **Then** the assertion uses `.rejects.toBeInstanceOf(DevOutcomeFileMalformedError)` instead of substring matching.
+
+vitest: processDevTranscript with dev-outcome.json missing prNumber field throws DevOutcomeFileMalformedError
 
 **AC3 (integration):**
 **Given** AC1 and AC2 are implemented,
 **When** `pnpm test` runs from `plugins/crew/mcp-server`,
 **Then** the full vitest suite passes and no production code is modified.
 
+vitest: process-dev-transcript
+
 **AC4 (substrate):**
 **Given** Epic 4 stories 4-10b, 4-11, and 4-12 add prose steps to one or more SKILL.md files,
 **When** this cleanup story runs,
 **Then** `plugins/crew/mcp-server/src/__tests__/start-skill-content.test.ts` (and the equivalent test for any other SKILL.md that grew new prose this epic) is extended with one structural-anchor assertion per new step — matching the existing anchor-test pattern. _(retro carry-forward #7 — see Retro Amendments below)_
+
+vitest: start-skill-content covers Epic 4 new prose anchors
 
 ## Tasks / Subtasks
 

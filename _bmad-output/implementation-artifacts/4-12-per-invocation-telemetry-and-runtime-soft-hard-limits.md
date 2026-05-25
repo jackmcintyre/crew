@@ -71,6 +71,8 @@ Three reasons this is one story rather than four:
 **When** the subagent runs,
 **Then** the dev session writes an `agent.invoke` event (agent type, story id, wall-clock runtime, timestamp). _(FR65)_
 
+vitest: agent.invoke event written on dev spawn
+
 <!-- vitest: agent.invoke is written on every spawn -->
 
 <!-- Not user-surface: AC1 describes a telemetry-file write; no chat-surface line is emitted. -->
@@ -79,6 +81,8 @@ Three reasons this is one story rather than four:
 **Given** any reviewer summary comment,
 **When** posted,
 **Then** a `reviewer.verdict` event is written carrying PR number, verdict sentinel, standards version, plugin version, and the eventual merge action (filled in retrospectively when the PR closes). _(FR66)_
+
+vitest: reviewer.verdict event written on post
 
 <!-- vitest: reviewer.verdict is written on every verdict comment -->
 
@@ -89,6 +93,8 @@ Three reasons this is one story rather than four:
 **When** the dev session inspects,
 **Then** it substitutes the verdict comment with a failure comment, applies `needs-human`, and does not mark the story failed. _(NFR2)_
 
+vitest: reviewer 8-min hard limit substitutes verdict
+
 <!-- vitest: hard-8-min substitution applies needs-human and does not mark the story failed -->
 
 <!-- Not user-surface: AC3's user-visible effect is the `needs-human` label (which Story 4.8 already governs as a label-only surface, not an operator-typed surface). -->
@@ -98,12 +104,16 @@ Three reasons this is one story rather than four:
 **When** the orchestration session next polls,
 **Then** it surfaces the story as stuck. _(NFR3, see also Story 5.4)_
 
+vitest: 30-min dev budget surfaces in next poll
+
 <!-- vitest: 30-min dev budget surfaces in the next poll (via the findStuckDevClaims helper that Story 5.4 will consume) -->
 
 <!-- Not user-surface: AC4's surface is a helper return value consumed by Story 5.4's poll; this story does not wire the poll. -->
 
 **AC5 (integration):**
 vitest covers (a) `agent.invoke` written on every spawn, (b) `reviewer.verdict` written on every verdict comment, (c) hard-8-min substitution, (d) 30-min dev budget surfaces in the next poll.
+
+vitest: per-invocation-telemetry
 
 <!-- Not user-surface: vitest integration suite — internal harness only. -->
 
@@ -112,12 +122,16 @@ vitest covers (a) `agent.invoke` written on every spawn, (b) `reviewer.verdict` 
 **When** `processDevTranscript` or `processReviewerTranscript` parses the transcript,
 **Then** the outcome is classified as typed `SessionQuotaExhaustedError`, the dev-outcome / reviewer-outcome JSON records `failure: { class: "session-quota-exhausted", recoverable: true }`, and `/crew:start` emits chat line `Story ${storyUlid} paused — session quota exhausted; retry after quota resets` and moves the manifest to `blocked/` (not `done/`). _(retro carry-forward #2 — see Retro Amendments below)_
 
+vitest: SessionQuotaExhaustedError classified from transcript
+
 <!-- User-surface: the `Story ${storyUlid} paused — session quota exhausted` chat line is operator-visible on /crew:start. -->
 
 **AC7 (substrate):**
 **Given** the dev subagent has signalled handoff (locked-phrase emitted),
 **When** `runDevTerminalAction` runs the pre-handoff verification,
 **Then** the tool runs `pnpm -w typecheck && pnpm -w test --run` from the worktree root and on non-zero exit classifies the outcome as typed `PreHandoffSuiteRedError` (recoverable: true). The dev's locked-phrase emission alone is insufficient to advance state. _(retro carry-forward #8 — see Retro Amendments below)_
+
+vitest: PreHandoffSuiteRedError raised when suite is red
 
 ### Expanded acceptance specifics (folded into AC1–AC5 above; each clause maps to an AC for the AC-table gate)
 
