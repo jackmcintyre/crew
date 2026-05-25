@@ -188,6 +188,59 @@ Leniency rules introduced in
 The integration fixture exercising all four rules lives at
 `plugins/crew/mcp-server/src/adapters/bmad/fixtures/sample-real-world-repo/`.
 
+## Two-stage parse: regex first, LLM fallback (Story 3.9)
+
+Story 3.9 introduces a hybrid parse path: the deterministic regex parser
+runs first; if it throws `MalformedBmadStoryError`, the adapter falls back
+to an LLM-based extractor before declaring the file unparseable. The fallback
+is the safety net, not the default — clean stories never pay the token cost.
+
+**Stage 1: regex parser** (`parseBmadStory`). Microsecond-fast. Handles
+the canonical shape plus the Story 3.8 leniency rules above. Throws
+`MalformedBmadStoryError` on shapes outside that envelope.
+
+**Stage 2: LLM fallback** (`extractBmadStoryViaLlm`). Invoked per-file when
+the regex parser throws. Uses a deterministic prompt (temperature 0) to ask
+Claude to extract the structured `SourceStory` fields from arbitrary
+BMad-flavoured Markdown. Model order:
+
+1. **Primary:** Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) — cheap, fast,
+   sufficient for most drift.
+2. **Retry:** Claude Sonnet 4.6 (`claude-sonnet-4-6`) — sturdier on weird
+   inputs, used only if Haiku returns malformed JSON or schema-invalid output.
+
+Output is validated through a Zod schema mirroring the `SourceStory` shape;
+the recovered story carries `raw_frontmatter.extracted_by_llm: true` so
+downstream consumers can audit fallback usage.
+
+**Cache.** Successful LLM extractions are cached under
+`.crew/state/extraction-cache/<source_hash>.json`. A cache hit short-circuits
+the model call on re-scan, so an unchanged drifted story costs zero tokens
+after the first scan. The cache is keyed by sha256 of the file bytes, so any
+edit invalidates it.
+
+**Failure mode: `blocked_by: "unparseable"`.** When both stages fail (regex
+throws AND LLM fallback throws), the file is routed to
+`.crew/state/blocked/<ref>.yaml` with `blocked_by: "unparseable"`. The
+`discipline_violations` array carries both error messages so the operator
+can see what went wrong. The scan continues — one bad file does not halt
+the run.
+
+**Token-budget warning.** If the LLM fallback fires more than ten times in a
+single scan, the scan emits a warning. There is no hard cap; the warning is
+a nudge to tidy the source stories so the regex parser can handle them.
+
+**`ANTHROPIC_API_KEY` required.** The fallback path requires the standard
+Anthropic environment variable. When unset, the fallback throws
+`BmadLlmExtractionError` immediately (no SDK call) and the file is routed
+to `blocked/` with `blocked_by: "unparseable"`.
+
+Cross-reference:
+`_bmad-output/implementation-artifacts/3-9-bmad-adapter-llm-fallback-extraction.md`.
+Integration fixture and mocked tests live at
+`plugins/crew/mcp-server/src/adapters/bmad/fixtures/sample-llm-fallback-repo/`
+and `__tests__/bmad-adapter-llm-fallback.integration.test.ts`.
+
 ## Disagreements with Story 3.3 tasks
 
 None at spike time. If the dev finds disagreements during

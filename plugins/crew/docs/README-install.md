@@ -201,4 +201,28 @@ Contract:
 - Do NOT re-add `dist/` (or `**/dist/`) to any `.gitignore`. If a new workspace package needs its own `dist/` ignored, name it explicitly and leave a comment.
 - Do NOT introduce a `prepare` / `postinstall` build hook to "fix" this. `/plugin install` won't run it. The committed-artefact path is the v1 contract.
 
+## Per-scan token cost for drifted BMad stories
+
+`/crew:scan` is free for backlogs whose source files parse cleanly through the
+deterministic regex parser. For drifted BMad stories (AC headings outside the
+canonical `**ACn:**` shape, malformed H1s, etc.), Story 3.9 falls back to an
+LLM extraction step before declaring the file unparseable. Each fallback
+invocation costs one Claude call:
+
+- **Primary:** Claude Haiku 4.5 — small payload (file contents + ~50-line
+  system prompt), typically a few hundred tokens in/out.
+- **Retry on schema failure:** Claude Sonnet 4.6 — same payload.
+
+Successful extractions are cached under `.crew/state/extraction-cache/` keyed
+by file content hash, so re-scanning an unchanged drifted story costs zero
+tokens. Only changes to a drifted file's bytes re-trigger the call.
+
+If `ANTHROPIC_API_KEY` is unset, the fallback short-circuits and the drifted
+files are routed to `.crew/state/blocked/<ref>.yaml` with
+`blocked_by: "unparseable"`. The regular scan path is unaffected.
+
+If the fallback fires more than ten times in one scan, the scan emits a
+warning — consider tidying the source stories to bring them back inside the
+regex envelope.
+
 > See Story 7.2 (Epic 7) for the full first-run walkthrough.

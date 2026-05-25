@@ -41,6 +41,7 @@ development_status:
   3-6-re-open-planning-mid-cycle-and-discard-a-feature-flow: done
   3-7-plain-language-guideline-and-direct-edit-allowance: done
   3-8-bmad-adapter-real-world-leniency: done
+  3-9-bmad-adapter-llm-fallback-extraction: ready-for-dev
   epic-3-retrospective: done
   epic-4: in-progress
   4-1-claim-story-dependency-check-and-complete-story-mcp-tools: done

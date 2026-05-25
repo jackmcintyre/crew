@@ -90,23 +90,26 @@ describe("BmadAdapter.detect()", () => {
 describe("BmadAdapter.listSourceStories()", () => {
   beforeEach(() => configureTarget());
 
-  it("returns one SourceStory per non-optional fixture story", async () => {
+  it("returns one SourceStory per non-optional non-done fixture story (Story 3.9 skip-done at walk)", async () => {
     const stories = await BmadAdapter.listSourceStories();
-    // sample-target-repo has 7 stories; 1 is `optional` → 6 emitted.
-    expect(stories.length).toBe(6);
+    // sample-target-repo has 7 stories; 1 is `optional` and 1 is `done`
+    // (Story 2.3); Story 3.9 skips done stories at the directory walk too,
+    // so 5 emitted (was 6 before Story 3.9).
+    expect(stories.length).toBe(5);
     expect(stories.every((s) => s.raw_frontmatter["status"] !== "optional")).toBe(true);
+    expect(stories.every((s) => s.raw_frontmatter["status"] !== "done")).toBe(true);
   });
 
   it("returns stories in numeric (epic, story) order — 1.10 follows 1.2, not 1.1", async () => {
     const stories = await BmadAdapter.listSourceStories();
     const refs = stories.map((s) => s.ref);
+    // bmad:2.3 has Status: done and is filtered out at directory walk by Story 3.9.
     expect(refs).toEqual([
       "bmad:1.1",
       "bmad:1.2",
       "bmad:1.10",
       "bmad:2.1",
       "bmad:2.2",
-      "bmad:2.3",
     ]);
   });
 

@@ -10,6 +10,7 @@
     "test": "NODE_OPTIONS=--max-old-space-size=8192 vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.98.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "zod": "^4.4.3",
     "pino": "^10.3.1",
