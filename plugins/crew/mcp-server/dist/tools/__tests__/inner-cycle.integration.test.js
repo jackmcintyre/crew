@@ -476,7 +476,7 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("applyReviewerLabels");
             expect(toolNames).toContain("computeAgreement");
             expect(toolNames).toContain("runAutoMergeGate");
-            expect(toolNames.length).toBe(27);
+            expect(toolNames.length).toBe(29);
         }
         finally {
             await client.close();

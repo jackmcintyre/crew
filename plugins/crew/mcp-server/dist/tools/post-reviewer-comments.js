@@ -36,6 +36,15 @@ import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
 import { composeSummaryBody } from "../lib/compose-reviewer-summary.js";
 import { findHunkLineForPath } from "../lib/find-hunk-line.js";
 import { GhApiResponseShapeError } from "../errors.js";
+import { writeReviewerVerdictEvent } from "../lib/reviewer-verdict-writer.js";
+import { writeAgentInvokeEvent } from "../lib/agent-invoke-writer.js";
+/**
+ * Story 4.12 NFR2: reviewer subagent wall-clock hard limit. When the
+ * elapsed time exceeds this, `postReviewerComments` substitutes the
+ * verdict body with a timeout failure and emits the `reviewer-timeout`
+ * return branch.
+ */
+export const REVIEWER_HARD_LIMIT_MS = 8 * 60 * 1000;
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -79,6 +88,166 @@ export async function postReviewerComments(opts) {
         return { next: "skipped-no-session-result", postedReviewId: null };
     }
     const permissions = await loadRolePermissions({ role, pluginRoot });
+    // ---------------------------------------------------------------------------
+    // Story 4.12 AC3: 8-min reviewer hard-limit pre-check.
+    // If elapsedMs > REVIEWER_HARD_LIMIT_MS, substitute the verdict body with a
+    // failure comment (events: COMMENT, no inline comments). Apply needs-human
+    // is the SKILL.md prose's job; the manifest is NOT marked failed.
+    // The footer marker uses role-slot "reviewer-timeout" so the PATCH lookup
+    // (regex `[^:]+`) still matches on a subsequent rerun.
+    // ---------------------------------------------------------------------------
+    if (opts.spawnStartedAt !== undefined) {
+        const nowFn = opts.now ?? (() => Date.now());
+        const elapsedMs = nowFn() - opts.spawnStartedAt;
+        if (elapsedMs > REVIEWER_HARD_LIMIT_MS) {
+            const chatLog = [];
+            // Emit agent.invoke for the reviewer spawn (AC3 (3h)).
+            try {
+                await writeAgentInvokeEvent({
+                    targetRepoRoot: opts.targetRepoRoot,
+                    sessionUlid: opts.sessionUlid,
+                    agent: "generalist-reviewer",
+                    ref: resultFile.ref,
+                    runtimeMs: elapsedMs,
+                });
+            }
+            catch (err) {
+                chatLog.push(`agent-invoke telemetry write failed: ${err.message}`);
+            }
+            // Resolve {owner}/{repo} via gh pr view --json headRepository,headRepositoryOwner.
+            const prViewResult = await gh({
+                role,
+                permissions,
+                subcommand: "pr-view",
+                args: [
+                    String(resultFile.prNumber),
+                    "--json",
+                    "headRepository,headRepositoryOwner",
+                ],
+                execaImpl,
+                pluginRootOverride: pluginRoot,
+            });
+            let owner;
+            let repo;
+            try {
+                const prViewJson = JSON.parse(prViewResult.stdout);
+                owner = prViewJson.headRepositoryOwner?.login ?? "";
+                repo = prViewJson.headRepository?.name ?? "";
+                if (!owner || !repo) {
+                    throw new Error("missing owner or repo in headRepository/headRepositoryOwner shape");
+                }
+            }
+            catch (cause) {
+                throw new GhApiResponseShapeError({ subcommand: "pr-view", cause });
+            }
+            const reviewsApiUrl = `/repos/${owner}/${repo}/pulls/${resultFile.prNumber}/reviews`;
+            // Search for a prior verdict review to PATCH (footer regex matches
+            // any role-slot, including `reviewer-timeout` on reruns).
+            const getReviewsResult = await gh({
+                role,
+                permissions,
+                subcommand: "api",
+                args: [reviewsApiUrl, "--method", "GET"],
+                execaImpl,
+                pluginRootOverride: pluginRoot,
+            });
+            let priorReviewId = null;
+            try {
+                const reviewsRaw = JSON.parse(getReviewsResult.stdout);
+                if (!Array.isArray(reviewsRaw)) {
+                    throw new Error(`expected array, got ${typeof reviewsRaw}`);
+                }
+                const footerPattern = new RegExp("<!-- crew:verdict:[^:]+:" + escapeRegex(resultFile.ref) + " -->");
+                for (const review of reviewsRaw) {
+                    if (typeof review.body !== "string")
+                        continue;
+                    if (footerPattern.test(review.body)) {
+                        if (typeof review.id !== "number") {
+                            throw new Error(`review.id is not a number: ${JSON.stringify(review.id)}`);
+                        }
+                        priorReviewId = review.id;
+                        break;
+                    }
+                }
+            }
+            catch (cause) {
+                throw new GhApiResponseShapeError({
+                    subcommand: "api",
+                    url: reviewsApiUrl,
+                    cause,
+                });
+            }
+            const timeoutBody = `**Reviewer timeout** — the reviewer subagent exceeded the 8-minute hard limit (NFR2) ` +
+                `and was terminated. This PR has been labelled \`needs-human\` and the story has NOT been ` +
+                `marked failed; an operator must inspect the dev branch and decide next steps.\n\n` +
+                `\`standards_version: ${resultFile.standardsVersion}\` · \`plugin_version: ${pluginVersion}\`\n\n` +
+                `<!-- crew:verdict:reviewer-timeout:${resultFile.ref} -->`;
+            const verdictLine = "**Reviewer timeout** — 8-minute hard limit exceeded";
+            let postedReviewId;
+            if (priorReviewId !== null) {
+                const patchUrl = `${reviewsApiUrl}/${priorReviewId}`;
+                const patchResult = await gh({
+                    role,
+                    permissions,
+                    subcommand: "api",
+                    args: [patchUrl, "--method", "PATCH", "--input", "-"],
+                    execaImpl,
+                    pluginRootOverride: pluginRoot,
+                    input: JSON.stringify({ body: timeoutBody }),
+                });
+                try {
+                    const parsed = JSON.parse(patchResult.stdout);
+                    if (typeof parsed.id !== "number") {
+                        throw new Error(`response.id is not a number: ${JSON.stringify(parsed.id)}`);
+                    }
+                    postedReviewId = parsed.id;
+                }
+                catch (cause) {
+                    throw new GhApiResponseShapeError({
+                        subcommand: "api",
+                        url: patchUrl,
+                        cause,
+                    });
+                }
+            }
+            else {
+                const apiResult = await gh({
+                    role,
+                    permissions,
+                    subcommand: "api",
+                    args: [reviewsApiUrl, "--method", "POST", "--input", "-"],
+                    execaImpl,
+                    pluginRootOverride: pluginRoot,
+                    input: JSON.stringify({
+                        event: "COMMENT",
+                        body: timeoutBody,
+                        comments: [],
+                    }),
+                });
+                try {
+                    const parsed = JSON.parse(apiResult.stdout);
+                    if (typeof parsed.id !== "number") {
+                        throw new Error(`response.id is not a number: ${JSON.stringify(parsed.id)}`);
+                    }
+                    postedReviewId = parsed.id;
+                }
+                catch (cause) {
+                    throw new GhApiResponseShapeError({
+                        subcommand: "api",
+                        url: reviewsApiUrl,
+                        cause,
+                    });
+                }
+            }
+            return {
+                next: "reviewer-timeout",
+                postedReviewId,
+                verdictLine,
+                elapsedMs,
+                chatLog,
+            };
+        }
+    }
     // Step 2: Fetch the PR diff (re-read — not persisted per Story 4.6 §3g).
     const diffResult = await gh({
         role,
@@ -198,6 +367,22 @@ export async function postReviewerComments(opts) {
         catch (cause) {
             throw new GhApiResponseShapeError({ subcommand: "api", url: patchUrl, cause });
         }
+        // Story 4.12 AC2: emit reviewer.verdict on PATCH success.
+        const chatLog = [];
+        try {
+            await writeReviewerVerdictEvent({
+                targetRepoRoot: opts.targetRepoRoot,
+                sessionUlid: opts.sessionUlid,
+                ref: resultFile.ref,
+                prNumber: resultFile.prNumber,
+                verdict: resultFile.recommendedVerdict,
+                standardsVersion: resultFile.standardsVersion,
+                pluginVersion,
+            });
+        }
+        catch (err) {
+            chatLog.push(`reviewer-verdict telemetry write failed: ${err.message}`);
+        }
         return {
             next: "posted",
             postedReviewId: patchedId,
@@ -205,6 +390,7 @@ export async function postReviewerComments(opts) {
             verdictLine,
             wasEdit: true,
             priorReviewId,
+            chatLog,
         };
     }
     // POST path — first run, no prior verdict found.
@@ -234,6 +420,22 @@ export async function postReviewerComments(opts) {
     catch (cause) {
         throw new GhApiResponseShapeError({ subcommand: "api", url: reviewsApiUrl, cause });
     }
+    // Story 4.12 AC2: emit reviewer.verdict on POST success.
+    const chatLog = [];
+    try {
+        await writeReviewerVerdictEvent({
+            targetRepoRoot: opts.targetRepoRoot,
+            sessionUlid: opts.sessionUlid,
+            ref: resultFile.ref,
+            prNumber: resultFile.prNumber,
+            verdict: resultFile.recommendedVerdict,
+            standardsVersion: resultFile.standardsVersion,
+            pluginVersion,
+        });
+    }
+    catch (err) {
+        chatLog.push(`reviewer-verdict telemetry write failed: ${err.message}`);
+    }
     return {
         next: "posted",
         postedReviewId,
@@ -241,5 +443,6 @@ export async function postReviewerComments(opts) {
         verdictLine,
         wasEdit: false,
         priorReviewId: null,
+        chatLog,
     };
 }

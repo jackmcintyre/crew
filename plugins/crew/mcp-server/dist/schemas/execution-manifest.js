@@ -149,6 +149,20 @@ export const ExecutionManifestSchema = z
      */
     claimed_by: z.string().min(1).optional(),
     /**
+     * ISO-8601 UTC ms-precise timestamp stamped by `claimStory` on the
+     * to-do → in-progress transition. Read by `findStuckDevClaims` (Story
+     * 4.12 NFR3) to compute claim age. Optional/nullable for backward
+     * compatibility with pre-4.12 in-progress manifests.
+     *
+     * Added in Story 4.12.
+     */
+    claimed_at: z
+        .string()
+        .datetime({ offset: false })
+        .refine((s) => s.endsWith("Z"), "must be UTC")
+        .nullable()
+        .optional(),
+    /**
      * Count of NEEDS CHANGES verdict rounds the dev/reviewer pair has run on
      * this story. `undefined` ≡ `0`. Incremented in-place by Story 4.3's
      * inner cycle on every NEEDS CHANGES verdict.

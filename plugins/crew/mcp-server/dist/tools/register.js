@@ -28,6 +28,8 @@ import { postReviewerComments } from "./post-reviewer-comments.js";
 import { applyReviewerLabels } from "./apply-reviewer-labels.js";
 import { computeAgreement } from "./compute-agreement.js";
 import { runAutoMergeGate } from "./auto-merge-gate.js";
+import { getStuckDevClaims } from "./get-stuck-dev-claims.js";
+import { markReviewerTimeout } from "./mark-reviewer-timeout.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -1051,6 +1053,85 @@ export function registerAllTools(server) {
                 .parse(args);
             try {
                 const result = await runAutoMergeGate(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 4.12 — getStuckDevClaims: enumerate in-progress claims that have
+    // exceeded the per-story budget (default 30 min, NFR3). Substrate for
+    // Story 5.4's poll loop.
+    server.registerTool({
+        name: "getStuckDevClaims",
+        description: "Return the list of in-progress dev claims that have exceeded the per-story budget (default 30 min, NFR3).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                budgetMs: { type: "number" },
+            },
+            required: ["targetRepoRoot"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                budgetMs: z.number().int().positive().optional(),
+            })
+                .parse(args);
+            try {
+                const result = await getStuckDevClaims(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 4.12 — markReviewerTimeout: stamp blocked_by=reviewer-timeout on
+    // the in-progress manifest after a reviewer 8-min hard limit fires.
+    server.registerTool({
+        name: "markReviewerTimeout",
+        description: "Stamp `blocked_by: reviewer-timeout` on the in-progress manifest after the reviewer subagent exceeded the 8-minute hard limit (NFR2).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+                ref: { type: "string" },
+                manifestPath: { type: "string" },
+            },
+            required: ["targetRepoRoot", "sessionUlid", "ref", "manifestPath"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                sessionUlid: z.string().min(1),
+                ref: z.string().min(1),
+                manifestPath: z.string().min(1),
+            })
+                .parse(args);
+            try {
+                const result = await markReviewerTimeout(parsed);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };

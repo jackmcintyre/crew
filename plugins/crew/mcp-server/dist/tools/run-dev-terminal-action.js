@@ -23,7 +23,7 @@
  * (Story 4.4 FR29 / Pattern §9 / NFR16)
  */
 import * as path from "node:path";
-import { ConventionalCommitTypeUnknownError, GhPrCreateFailedError, } from "../errors.js";
+import { ConventionalCommitTypeUnknownError, GhPrCreateFailedError, PreHandoffSuiteRedError, } from "../errors.js";
 import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
 import { atomicWriteFile } from "../lib/managed-fs.js";
 import { gh } from "../lib/gh.js";
@@ -49,12 +49,58 @@ const ROLE = "generalist-dev";
 export async function runDevTerminalAction(opts) {
     const { targetRepoRoot, ref, title, type, body, summary, manifestPath, sessionUlid, } = opts;
     const execaImpl = opts.execaImpl;
+    // Default `true` for backward compatibility — production callers set `false`
+    // via SKILL.md prose. The gate uses real `pnpm` subprocesses; existing tests
+    // stub `execaImpl` for git/gh only and would otherwise have to handle the
+    // pnpm invocations too. Story 4.12.
+    const skipPreHandoffSuite = opts.skipPreHandoffSuite ?? true;
     // (i) Validate conventional-commits type BEFORE any subprocess spawn.
     if (!CONVENTIONAL_COMMIT_TYPES.includes(type)) {
         throw new ConventionalCommitTypeUnknownError({
             attempted_type: type,
             allowed_types: CONVENTIONAL_COMMIT_TYPES,
         });
+    }
+    // ---------------------------------------------------------------------------
+    // Story 4.12 AC7: pre-handoff suite gate.
+    // Run `pnpm -w typecheck && pnpm -w test --run` from the worktree root.
+    // Non-zero exit raises a typed `PreHandoffSuiteRedError` (recoverable).
+    // The dev's locked-phrase emission alone is insufficient to advance state.
+    // ---------------------------------------------------------------------------
+    if (!skipPreHandoffSuite) {
+        const { execa: nodeExeca } = await import("execa");
+        const runner = (execaImpl ?? nodeExeca);
+        try {
+            const tcResult = await runner("pnpm", ["-w", "typecheck"], {
+                cwd: targetRepoRoot,
+                reject: false,
+            });
+            if (tcResult.exitCode !== 0) {
+                throw new PreHandoffSuiteRedError({
+                    exitCode: tcResult.exitCode ?? -1,
+                    stderr: tcResult.stderr ?? "",
+                });
+            }
+            const testResult = await runner("pnpm", ["-w", "test", "--run"], {
+                cwd: targetRepoRoot,
+                reject: false,
+            });
+            if (testResult.exitCode !== 0) {
+                throw new PreHandoffSuiteRedError({
+                    exitCode: testResult.exitCode ?? -1,
+                    stderr: testResult.stderr ?? "",
+                });
+            }
+        }
+        catch (err) {
+            if (err instanceof PreHandoffSuiteRedError)
+                throw err;
+            // Failed to even spawn — also red.
+            throw new PreHandoffSuiteRedError({
+                exitCode: -1,
+                stderr: err.message,
+            });
+        }
     }
     // (i) Compose branch slug (raises BranchSlugUnrenderableError if un-renderable).
     const branch = buildBranchSlug({ ref, title });

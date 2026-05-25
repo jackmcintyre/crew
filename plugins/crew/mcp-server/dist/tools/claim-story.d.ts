@@ -61,6 +61,8 @@ export declare function claimStory(opts: {
     ref: string;
     sessionUlid: string;
     role?: string;
+    /** Test seam — production callers omit. Story 4.12. */
+    now?: () => Date;
 }): Promise<{
     ref: string;
     absPath: string;

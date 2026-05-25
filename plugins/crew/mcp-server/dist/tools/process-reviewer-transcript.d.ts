@@ -72,12 +72,26 @@ export type ProcessReviewerTranscriptResult = {
      */
     next: "done-blocked-no-session-result";
     chatLog: string[];
+} | {
+    /** Story 4.12 AC6: reviewer transcript contained session-quota string. */
+    next: "done-blocked-session-quota-exhausted";
+    chatLog: string[];
 };
 export interface ProcessReviewerTranscriptOptions {
     targetRepoRoot: string;
     sessionUlid: string;
     ref: string;
     manifestPath: string;
+    /** Epoch ms — when the reviewer subagent was spawned (Story 4.12 AC1). */
+    spawnStartedAt?: number;
+    /** Test seam — production callers omit. Story 4.12. */
+    now?: () => number;
+    /**
+     * Optional reviewer subagent transcript. When provided and matching the
+     * session-quota pattern, classifies as `SessionQuotaExhaustedError`
+     * (Story 4.12 AC6).
+     */
+    reviewerTranscript?: string;
 }
 /**
  * Process the reviewer subagent's session result.

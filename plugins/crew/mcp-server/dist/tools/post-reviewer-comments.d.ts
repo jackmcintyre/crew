@@ -28,10 +28,18 @@
  * Story 4.6b Task 4.
  */
 import { execa as defaultExeca } from "execa";
+/**
+ * Story 4.12 NFR2: reviewer subagent wall-clock hard limit. When the
+ * elapsed time exceeds this, `postReviewerComments` substitutes the
+ * verdict body with a timeout failure and emits the `reviewer-timeout`
+ * return branch.
+ */
+export declare const REVIEWER_HARD_LIMIT_MS: number;
 export type PostReviewerCommentsResult = {
     /** File was absent — no verdict to post. processReviewerTranscript handles it. */
     next: "skipped-no-session-result";
     postedReviewId: null;
+    chatLog?: string[];
 } | {
     /** Review successfully posted (first run) or PATCH-edited in place (rerun). */
     next: "posted";
@@ -46,6 +54,18 @@ export type PostReviewerCommentsResult = {
     wasEdit: boolean;
     /** ID of the prior verdict review that was PATCH-edited. null on POST path. */
     priorReviewId: number | null;
+    chatLog?: string[];
+} | {
+    /**
+     * Story 4.12 AC3: the reviewer subagent exceeded the 8-min hard limit;
+     * the verdict body was substituted with a timeout failure comment.
+     * No `reviewer.verdict` telemetry is written on this branch.
+     */
+    next: "reviewer-timeout";
+    postedReviewId: number;
+    verdictLine: string;
+    elapsedMs: number;
+    chatLog?: string[];
 };
 export interface PostReviewerCommentsOptions {
     targetRepoRoot: string;
@@ -60,6 +80,14 @@ export interface PostReviewerCommentsOptions {
      * Named with `Override` suffix per project conventions (cf. `pluginRootOverride`).
      */
     pluginVersionOverride?: string;
+    /**
+     * Epoch ms at which the reviewer subagent was spawned. Used by the
+     * 8-min hard-limit pre-check (Story 4.12 AC3 / NFR2). Optional for
+     * backward compatibility — when absent, no timeout check is performed.
+     */
+    spawnStartedAt?: number;
+    /** Test seam for the wall-clock. Story 4.12. */
+    now?: () => number;
 }
 /**
  * Post the reviewer's verdict as a PR review with inline comments and a

@@ -26,6 +26,8 @@ import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { PrUrlNotFoundInDevTranscriptError } from "../errors.js";
 import { readDevOutcomeFile } from "../lib/read-dev-outcome-file.js";
+import { writeAgentInvokeEvent } from "../lib/agent-invoke-writer.js";
+import { detectSessionQuotaExhausted } from "../lib/session-quota-detector.js";
 // ---------------------------------------------------------------------------
 // Recoverable-error locked phrase regex
 // (Story 4.5 AC2e / Task 4.1)
@@ -63,6 +65,42 @@ export async function processDevTranscript(opts) {
     const { targetRepoRoot, sessionUlid, ref, devTranscript } = opts;
     const chatLog = [];
     const manifestPath = path.resolve(targetRepoRoot, ".crew", "state", "in-progress", `${ref}.yaml`);
+    // ---------------------------------------------------------------------------
+    // Story 4.12 AC1: emit agent.invoke telemetry on every spawn (every return path).
+    // Wrapped in try/catch — telemetry failure is observability infra, must not
+    // break the dev cycle. The chat log surfaces the failure for the operator.
+    // ---------------------------------------------------------------------------
+    if (opts.spawnStartedAt !== undefined) {
+        const nowFn = opts.now ?? (() => Date.now());
+        const runtimeMs = nowFn() - opts.spawnStartedAt;
+        try {
+            await writeAgentInvokeEvent({
+                targetRepoRoot,
+                sessionUlid,
+                agent: "generalist-dev",
+                ref,
+                runtimeMs,
+            });
+        }
+        catch (err) {
+            chatLog.push(`agent-invoke telemetry write failed: ${err.message}`);
+        }
+    }
+    // ---------------------------------------------------------------------------
+    // Story 4.12 AC6: detect Claude session-quota strings BEFORE the
+    // recoverable-error marker check. A session-quota wall is recoverable
+    // (operator re-runs after the quota resets) but takes precedence over
+    // any other classification — the dev simply could not complete.
+    // ---------------------------------------------------------------------------
+    if (detectSessionQuotaExhausted(devTranscript)) {
+        const currentManifest = await readManifest(manifestPath);
+        await writeManifest(manifestPath, {
+            ...currentManifest,
+            blocked_by: "session-quota-exhausted",
+        });
+        chatLog.push(`Story ${ref} paused — session quota exhausted; retry after quota resets`);
+        return { next: "done-blocked-session-quota-exhausted", chatLog };
+    }
     // ---------------------------------------------------------------------------
     // Step 1: Check for the locked recoverable-error marker line FIRST.
     // (Story 4.5 AC2d / Task 4.1)

@@ -56,6 +56,8 @@
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { completeStory } from "./complete-story.js";
 import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
+import { writeAgentInvokeEvent } from "../lib/agent-invoke-writer.js";
+import { detectSessionQuotaExhausted } from "../lib/session-quota-detector.js";
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -88,6 +90,34 @@ import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
 export async function processReviewerTranscript(opts) {
     const { targetRepoRoot, ref, sessionUlid, manifestPath } = opts;
     const chatLog = [];
+    // Story 4.12 AC1: emit agent.invoke for the reviewer spawn.
+    if (opts.spawnStartedAt !== undefined) {
+        const nowFn = opts.now ?? (() => Date.now());
+        const runtimeMs = nowFn() - opts.spawnStartedAt;
+        try {
+            await writeAgentInvokeEvent({
+                targetRepoRoot,
+                sessionUlid,
+                agent: "generalist-reviewer",
+                ref,
+                runtimeMs,
+            });
+        }
+        catch (err) {
+            chatLog.push(`agent-invoke telemetry write failed: ${err.message}`);
+        }
+    }
+    // Story 4.12 AC6: detect session-quota strings in reviewer transcript.
+    if (opts.reviewerTranscript &&
+        detectSessionQuotaExhausted(opts.reviewerTranscript)) {
+        const currentManifest = await readManifest(manifestPath);
+        await writeManifest(manifestPath, {
+            ...currentManifest,
+            blocked_by: "session-quota-exhausted",
+        });
+        chatLog.push(`Story ${ref} paused — session quota exhausted; retry after quota resets`);
+        return { next: "done-blocked-session-quota-exhausted", chatLog };
+    }
     // Read the persisted reviewer-result.json file.
     const resultFile = await readReviewerResultFile(targetRepoRoot, sessionUlid);
     if (resultFile === null) {

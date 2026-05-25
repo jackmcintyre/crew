@@ -85,8 +85,11 @@ export async function claimStory(opts: {
   ref: string;
   sessionUlid: string;
   role?: string;
+  /** Test seam — production callers omit. Story 4.12. */
+  now?: () => Date;
 }): Promise<{ ref: string; absPath: string }> {
   const { targetRepoRoot, ref, sessionUlid, role = "orchestrator" } = opts;
+  const now = opts.now ?? (() => new Date());
 
   const stateRoot = path.join(targetRepoRoot, ".crew", "state");
   const absToDoPath = path.join(stateRoot, "to-do", `${ref}.yaml`);
@@ -173,6 +176,7 @@ export async function claimStory(opts: {
     ...manifest,
     status: "in-progress" as const,
     claimed_by: sessionUlid,
+    claimed_at: now().toISOString(),
   };
   const reparsed = parseExecutionManifest(updatedManifest, {
     absPath: absInProgressPath,

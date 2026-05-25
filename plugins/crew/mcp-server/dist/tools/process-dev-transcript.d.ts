@@ -40,12 +40,25 @@ export type ProcessDevTranscriptResult = {
 } | {
     next: "done-blocked-gh-needs-human";
     chatLog: string[];
+} | {
+    next: "done-blocked-session-quota-exhausted";
+    chatLog: string[];
 };
 export interface ProcessDevTranscriptOptions {
     targetRepoRoot: string;
     sessionUlid: string;
     ref: string;
     devTranscript: string;
+    /**
+     * Epoch ms at which the dev subagent was spawned. Captured by SKILL.md
+     * prose immediately before invoking the Task tool. Used to stamp
+     * `runtime_ms` on the `agent.invoke` telemetry event (Story 4.12).
+     * Optional for backward compatibility — when absent, no telemetry
+     * event is written.
+     */
+    spawnStartedAt?: number;
+    /** Test seam — production callers omit. Story 4.12. */
+    now?: () => number;
 }
 /**
  * Process the dev subagent's final transcript.

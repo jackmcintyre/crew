@@ -819,3 +819,42 @@ export declare class DevOutcomeFileMalformedError extends DomainError {
         cause: unknown;
     });
 }
+/**
+ * The dev or reviewer subagent's transcript carried a Claude session-quota
+ * limit string ("You've hit your session limit" or equivalent). The session
+ * cannot continue until the quota resets.
+ *
+ * `recoverable: true` — the operator re-runs `/crew:start` after the quota
+ * resets and the blocked manifest auto-promotes.
+ *
+ * Story 4.12 retro AC6.
+ */
+export declare class SessionQuotaExhaustedError extends DomainError {
+    readonly recoverable: true;
+    readonly failureClass: "session-quota-exhausted";
+    readonly storyRef: string;
+    readonly source: "dev" | "reviewer";
+    constructor(opts: {
+        storyRef: string;
+        source: "dev" | "reviewer";
+    });
+}
+/**
+ * The dev's pre-handoff verification (`pnpm -w typecheck && pnpm -w test --run`)
+ * exited non-zero, indicating the suite is red. The dev's locked-phrase
+ * emission alone is not sufficient to advance state.
+ *
+ * `recoverable: true` — the operator can clear the block, fix tests, and re-run.
+ *
+ * Story 4.12 retro AC7.
+ */
+export declare class PreHandoffSuiteRedError extends DomainError {
+    readonly recoverable: true;
+    readonly failureClass: "pre-handoff-suite-red";
+    readonly exitCode: number;
+    readonly stderr: string;
+    constructor(opts: {
+        exitCode: number;
+        stderr: string;
+    });
+}

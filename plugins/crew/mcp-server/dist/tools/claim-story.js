@@ -74,6 +74,7 @@ function stripUndefined(obj) {
  */
 export async function claimStory(opts) {
     const { targetRepoRoot, ref, sessionUlid, role = "orchestrator" } = opts;
+    const now = opts.now ?? (() => new Date());
     const stateRoot = path.join(targetRepoRoot, ".crew", "state");
     const absToDoPath = path.join(stateRoot, "to-do", `${ref}.yaml`);
     const absInProgressPath = path.join(stateRoot, "in-progress", `${ref}.yaml`);
@@ -157,6 +158,7 @@ export async function claimStory(opts) {
         ...manifest,
         status: "in-progress",
         claimed_by: sessionUlid,
+        claimed_at: now().toISOString(),
     };
     const reparsed = parseExecutionManifest(updatedManifest, {
         absPath: absInProgressPath,

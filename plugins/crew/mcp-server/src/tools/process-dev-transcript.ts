@@ -27,6 +27,8 @@ import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { PrUrlNotFoundInDevTranscriptError } from "../errors.js";
 import { readDevOutcomeFile } from "../lib/read-dev-outcome-file.js";
+import { writeAgentInvokeEvent } from "../lib/agent-invoke-writer.js";
+import { detectSessionQuotaExhausted } from "../lib/session-quota-detector.js";
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -38,7 +40,8 @@ export type ProcessDevTranscriptResult =
   | { next: "done-handoff-but-no-review-yet"; chatLog: string[] } // v1: unreachable; declared for ABI stability
   | { next: "done-blocked-gh-defer"; chatLog: string[] }
   | { next: "done-blocked-gh-retry"; chatLog: string[] }
-  | { next: "done-blocked-gh-needs-human"; chatLog: string[] };
+  | { next: "done-blocked-gh-needs-human"; chatLog: string[] }
+  | { next: "done-blocked-session-quota-exhausted"; chatLog: string[] };
 
 // ---------------------------------------------------------------------------
 // Options
@@ -49,6 +52,16 @@ export interface ProcessDevTranscriptOptions {
   sessionUlid: string;
   ref: string;
   devTranscript: string;
+  /**
+   * Epoch ms at which the dev subagent was spawned. Captured by SKILL.md
+   * prose immediately before invoking the Task tool. Used to stamp
+   * `runtime_ms` on the `agent.invoke` telemetry event (Story 4.12).
+   * Optional for backward compatibility — when absent, no telemetry
+   * event is written.
+   */
+  spawnStartedAt?: number;
+  /** Test seam — production callers omit. Story 4.12. */
+  now?: () => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +116,49 @@ export async function processDevTranscript(
     "in-progress",
     `${ref}.yaml`,
   );
+
+  // ---------------------------------------------------------------------------
+  // Story 4.12 AC1: emit agent.invoke telemetry on every spawn (every return path).
+  // Wrapped in try/catch — telemetry failure is observability infra, must not
+  // break the dev cycle. The chat log surfaces the failure for the operator.
+  // ---------------------------------------------------------------------------
+
+  if (opts.spawnStartedAt !== undefined) {
+    const nowFn = opts.now ?? (() => Date.now());
+    const runtimeMs = nowFn() - opts.spawnStartedAt;
+    try {
+      await writeAgentInvokeEvent({
+        targetRepoRoot,
+        sessionUlid,
+        agent: "generalist-dev",
+        ref,
+        runtimeMs,
+      });
+    } catch (err) {
+      chatLog.push(
+        `agent-invoke telemetry write failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Story 4.12 AC6: detect Claude session-quota strings BEFORE the
+  // recoverable-error marker check. A session-quota wall is recoverable
+  // (operator re-runs after the quota resets) but takes precedence over
+  // any other classification — the dev simply could not complete.
+  // ---------------------------------------------------------------------------
+
+  if (detectSessionQuotaExhausted(devTranscript)) {
+    const currentManifest = await readManifest(manifestPath);
+    await writeManifest(manifestPath, {
+      ...currentManifest,
+      blocked_by: "session-quota-exhausted",
+    });
+    chatLog.push(
+      `Story ${ref} paused — session quota exhausted; retry after quota resets`,
+    );
+    return { next: "done-blocked-session-quota-exhausted", chatLog };
+  }
 
   // ---------------------------------------------------------------------------
   // Step 1: Check for the locked recoverable-error marker line FIRST.
