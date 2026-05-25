@@ -358,6 +358,39 @@ describe("AC4(d): structured acResults for the three fixture ACs", () => {
     );
   });
 
+  it("plugin.test_cwd from .crew/config.yaml overrides the vitest cwd (4.12 reviewer-runner cwd fix)", async () => {
+    // Rewrite .crew/config.yaml with a nested-workspace test_cwd setting.
+    await atomicWriteFile(
+      path.join(tmpRoot, ".crew", "config.yaml"),
+      "adapter: native\nadapter_config: {}\nplugin:\n  test_cwd: nested/workspace\n",
+    );
+    await fs.mkdir(path.join(tmpRoot, "nested", "workspace"), { recursive: true });
+
+    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 } });
+    await callSession({ execaImpl: passingStub });
+
+    const stub = passingStub as unknown as ReturnType<typeof vi.fn>;
+    const vitestCall = stub.mock.calls.find(
+      (c: unknown[]) => c[0] === "pnpm",
+    );
+    expect(vitestCall).toBeDefined();
+    const opts = vitestCall![2] as { cwd?: string };
+    expect(opts.cwd).toBe(path.resolve(tmpRoot, "nested/workspace"));
+  });
+
+  it("plugin.test_cwd omitted → vitest cwd defaults to targetRepoRoot", async () => {
+    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 } });
+    await callSession({ execaImpl: passingStub });
+
+    const stub = passingStub as unknown as ReturnType<typeof vi.fn>;
+    const vitestCall = stub.mock.calls.find(
+      (c: unknown[]) => c[0] === "pnpm",
+    );
+    expect(vitestCall).toBeDefined();
+    const opts = vitestCall![2] as { cwd?: string };
+    expect(opts.cwd).toBe(tmpRoot);
+  });
+
   it("AC3: manual-check-required, reason contains 'manual check required'", async () => {
     const result = await callSession();
 

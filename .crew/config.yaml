@@ -1,3 +1,8 @@
 adapter: bmad
 adapter_config:
   stories_root: _bmad-output/implementation-artifacts
+plugin:
+  # Dogfood layout: the pnpm workspace lives at plugins/crew/, not the repo
+  # root. The reviewer's `pnpm vitest -t <filter>` calls need cwd inside the
+  # workspace.
+  test_cwd: plugins/crew

@@ -216,11 +216,11 @@ async function runVitestCheck(
   index: number,
   tag: string | null,
   testNameFilter: string,
-  targetRepoRoot: string,
+  vitestCwd: string,
   execaImpl: typeof defaultExeca,
 ): Promise<AcResult> {
   const result = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
-    cwd: targetRepoRoot,
+    cwd: vitestCwd,
     reject: false,
     timeout: VITEST_TIMEOUT_MS,
   });
@@ -325,6 +325,14 @@ export async function runReviewerSession(
   const workspace = await resolveWorkspace({ targetRepoRoot });
   const sourceStory = await workspace.activeAdapter.readSourceStory(ref);
 
+  // Resolve where `pnpm vitest -t <filter>` runs. Defaults to targetRepoRoot
+  // (the normal case for projects whose package.json lives at the repo root).
+  // Dogfood / nested-workspace projects set `plugin.test_cwd` in .crew/config.yaml
+  // to the subdirectory that hosts the workspace.
+  const vitestCwd = workspace.pluginSettings.test_cwd
+    ? path.resolve(targetRepoRoot, workspace.pluginSettings.test_cwd)
+    : targetRepoRoot;
+
   // -------------------------------------------------------------------------
   // Read 2: PR diff via gh wrapper
   // -------------------------------------------------------------------------
@@ -388,7 +396,7 @@ export async function runReviewerSession(
         ac.index,
         ac.tag,
         classification.testNameFilter!,
-        targetRepoRoot,
+        vitestCwd,
         execaImpl,
       );
     } else {
