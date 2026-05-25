@@ -252,3 +252,74 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
     expect(raw).toContain("Completion seam (revised)");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story 4.13 (AC4) — start-skill-content covers Epic 4 new prose anchors
+//
+// Retro carry-forward #7: locked-phrase grammar drift has three fresh examples
+// this epic (4.6 / 4.8 / 4.10b reviewer Lows). Pattern: new prose ships with no
+// anchor test. This block adds one structural-anchor assertion per new step
+// added by Stories 4-10b / 4-11 / 4-12 (only 4-10b shipped SKILL.md prose
+// additions per `git log --since="2026-05-23" -- plugins/crew/skills/start/SKILL.md`).
+// ---------------------------------------------------------------------------
+
+describe("start-skill-content covers Epic 4 new prose anchors (Story 4.13 AC4)", () => {
+  let skillContent: string;
+
+  beforeAll(async () => {
+    skillContent = await fs.readFile(SKILL_FILE, "utf8");
+  });
+
+  // Story 4-10b — auto-merge gate (commit dec3b60) added Step 12a and its branches.
+  it("Step 12a — auto-merge gate header anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("Step 12a — auto-merge gate");
+  });
+
+  it("Step 12a — runAutoMergeGate invocation anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("runAutoMergeGate({ targetRepoRoot, sessionUlid })");
+  });
+
+  it("Step 12a — `merged` branch chat-surface anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("PR #${prNumber} auto-merged (risk:low, agreement:${(agreementRatio * 100).toFixed(1)}%)");
+  });
+
+  it("Step 12a — `paused-medium` branch chat-surface anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("PR #${prNumber} paused — risk_tier: medium");
+  });
+
+  it("Step 12a — `paused-high` branch chat-surface anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("PR #${prNumber} paused — risk_tier: high");
+  });
+
+  it("Step 12a — `paused-missing-risk-tier` branch chat-surface anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("PR #${prNumber} paused — risk_tier missing on reviewer-result (run pre-dates 4.9b or classifier failed)");
+  });
+
+  it("Step 12a — `paused-residual-medium-or-higher` branch chat-surface anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("PR #${prNumber} paused — ${residuals.medium + residuals.high} unresolved medium/high finding(s)");
+  });
+
+  it("Step 12a — `paused-sub-threshold` branch chat-surface anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("PR #${prNumber} paused — agreement ${(agreementRatio * 100).toFixed(1)}% below threshold ${(threshold * 100).toFixed(1)}%");
+  });
+
+  it("Step 12a — `paused-insufficient-data` branch chat-surface anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("PR #${prNumber} paused — insufficient telemetry to compute agreement (need ≥50 resolved verdicts)");
+  });
+
+  it("Step 12a — `skipped-no-session-result` branch chat-surface anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("auto-merge-gate skipped — no reviewer-result.json");
+  });
+
+  it("Step 12a — `skipped-not-ready-for-merge` branch chat-surface anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("auto-merge-gate skipped — verdict was ${verdict}");
+  });
+
+  it("Step 12a — best-effort failure log anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("auto-merge-gate failed: <error.message>");
+  });
+
+  it("Failure modes — auto-merge-gate failure entry anchor (Story 4-10b)", () => {
+    expect(skillContent).toContain("**auto-merge-gate failure**");
+  });
+});

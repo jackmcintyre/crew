@@ -28,6 +28,7 @@ import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processDevTranscript } from "../process-dev-transcript.js";
+import { DevOutcomeFileMalformedError } from "../../errors.js";
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -470,7 +471,7 @@ describe("Story 4.8b (5c) — fallback path: no dev-outcome.json → regex scan 
     });
 });
 describe("Story 4.8b (5d) — malformed JSON in dev-outcome.json → DevOutcomeFileMalformedError", () => {
-    it("throws DevOutcomeFileMalformedError and does NOT fall back to transcript scanning", async () => {
+    it("processDevTranscript with dev-outcome.json containing malformed JSON throws DevOutcomeFileMalformedError (does NOT fall back to transcript scanning)", async () => {
         await writeDevOutcomeFile(tmpRoot, "{ this is not valid json !!!");
         // Even with a valid PR URL in transcript, must NOT fall back
         const transcript = `PR: https://github.com/test-org/test-repo/pull/77\n${HANDOFF_PHRASE}`;
@@ -479,11 +480,11 @@ describe("Story 4.8b (5d) — malformed JSON in dev-outcome.json → DevOutcomeF
             sessionUlid: SESSION_ULID,
             ref: STORY_REF,
             devTranscript: transcript,
-        })).rejects.toThrow("dev-outcome.json");
+        })).rejects.toBeInstanceOf(DevOutcomeFileMalformedError);
     });
 });
 describe("Story 4.8b (5e) — missing prNumber field → DevOutcomeFileMalformedError", () => {
-    it("throws DevOutcomeFileMalformedError when prNumber is absent from dev-outcome.json", async () => {
+    it("processDevTranscript with dev-outcome.json missing prNumber field throws DevOutcomeFileMalformedError", async () => {
         await writeDevOutcomeFile(tmpRoot, {
             prUrl: "https://github.com/test-org/test-repo/pull/42",
             branch: "story/test-branch",
@@ -496,7 +497,7 @@ describe("Story 4.8b (5e) — missing prNumber field → DevOutcomeFileMalformed
             sessionUlid: SESSION_ULID,
             ref: STORY_REF,
             devTranscript: transcript,
-        })).rejects.toThrow("dev-outcome.json");
+        })).rejects.toBeInstanceOf(DevOutcomeFileMalformedError);
     });
 });
 describe("Story 4.8b (5f) — non-regression: no dev-outcome.json, no PR URL → PrUrlNotFoundInDevTranscriptError", () => {
