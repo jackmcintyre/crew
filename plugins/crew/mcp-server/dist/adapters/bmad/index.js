@@ -1,8 +1,10 @@
 import { promises as fs, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
+import { parse as yamlParse } from "yaml";
 import { z } from "zod";
-import { AmbiguousBmadRefError, MalformedBmadStoryError, UnknownBmadRefError, } from "../../errors.js";
+import { AmbiguousBmadRefError, BmadLlmExtractionError, MalformedBmadStoryError, UnknownBmadRefError, } from "../../errors.js";
 import { validateStoryAgainstDiscipline } from "../../validators/planning-discipline.js";
+import { extractBmadStoryViaLlm } from "./extract-bmad-story-llm.js";
 import { parseBmadStory } from "./parse-bmad-story.js";
 import { mapBmadStatusToExecution, reconcileStatus, } from "./map-bmad-status.js";
 /**
@@ -61,6 +63,78 @@ function absStoriesRoot(ctx) {
 // The optional [a-z] captures the single-letter suffix shape observed in this
 // repo (4-8b, 5-4b). Wider patterns risk colliding with the slug class.
 const BMAD_FILENAME_RE = /^\d+-\d+[a-z]?-[a-z0-9-]+\.md$/;
+/**
+ * Story 3.9 Task 4: cheap pre-read filter that skips done/optional
+ * stories at the directory walk. Reads only the first ~4 KB of the
+ * file looking for a `Status:` line; returns true if the value is
+ * `done` or `optional`. Stops scanning after the first `## ` heading
+ * (Status must appear in the preamble per the parser contract).
+ *
+ * Defensive: any IO error returns false so the regular parser path
+ * runs and either succeeds or throws a useful error.
+ */
+async function shouldSkipDoneAtWalk(absFile) {
+    let head;
+    try {
+        const handle = await fs.open(absFile, "r");
+        try {
+            const buf = Buffer.alloc(4096);
+            const { bytesRead } = await handle.read(buf, 0, buf.length, 0);
+            head = buf.subarray(0, bytesRead).toString("utf8");
+        }
+        finally {
+            await handle.close();
+        }
+    }
+    catch {
+        return false;
+    }
+    const lines = head.split("\n");
+    for (const raw of lines) {
+        if (/^##\s/.test(raw))
+            return false;
+        const m = /^Status:\s*(\S.*?)\s*$/.exec(raw);
+        if (m) {
+            const value = m[1].toLowerCase();
+            return value === "done" || value === "optional";
+        }
+    }
+    return false;
+}
+/**
+ * Story 3.9 Task 4 (belt-and-braces): if a sprint-status.yaml file
+ * exists at the documented BMad path, return the set of refs marked
+ * `done` in `development_status:`. Used to short-circuit parsing for
+ * already-shipped stories whose source file may have drifted.
+ */
+async function readSprintStatusDoneRefs(targetRepo) {
+    const candidate = path.join(targetRepo, "_bmad-output", "implementation-artifacts", "sprint-status.yaml");
+    try {
+        const raw = await fs.readFile(candidate, "utf8");
+        const parsed = yamlParse(raw);
+        const out = new Set();
+        for (const [key, value] of Object.entries(parsed?.development_status ?? {})) {
+            if (typeof value === "string" && value === "done") {
+                // Story keys may be either `1-1-...slug` or `epic-1` — only the
+                // slug-shaped ones map to story files. Pull the epic + story
+                // number out of the key for matching the filename pattern later.
+                const m = /^(\d+)-(\d+[a-z]?)-/.exec(key);
+                if (m) {
+                    out.add(`${m[1]}-${m[2]}`);
+                }
+            }
+        }
+        return out;
+    }
+    catch {
+        return new Set();
+    }
+}
+function fileKeyForSprintStatus(absFile) {
+    const base = path.basename(absFile);
+    const m = /^(\d+)-(\d+[a-z]?)-/.exec(base);
+    return m ? `${m[1]}-${m[2]}` : null;
+}
 async function readStoriesDir(absRoot) {
     // Returns absolute paths of BMad-shaped story files. Walks one level
     // of subdirectory deep (Task 3.2 — defensive against future
@@ -214,46 +288,8 @@ export const BmadAdapter = {
         return false;
     },
     async listSourceStories() {
-        const ctx = requireContext();
-        const absRoot = absStoriesRoot(ctx);
-        const files = await readStoriesDir(absRoot);
-        // Build (and validate uniqueness of) the ref index off the same
-        // file set. This keeps the cold-cache and warm-cache callers in
-        // sync.
-        refIndex = buildRefIndex(files, absRoot);
-        refIndexFor = ctx;
-        // Parse, drop optionals, sort numerically.
-        const parsed = [];
-        for (const file of files) {
-            const contents = await fs.readFile(file, "utf8");
-            const story = parseBmadStory(file, contents);
-            const status = story.raw_frontmatter["status"];
-            if (status === "optional")
-                continue;
-            parsed.push(story);
-        }
-        // Story 3.8: sort by (epic, storyNumericPart, storySuffix) so that e.g.
-        // "4.8" sorts before "4.8b" (numeric part equal, no-suffix < suffix).
-        parsed.sort((a, b) => {
-            const ea = a.raw_frontmatter["id"];
-            const eb = b.raw_frontmatter["id"];
-            // id shape: "<epic>.<story>" where story may be "8" or "8b".
-            const [aeStr, asStr] = ea.split(".");
-            const [beStr, bsStr] = eb.split(".");
-            const ae = parseInt(aeStr, 10);
-            const be = parseInt(beStr, 10);
-            if (ae !== be)
-                return ae - be;
-            // Extract numeric prefix and letter suffix from story part.
-            const [, asNum, asSuf] = /^(\d+)([a-z]?)$/.exec(asStr) ?? ["", "0", ""];
-            const [, bsNum, bsSuf] = /^(\d+)([a-z]?)$/.exec(bsStr) ?? ["", "0", ""];
-            const numDiff = parseInt(asNum, 10) - parseInt(bsNum, 10);
-            if (numDiff !== 0)
-                return numDiff;
-            // Same numeric part — no suffix comes before letter suffix.
-            return (asSuf ?? "").localeCompare(bsSuf ?? "");
-        });
-        return parsed;
+        const result = await listSourceStoriesResilient();
+        return result.stories;
     },
     async readSourceStory(ref) {
         const ctx = requireContext();
@@ -303,6 +339,102 @@ export const BmadAdapter = {
         return validateStoryAgainstDiscipline(story);
     },
 };
+export async function listSourceStoriesResilient(options) {
+    const ctx = requireContext();
+    const absRoot = absStoriesRoot(ctx);
+    const files = await readStoriesDir(absRoot);
+    // Build (and validate uniqueness of) the ref index off the same
+    // file set. Files that ultimately fail both parsing paths still
+    // count toward ref-collision detection — they have a known filename.
+    refIndex = buildRefIndex(files, absRoot);
+    refIndexFor = ctx;
+    // Story 3.9 Task 4: pre-load sprint-status done refs once per call.
+    const doneFromSprintStatus = await readSprintStatusDoneRefs(ctx.targetRepo);
+    const parsed = [];
+    const extractedByLlm = [];
+    const unparseable = [];
+    let skippedDone = 0;
+    for (const file of files) {
+        // Story 3.9 Task 4 — cheap status pre-read.
+        if (await shouldSkipDoneAtWalk(file)) {
+            skippedDone += 1;
+            continue;
+        }
+        // Belt-and-braces: skip if sprint-status.yaml lists this ref as done.
+        const sprintKey = fileKeyForSprintStatus(file);
+        if (sprintKey && doneFromSprintStatus.has(sprintKey)) {
+            skippedDone += 1;
+            continue;
+        }
+        const contents = await fs.readFile(file, "utf8");
+        // Story 3.9 Task 1 — per-file isolation seam.
+        try {
+            const story = parseBmadStory(file, contents);
+            const status = story.raw_frontmatter["status"];
+            if (status === "optional")
+                continue; // Defensive: parser-side filter (Story 3.8 contract).
+            parsed.push(story);
+        }
+        catch (regexErr) {
+            if (!(regexErr instanceof MalformedBmadStoryError))
+                throw regexErr;
+            // Try the LLM fallback (Story 3.9 Task 2).
+            try {
+                const extractOpts = {
+                    targetRepoRoot: ctx.targetRepo,
+                    ...options?.extractOptionsOverride,
+                };
+                const story = await extractBmadStoryViaLlm(file, contents, extractOpts);
+                parsed.push(story);
+                extractedByLlm.push(story.ref);
+            }
+            catch (llmErr) {
+                const llmMessage = llmErr instanceof BmadLlmExtractionError
+                    ? llmErr.reason + (llmErr.underlying ? ` (${llmErr.underlying})` : "")
+                    : llmErr instanceof Error
+                        ? llmErr.message
+                        : String(llmErr);
+                unparseable.push({
+                    path: file,
+                    refGuess: refGuessFromFilename(file),
+                    regexError: regexErr.reason,
+                    llmError: llmMessage,
+                });
+            }
+        }
+    }
+    // Story 3.8: sort by (epic, storyNumericPart, storySuffix) so that e.g.
+    // "4.8" sorts before "4.8b" (numeric part equal, no-suffix < suffix).
+    parsed.sort((a, b) => {
+        const ea = a.raw_frontmatter["id"] ?? refToId(a.ref);
+        const eb = b.raw_frontmatter["id"] ?? refToId(b.ref);
+        const [aeStr, asStr] = ea.split(".");
+        const [beStr, bsStr] = eb.split(".");
+        const ae = parseInt(aeStr, 10);
+        const be = parseInt(beStr, 10);
+        if (ae !== be)
+            return ae - be;
+        const [, asNum, asSuf] = /^(\d+)([a-z]?)$/.exec(asStr) ?? ["", "0", ""];
+        const [, bsNum, bsSuf] = /^(\d+)([a-z]?)$/.exec(bsStr) ?? ["", "0", ""];
+        const numDiff = parseInt(asNum, 10) - parseInt(bsNum, 10);
+        if (numDiff !== 0)
+            return numDiff;
+        return (asSuf ?? "").localeCompare(bsSuf ?? "");
+    });
+    return { stories: parsed, extractedByLlm, unparseable, skippedDone };
+}
+function refToId(ref) {
+    const m = /^bmad:(\d+)\.(\d+[a-z]?)$/.exec(ref);
+    if (!m)
+        return "0.0";
+    return `${m[1]}.${m[2]}`;
+}
+function refGuessFromFilename(file) {
+    const es = epicStoryFromFilename(file);
+    if (!es)
+        return null;
+    return `bmad:${es.epic}.${es.story}`;
+}
 // Re-exports — the test suite and downstream consumers import these via
 // the adapter's index module for a single entry point per adapter
 // (Task 9.2).

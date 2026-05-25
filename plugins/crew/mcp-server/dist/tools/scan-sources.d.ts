@@ -42,6 +42,19 @@ export interface ScanResult {
         path: string;
         message: string;
     }>;
+    /**
+     * Story 3.9: refs whose `SourceStory` was produced by the LLM-fallback
+     * extractor (the regex parser threw, LLM extraction succeeded). These
+     * refs ALSO appear in `createdRefs`/`updatedRefs`/`unchangedRefs` — this
+     * field is the audit trail for fallback usage.
+     */
+    extractedByLlmRefs: string[];
+    /**
+     * Story 3.9: files that failed BOTH the regex parser AND the LLM
+     * fallback. Each entry was written to `blocked/<ref>.yaml` with
+     * `blocked_by: "unparseable"`. The refs ALSO appear in `blockedRefs`.
+     */
+    unparseableRefs: string[];
 }
 /**
  * Render a `ScanResult` as a human-readable text summary.

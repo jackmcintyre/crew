@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
+import { listSourceStoriesResilient } from "../adapters/bmad/index.js";
 import { MalformedExecutionManifestError } from "../errors.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { ExecutionManifestSchema, parseExecutionManifest, } from "../schemas/execution-manifest.js";
@@ -44,6 +45,17 @@ export function renderScanResult(result) {
     }
     else {
         lines.push(`blocked:   0 ref(s)`);
+    }
+    // Story 3.9: surface fallback extraction and unparseable refs.
+    if ((result.extractedByLlmRefs ?? []).length > 0) {
+        lines.push(`extracted-by-llm: ${result.extractedByLlmRefs.length} ref(s) — ` +
+            result.extractedByLlmRefs.join(", ") +
+            ` (regex parser failed; LLM fallback recovered the story)`);
+    }
+    if ((result.unparseableRefs ?? []).length > 0) {
+        lines.push(`unparseable: ${result.unparseableRefs.length} ref(s) — ` +
+            result.unparseableRefs.join(", ") +
+            ` (both regex parser AND LLM fallback failed — fix the source story and re-run /crew:scan)`);
     }
     // Story 3.8 AC3: structured warnings (e.g. unknown Status values).
     if ((result.warnings ?? []).length > 0) {
@@ -143,8 +155,23 @@ export async function scanSources(opts) {
     // Step 1: Resolve the workspace. Throws on misconfiguration.
     const workspace = await resolveWorkspace({ targetRepoRoot: opts.targetRepoRoot });
     const { activeAdapter, activeAdapterName, adapterConfig, targetRepoRoot } = workspace;
-    // Step 2: List source stories from the active adapter.
-    const sourceStories = await activeAdapter.listSourceStories();
+    // Step 2: List source stories from the active adapter. Story 3.9
+    // introduces a richer BMad path that surfaces LLM-fallback metadata
+    // and per-file parse failures; other adapters keep the original
+    // narrow contract.
+    let sourceStories;
+    let resilient = null;
+    if (activeAdapterName === "bmad") {
+        resilient = await listSourceStoriesResilient();
+        sourceStories = resilient.stories;
+        if (resilient.extractedByLlm.length > 10) {
+            console.warn(`[scanSources] LLM fallback fired ${resilient.extractedByLlm.length} times in one scan. ` +
+                `Each fallback costs one Claude call; consider tidying the source stories so the regex parser handles them.`);
+        }
+    }
+    else {
+        sourceStories = await activeAdapter.listSourceStories();
+    }
     const result = {
         targetRepoRoot,
         adapterName: activeAdapterName,
@@ -154,7 +181,18 @@ export async function scanSources(opts) {
         skippedRefs: [],
         blockedRefs: [],
         warnings: [],
+        extractedByLlmRefs: resilient?.extractedByLlm ?? [],
+        unparseableRefs: [],
     };
+    // Story 3.9 — bookkeeping warning for high fallback volume.
+    if (resilient && resilient.extractedByLlm.length > 10) {
+        result.warnings.push({
+            path: targetRepoRoot,
+            message: `LLM fallback fired ${resilient.extractedByLlm.length} times in this scan. ` +
+                `Each fallback costs one Claude call (Haiku 4.5, Sonnet 4.6 on retry). ` +
+                `Consider tidying the source stories so the regex parser handles them.`,
+        });
+    }
     const stateRoot = path.join(targetRepoRoot, ".crew", "state");
     // Startup guard: resolve any refs that appear in both to-do/ and blocked/
     // simultaneously. This can occur if a previous blocked→to-do promotion wrote
@@ -188,6 +226,102 @@ export async function scanSources(opts) {
             if (toDoRefs.has(ref)) {
                 console.warn(`[scanSources] Ref ${ref} exists in both to-do/ and blocked/ — recovering by removing stale blocked/ manifest (to-do/ wins).`);
                 await fs.unlink(path.join(blockedDir, blockedFile));
+            }
+        }
+    }
+    // Story 3.9: route unparseable BMad files (both regex parser AND LLM
+    // fallback failed) to blocked/<ref>.yaml with blocked_by: "unparseable".
+    // The scan continues — these refs do NOT halt the run.
+    if (resilient) {
+        for (const entry of resilient.unparseable) {
+            const ref = entry.refGuess ?? `bmad:unparseable-${path.basename(entry.path)}`;
+            // Compose a minimal blocked manifest. We do not have a parsed
+            // SourceStory, so we synthesise the required schema fields directly.
+            const sourceHash = await (async () => {
+                try {
+                    const buf = await fs.readFile(entry.path);
+                    const { createHash } = await import("node:crypto");
+                    return createHash("sha256").update(buf).digest("hex");
+                }
+                catch {
+                    // 64-char zero hash satisfies the schema's hex-format requirement
+                    // when the file is unreadable. Drift detection compares this
+                    // against a freshly-computed hash on re-scan; a zero hash will
+                    // always look "changed" which is the right behaviour.
+                    return "0".repeat(64);
+                }
+            })();
+            const blockedManifestRaw = stripUndefined({
+                ref,
+                status: "blocked",
+                adapter: activeAdapterName,
+                source_path: repoRelativePath(entry.path, targetRepoRoot),
+                source_hash: sourceHash,
+                depends_on: [],
+                // Schema requires at least one AC. We synthesise a placeholder so
+                // the manifest validates; the real ACs cannot be recovered from
+                // an unparseable file by definition.
+                acceptance_criteria: [
+                    {
+                        text: "(synthesised) Source file is unparseable — operator must edit the spec and re-run /crew:scan.",
+                        kind: "unit",
+                    },
+                ],
+                title: `Unparseable BMad story at ${path.basename(entry.path)}`,
+                narrative: "The deterministic regex parser AND the LLM fallback both failed to extract a story shape from this file. " +
+                    "Edit the source spec and re-run /crew:scan to recover.",
+                withdrawn: false,
+                blocked_by: "unparseable",
+                // Surface the underlying parser/LLM errors as discipline_violations so
+                // the operator-facing manifest carries the detail without widening the
+                // schema. `code` is the human-readable bucket; `detail` carries the
+                // verbatim error message.
+                discipline_violations: [
+                    {
+                        code: "unparseable-regex",
+                        field: "source_path",
+                        detail: entry.regexError,
+                    },
+                    ...(entry.llmError
+                        ? [
+                            {
+                                code: "unparseable-llm",
+                                field: "source_path",
+                                detail: entry.llmError,
+                            },
+                        ]
+                        : []),
+                ],
+            });
+            try {
+                const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
+                const absBlockedPath = path.join(stateRoot, "blocked", `${ref}.yaml`);
+                const yamlText = yamlStringify(blockedManifest, { lineWidth: 0 });
+                await writeManagedFile({
+                    absPath: absBlockedPath,
+                    contents: yamlText,
+                    targetRepoRoot,
+                    mcpToolContext: { toolName: "scanSources", role: "operator" },
+                });
+                result.blockedRefs.push(ref);
+                result.unparseableRefs.push(ref);
+                result.warnings.push({
+                    path: entry.path,
+                    message: `BMad story at \`${entry.path}\` is unparseable: regex parser failed (${entry.regexError})` +
+                        (entry.llmError ? ` and the LLM fallback also failed (${entry.llmError})` : "") +
+                        `. The story has been blocked with reason \`unparseable\` so the scan can continue. ` +
+                        `Edit the spec and re-run /crew:scan.`,
+                });
+                console.warn(`[scanSources] unparseable BMad story at ${entry.path} — routed to blocked/`);
+            }
+            catch (composeErr) {
+                // Defensive: if schema composition itself fails for the synthetic
+                // manifest, log a warning and skip — never crash the scan.
+                console.warn(`[scanSources] failed to compose blocked manifest for unparseable story at ${entry.path}: ${composeErr instanceof Error ? composeErr.message : String(composeErr)}`);
+                result.warnings.push({
+                    path: entry.path,
+                    message: `BMad story at \`${entry.path}\` is unparseable AND a blocked manifest could not be written. Manual cleanup needed.`,
+                });
             }
         }
     }

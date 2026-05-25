@@ -246,6 +246,28 @@ export declare class MalformedBmadStoryError extends DomainError {
     });
 }
 /**
+ * LLM-based extraction of a BMad story (the Story 3.9 fallback path
+ * invoked when `parseBmadStory` throws `MalformedBmadStoryError`)
+ * could not produce a valid `SourceStory`. Causes include: the model
+ * returned malformed JSON, the JSON failed `SourceStorySchema`
+ * validation, the underlying SDK call errored, or the `ANTHROPIC_API_KEY`
+ * environment variable was not set.
+ *
+ * The scan-sources loop catches this and routes the offending file
+ * to `.crew/state/blocked/<ref>.yaml` with `blocked_by: "unparseable"`
+ * (Story 3.9 AC1).
+ */
+export declare class BmadLlmExtractionError extends DomainError {
+    readonly path: string;
+    readonly reason: string;
+    readonly underlying?: string;
+    constructor(opts: {
+        path: string;
+        reason: string;
+        underlying?: string;
+    });
+}
+/**
  * `BmadAdapter.readSourceStory(ref)` or `resolveSourcePath(ref)` was
  * given a ref that does not resolve to any file under `stories_root`.
  */
