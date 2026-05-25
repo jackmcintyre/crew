@@ -98,9 +98,9 @@ function capString(s) {
         return s;
     return s.slice(0, STDOUT_STDERR_CAP) + TRUNCATION_MARKER;
 }
-async function runVitestCheck(index, tag, testNameFilter, targetRepoRoot, execaImpl) {
+async function runVitestCheck(index, tag, testNameFilter, vitestCwd, execaImpl) {
     const result = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
-        cwd: targetRepoRoot,
+        cwd: vitestCwd,
         reject: false,
         timeout: VITEST_TIMEOUT_MS,
     });
@@ -182,6 +182,13 @@ export async function runReviewerSession(opts) {
     // -------------------------------------------------------------------------
     const workspace = await resolveWorkspace({ targetRepoRoot });
     const sourceStory = await workspace.activeAdapter.readSourceStory(ref);
+    // Resolve where `pnpm vitest -t <filter>` runs. Defaults to targetRepoRoot
+    // (the normal case for projects whose package.json lives at the repo root).
+    // Dogfood / nested-workspace projects set `plugin.test_cwd` in .crew/config.yaml
+    // to the subdirectory that hosts the workspace.
+    const vitestCwd = workspace.pluginSettings.test_cwd
+        ? path.resolve(targetRepoRoot, workspace.pluginSettings.test_cwd)
+        : targetRepoRoot;
     // -------------------------------------------------------------------------
     // Read 2: PR diff via gh wrapper
     // -------------------------------------------------------------------------
@@ -231,7 +238,7 @@ export async function runReviewerSession(opts) {
             acResults[ac.index] = await runArtifactCheck(ac.index, ac.tag, classification.artifactPath, targetRepoRoot);
         }
         else if (classification.applicability === "runnable-vitest") {
-            acResults[ac.index] = await runVitestCheck(ac.index, ac.tag, classification.testNameFilter, targetRepoRoot, execaImpl);
+            acResults[ac.index] = await runVitestCheck(ac.index, ac.tag, classification.testNameFilter, vitestCwd, execaImpl);
         }
         else {
             // manual-check-required (spec §2c)
