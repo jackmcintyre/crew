@@ -252,7 +252,92 @@ def extract_acs(story_body: str) -> list[str]:
     return acs
 
 
-def pick_story(dev_status: dict, story_id: str | None) -> str:
+# ---------------------------------------------------------------- dependency-aware picker (Story 5.1b)
+#
+# Story specs may declare upstream dependencies via a `### Dependencies` section
+# whose bullets reference other stories by their `Story <epic>.<num>` key. The
+# picker must skip any backlog candidate whose declared upstream stories have
+# not yet shipped (status != "done"), and halt with `DEPS_NOT_BUILT` when no
+# eligible candidate remains. Motivated by the 4.10b incident (2026-05-25):
+# a dev subagent claimed a story whose upstream code didn't exist and
+# fabricated stubs.
+#
+# Source of truth: prose `### Dependencies` section in the spec + the
+# `development_status` map in sprint-status.yaml. The MCP-side path uses a
+# different source (execution-manifest `depends_on` + `done/<dep>.yaml`); the
+# two are intentionally independent — see Story 4.3b lineage.
+
+# Matches `Story 4.10`, `Story 4.10b`, `Story 5.1`, `Story 5.1b`, etc.
+# Suffix is a single lowercase letter on either the epic or the story num.
+# Must NOT match `Stories 4.10`, `STORY 4.10`, `4.10b`.
+_DEP_STORY_REF_RE = re.compile(r"\bStory\s+(\d+[a-z]?)\.(\d+[a-z]?)\b")
+_DEP_SECTION_HEADER_RE = re.compile(r"^### Dependencies\s*$", re.MULTILINE)
+_DEP_SECTION_END_RE = re.compile(r"^#{1,3}\s+\S", re.MULTILINE)
+
+
+def _parse_spec_deps(spec_path: Path) -> list[str]:
+    """Return normalised story-key prefixes from a spec's `### Dependencies` section.
+
+    Each match is normalised to hyphenated form (`Story 4.10` -> `"4-10"`,
+    `Story 5.1b` -> `"5-1b"`) suitable for prefix-matching against
+    sprint-status keys.
+
+    Returns `[]` for: missing spec file, missing section, empty section, or a
+    section whose bullets contain only non-story references (FR refs,
+    architecture refs, file paths). Non-story refs are silently skipped — this
+    is by design, since `### Dependencies` is also used for prose cross-refs.
+    """
+    if not spec_path.exists():
+        return []
+    text = spec_path.read_text()
+    m = _DEP_SECTION_HEADER_RE.search(text)
+    if not m:
+        return []
+    body_start = m.end()
+    end_m = _DEP_SECTION_END_RE.search(text, pos=body_start)
+    body = text[body_start:end_m.start()] if end_m else text[body_start:]
+    return [f"{epic}-{num}" for epic, num in _DEP_STORY_REF_RE.findall(body)]
+
+
+def _resolve_deps_to_status(
+    dep_refs: list[str], dev_status: dict
+) -> list[tuple[str, str]]:
+    """Resolve each normalised ref to `(matched_full_key, current_status)`.
+
+    Lookup is prefix-match: ref `"4-10"` matches sprint-status key
+    `"4-10-agreement-metric-helper-compute-agreement"` but NOT
+    `"4-10b-auto-merge-gate-…"` (the `-` boundary is enforced). If a ref
+    matches no sprint-status key, returns `(ref, "<not-in-sprint-status>")`
+    so the caller can treat unresolved refs as unmet rather than raising.
+    """
+    keys = list(dev_status.keys())
+    out: list[tuple[str, str]] = []
+    for ref in dep_refs:
+        prefix = f"{ref}-"
+        matched: str | None = next((k for k in keys if k.startswith(prefix)), None)
+        if matched is None:
+            out.append((ref, "<not-in-sprint-status>"))
+        else:
+            out.append((matched, dev_status[matched]))
+    return out
+
+
+def _unmet_deps(spec_path: Path, dev_status: dict) -> list[dict]:
+    """Return `[{ref, status}]` for declared deps NOT at `done`. Empty means ready."""
+    refs = _parse_spec_deps(spec_path)
+    resolved = _resolve_deps_to_status(refs, dev_status)
+    return [{"ref": ref, "status": status} for ref, status in resolved if status != "done"]
+
+
+def _default_spec_dir() -> Path:
+    return REPO / "_bmad-output/implementation-artifacts"
+
+
+def pick_story(
+    dev_status: dict,
+    story_id: str | None,
+    spec_dir: Path | None = None,
+) -> str:
     if story_id:
         for key in story_keys(dev_status):
             if key == story_id or key.startswith(story_id + "-"):
@@ -269,11 +354,30 @@ def pick_story(dev_status: dict, story_id: str | None) -> str:
     if not candidates:
         die("no backlog stories remaining")
 
+    # Epic-preference: narrow to candidates in an in-progress epic if any exist.
     if in_progress_epics:
-        for key in candidates:
-            if key.split("-", 1)[0] in in_progress_epics:
-                return key
-    return candidates[0]
+        narrowed = [
+            k for k in candidates if k.split("-", 1)[0] in in_progress_epics
+        ]
+        if narrowed:
+            candidates = narrowed
+
+    # Dependency-readiness check (Story 5.1b). Iterates in declaration order;
+    # returns the first candidate with no unmet deps. Records skip info for
+    # the halt payload when none are eligible.
+    sd = spec_dir if spec_dir is not None else _default_spec_dir()
+    skipped: list[dict] = []
+    for key in candidates:
+        spec_path = sd / f"{key}.md"
+        unmet = _unmet_deps(spec_path, dev_status)
+        if not unmet:
+            return key
+        skipped.append({"story_key": key, "unmet": unmet})
+
+    # No eligible candidate. Halt with structured payload on stdout per AC2.
+    payload = {"halt": "DEPS_NOT_BUILT", "skipped": skipped}
+    sys.stdout.write(json.dumps(payload) + "\n")
+    sys.exit(1)
 
 
 def cmd_resolve(args) -> None:

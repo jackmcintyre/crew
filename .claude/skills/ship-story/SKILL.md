@@ -468,6 +468,7 @@ The skill halts (no PR) on any of these. Each is recorded in the run log before 
 |------|---------|---------------------|
 | `PREFLIGHT_FAIL` | Step 1 caught dirty tree / unauthed gh / missing files | Address what stderr listed |
 | `NO_ELIGIBLE_STORY` | No backlog stories remain or arg matched nothing | Check sprint-status.yaml |
+| `DEPS_NOT_BUILT` | All eligible backlog stories have unshipped upstream dependencies | Author or ship the missing upstream stories first, or use `/ship-story <id>` to target a specific story explicitly (bypasses the dep check) |
 | `MISSING_ACS` | Story has no Acceptance Criteria section | Author the epic before shipping |
 | `WORKTREE_CONFLICT` | Path or branch already exists | Clean up old run before retry |
 | `SPEC_VALIDATION_FAILED` | Step 5 caught spec issues before any code burned | Re-run `bmad-create-story` and re-author, then retry |
