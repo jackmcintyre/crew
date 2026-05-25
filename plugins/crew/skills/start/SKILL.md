@@ -1,7 +1,7 @@
 ---
 name: crew:start
 description: "Claim the next ready story from the backlog, spawn a clean-context generalist-dev subagent, and drain the queue until empty."
-allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, runReviewerSession, postReviewerComments, applyReviewerLabels, Task]
+allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, runReviewerSession, postReviewerComments, applyReviewerLabels, Task, Write]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/4-2-start-skill-and-per-story-dev-subagent-spawn.md § Behavioural contract -->
@@ -45,6 +45,9 @@ After a story is claimed, the inner cycle manages the dev spawn → handoff pars
 **Invariant: The SKILL.md prose MUST pass the transcript verbatim — no summarisation, no editing.**
 `devTranscript` (passed to `processDevTranscript`) MUST be the full final-message string returned by the `Task` tool — no extraction, no trimming. The reviewer's chat transcript is NOT passed to `processReviewerTranscript`; the verdict transport is the `reviewer-result.json` file written by `runReviewerSession` (Story 4.6 revision 2). `runReviewerSession` is the reviewer's only valid verdict-path; `processReviewerTranscript` reads the file, not the chat.
 
+**Invariant: The transcript MUST be persisted to disk before any MCP call.**
+The persistence write in step 4.5 happens between `Task` return (step 4) and `processDevTranscript` (step 5). It is the prose layer's responsibility — there is no MCP tool that can be called here without defeating the durability guarantee (MCP may have died during the Task run).
+
 ## Dev spawn
 
 1. Call `buildPersonaSpawnPrompt({ targetRepoRoot, role: "generalist-dev" })` to get the initial `devPrompt`.
@@ -62,6 +65,22 @@ After a story is claimed, the inner cycle manages the dev spawn → handoff pars
    If this is a rework iteration, also include `rework_iteration: <n>`.
 
 4. When the `Task` tool returns, capture the dev subagent's final message as `devTranscript`.
+
+4.5. Persist `devTranscript` to disk **before any MCP call**. Invoke the built-in `Write` tool with:
+   - `file_path`: `<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/dev-transcript.txt`
+   - `content`: the verbatim `devTranscript` string (no trimming, no JSON-wrapping, no normalisation)
+
+   Surface the verbatim chat line:
+
+   ```
+   dev transcript persisted — .crew/state/sessions/<sessionUlid>/dev-transcript.txt
+   ```
+
+   with `<sessionUlid>` substituted at runtime. The path in the chat line is relative to `targetRepoRoot` (omit the absolute prefix).
+
+   **Why this happens before step 5:** if the MCP child has been idle-reaped during the long `Task` run, step 5 will throw "MCP server has disconnected" and the transcript will be lost. The write here uses Claude Code's built-in `Write` tool, which is independent of the MCP server and remains available after a reap. Story 5.11 reads this file to drive orphan recovery in a later session.
+
+   **On `Write` failure:** surface the error verbatim and halt the inner cycle. Do NOT call `processDevTranscript`. The in-progress manifest is left in place — Story 5.11's orphan-recovery branch will surface it on the next `/crew:start` run.
 
 5. pass the captured devTranscript to processDevTranscript({ targetRepoRoot, sessionUlid, ref, devTranscript }).
 
@@ -149,6 +168,8 @@ The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as th
 - **`postReviewerComments` raising `GhRecoverableError`**: The `gh pr diff` or `gh api` call within `postReviewerComments` failed with a recoverable class (rate-limit, auth, network). Surface the error verbatim and halt the inner cycle — a posting failure indicates an environmental problem worth pausing for. Do NOT proceed to `processReviewerTranscript`.
 
 - **`completeStory` raising `WrongClaimantError` or `InProgressHandEditError`**: On the `READY FOR MERGE` branch, `processReviewerTranscript` calls `completeStory` internally. If the in-progress manifest has been hand-edited since claim (FR14a) OR the session ULID does not match `claimed_by` (FR19), `completeStory` raises `InProgressHandEditError` or `WrongClaimantError` respectively. These errors propagate verbatim THROUGH `processReviewerTranscript` to the prose layer, which surfaces them and exits — the outer loop does NOT advance to the next `claimNextStory` call. Recovery is operator inspection of the in-progress manifest plus a fresh `/crew:start` invocation.
+
+- **`Write` failure persisting dev transcript** (step 4.5): The built-in `Write` tool threw a filesystem error (disk full, permission denied, EROFS). The inner cycle halts; `processDevTranscript` is NOT called; the in-progress manifest is untouched. Operator recovery: inspect filesystem permissions and free space under `<targetRepoRoot>/.crew/state/sessions/`, then re-run `/crew:start`. Once Story 5.11 ships, the next `/crew:start` will surface this manifest as `[orphan]` and route it through the orphan-recovery branch.
 
 Note: `runDevSession` is no longer used. The SKILL.md prose now drives the inner cycle directly via `Task` tool invocations, with `processDevTranscript` and `processReviewerTranscript` handling the parsing and manifest mutations.
 

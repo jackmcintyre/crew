@@ -12,6 +12,11 @@ const SRC_DIR = path.resolve(HERE, "..", "src");
 const FS_WRITE_WHITELIST = new Set<string>([
   path.join(SRC_DIR, "lib", "managed-fs.ts"),
   path.join(SRC_DIR, "lib", "logger.ts"),
+  // Story 5.10: the persistence test exercises raw fs.writeFile to simulate what
+  // SKILL.md step 4.5 does via Claude Code's built-in Write tool. This is a test
+  // file, not production code — the write originates outside mcp-server/src/ in
+  // the prose layer. Whitelisted so the static guard does not flag it.
+  path.join(SRC_DIR, "__tests__", "dev-transcript-persistence.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [
