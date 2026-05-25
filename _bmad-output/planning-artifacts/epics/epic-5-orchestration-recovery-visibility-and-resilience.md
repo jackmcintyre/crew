@@ -20,6 +20,32 @@ So that downstream surfaces (orchestration, retros) can route by reason.
 
 **AC3 (integration):** vitest covers all `blocked_by` reasons and asserts dev keeps picking.
 
+## Story 5.1b: Dependency-aware story picker in `ship.py resolve`
+
+As a plugin maintainer,
+I want the ship-story resolver to skip stories whose declared upstream dependencies haven't shipped yet, and to halt with a clear `DEPS_NOT_BUILT` signal when no other candidate is eligible,
+So that a dev subagent can never claim a story whose upstream code doesn't exist and silently fabricate it (the 4.10b incident, 2026-05-25).
+
+**Acceptance Criteria:**
+
+**Given** a candidate at `backlog` whose spec contains a `### Dependencies` section listing story-key references,
+**When** `ship.py resolve` (no `story_id`) considers it,
+**Then** the picker parses the referenced story-keys, looks each up in `sprint-status.yaml`, and skips the candidate if any referenced key is not at `done`, advancing to the next `backlog` entry.
+
+**Given** the picker has skipped one or more candidates for dep reasons AND no eligible candidate remains,
+**When** `ship.py resolve` would otherwise return,
+**Then** it exits non-zero with halt code `DEPS_NOT_BUILT` and a JSON payload listing each skipped candidate's `story_key`, the unmet dependency refs, and each unmet dep's current status.
+
+**Given** a candidate whose spec has NO `### Dependencies` section,
+**When** the picker considers it,
+**Then** it is treated as having zero declared deps; pre-this-story behaviour is preserved for older specs.
+
+**Given** a `### Dependencies` section containing non-story-ref entries (FR refs, architecture refs, file-path refs),
+**When** the picker parses it,
+**Then** non-story-key entries are skipped silently; only entries matching `Story <epic>[<suffix>?].<num>[<suffix>?]` are extracted and looked up.
+
+**AC5 (integration):** pytest covers skip-on-missing-dep, pass-through-when-deps-done, no-section-no-skip, mixed-refs, chained skip, targeted-pick bypass (`/ship-story <id>` skips the check), and DEPS_NOT_BUILT halt-payload shape.
+
 ## Story 5.2: Heartbeat-based session liveness
 
 As a plugin maintainer,

@@ -2,7 +2,7 @@
 
 story_shape: substrate
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
