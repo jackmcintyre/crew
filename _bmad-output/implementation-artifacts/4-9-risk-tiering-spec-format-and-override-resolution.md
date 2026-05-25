@@ -64,12 +64,16 @@ This story explicitly does NOT introduce `classify-risk-tier`, the MCP tool regi
 **When** parsed,
 **Then** the YAML block declares `tiers:` with `path_patterns`, `change_types` (`revert | migration | schema | dep-bump`), and `diff_size_thresholds`; the body is human-readable Markdown. _(Architecture § Risk-tier classification)_
 
+artifact: plugins/crew/docs/risk-tiering.md
+
 <!-- Not user-surface: AC1 describes the on-disk YAML-frontmatter shape of an internal config file. The operator does not interact with this file in v1; Story 7.1 ships it as part of the bundled example. -->
 
 **AC2:**
 **Given** an optional override at `<target-repo>/docs/risk-tiering.md`,
 **When** the spec loader runs,
 **Then** the override is picked when present, else the shipped default; both files validate against the same Zod schema. _(FR40a)_
+
+vitest: loadRiskTieringSpec resolves override when present
 
 <!-- Not user-surface: AC2 describes the loader's resolution logic. The path is the file's persistence target, not a user-typed input. -->
 
@@ -78,10 +82,14 @@ This story explicitly does NOT introduce `classify-risk-tier`, the MCP tool regi
 **When** the loader parses,
 **Then** it raises a typed `MalformedRiskTieringSpecError` with a human-readable error citing the offending key. _(FR40a)_
 
+vitest: loadRiskTieringSpec throws MalformedRiskTieringSpecError
+
 <!-- Not user-surface: AC3 describes typed-error propagation; no operator-visible chat surface in v1 because there is no caller. -->
 
 **AC4 (integration):**
 vitest covers (a) shipped-default loads, (b) override wins when present, (c) malformed override errors clearly.
+
+vitest: load-risk-tiering-spec
 
 <!-- Not user-surface: vitest integration suite — internal harness only. -->
 
