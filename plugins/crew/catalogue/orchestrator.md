@@ -8,6 +8,8 @@ tools_allow:
   - Task
 gh_allow:
   - pr-view
+  - pr-merge
+  - api
 locked_phrases:
   handoff: "Handoff to <next role> — resuming work"
   yield: "This sits in <role>'s domain — handing off"

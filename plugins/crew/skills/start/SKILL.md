@@ -110,8 +110,19 @@ After a story is claimed, the inner cycle manages the dev spawn → handoff pars
 12. Switch on the `next` field:
     - `done-ready-for-merge` →
       1. Confirm `completed: true` is present on the returned object. This flag signals that `processReviewerTranscript` has already called `completeStory` internally and moved the manifest from `in-progress/<ref>.yaml` to `done/<ref>.yaml` before returning.
-      2. emit the verbatim chat-surface line `story <ref> moved to done — claiming next` (with `<ref>` substituted at runtime).
-      3. return to outer loop step 4 (`claimNextStory`).
+      2. **Step 12a — auto-merge gate.** Invoke `runAutoMergeGate({ targetRepoRoot, sessionUlid })`. This call is best-effort: wrap it in a try/catch. Switch on the `next` field:
+         - `merged` → emit the verbatim chat-surface line `PR #${prNumber} auto-merged (risk:low, agreement:${(agreementRatio * 100).toFixed(1)}%)`.
+         - `paused-medium` → emit `PR #${prNumber} paused — risk_tier: medium`.
+         - `paused-high` → emit `PR #${prNumber} paused — risk_tier: high`.
+         - `paused-missing-risk-tier` → emit `PR #${prNumber} paused — risk_tier missing on reviewer-result (run pre-dates 4.9b or classifier failed)`.
+         - `paused-residual-medium-or-higher` → emit `PR #${prNumber} paused — ${residuals.medium + residuals.high} unresolved medium/high finding(s)`.
+         - `paused-sub-threshold` → emit `PR #${prNumber} paused — agreement ${(agreementRatio * 100).toFixed(1)}% below threshold ${(threshold * 100).toFixed(1)}%`.
+         - `paused-insufficient-data` → emit `PR #${prNumber} paused — insufficient telemetry to compute agreement (need ≥50 resolved verdicts)`.
+         - `skipped-no-session-result` → emit `auto-merge-gate skipped — no reviewer-result.json` and proceed.
+         - `skipped-not-ready-for-merge` → emit `auto-merge-gate skipped — verdict was ${verdict} (defensive — should not reach here on the green branch)` and proceed.
+         - If `runAutoMergeGate` throws: log `auto-merge-gate failed: <error.message>` and do NOT halt. The manifest is already in `done/`; surface the failure and proceed.
+      3. emit the verbatim chat-surface line `story <ref> moved to done — claiming next` (with `<ref>` substituted at runtime).
+      4. return to outer loop step 4 (`claimNextStory`).
     - `done-blocked-reviewer-needs-changes` → emit the verbatim chat line `reviewer verdict: NEEDS CHANGES — story <ref> needs dev rework` (with `<ref>` substituted). The manifest stays in `in-progress/` with `blocked_by: reviewer-verdict-needs-changes` (stamped by `processReviewerTranscript`). Loop back to step 3 (dev spawn) for rework — use the original `devPrompt` from `buildPersonaSpawnPrompt` and include `rework_iteration: <n>` in the `initial_context`.
     - `done-blocked-reviewer-blocked` → emit the verbatim chat line `reviewer verdict: BLOCKED — story <ref> awaiting human`. The manifest stays in `in-progress/` with `blocked_by: reviewer-verdict-blocked`. Do NOT loop — operator must intervene. Return to outer loop step 4.
     - `done-blocked-no-session-result` → emit the verbatim chat line `reviewer did not invoke runReviewerSession — story <ref> awaiting human`. The manifest stays in `in-progress/` with `blocked_by` already stamped by `processReviewerTranscript`. Do NOT loop — operator must inspect why `reviewer-result.json` was not written. Return to outer loop step 4.
@@ -145,6 +156,8 @@ The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as th
 - **`GhApiResponseShapeError`** (from `postReviewerComments`): `gh api` or `gh pr view` returned a response that could not be parsed as the expected JSON shape. Surface the error verbatim and halt the inner cycle. Do NOT proceed to `processReviewerTranscript`.
 
 - **`GhApiResponseShapeError` or `GhRecoverableError`** (from `applyReviewerLabels` at step 10a): the label-posting `gh api` call failed after a successful `processReviewerTranscript`. This is best-effort: log the failure and proceed to step 11 — do NOT halt. If `applyReviewerLabels` fails in the step-10 or step-9a error handlers (as a secondary best-effort call), log the secondary failure and surface the original error unchanged.
+
+- **auto-merge-gate failure** (any error from `runAutoMergeGate` at step 12a): logged best-effort; the manifest stays in `done/`; the PR stays open for manual merge. FR42 override preserved.
 
 - **`postReviewerComments` raising `GhRecoverableError`**: The `gh pr diff` or `gh api` call within `postReviewerComments` failed with a recoverable class (rate-limit, auth, network). Surface the error verbatim and halt the inner cycle — a posting failure indicates an environmental problem worth pausing for. Do NOT proceed to `processReviewerTranscript`.
 
