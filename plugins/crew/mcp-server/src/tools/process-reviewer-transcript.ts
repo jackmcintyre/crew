@@ -58,6 +58,8 @@ import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { completeStory } from "./complete-story.js";
 import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
 import type { RecommendedVerdict } from "./run-reviewer-session.js";
+import { writeAgentInvokeEvent } from "../lib/agent-invoke-writer.js";
+import { detectSessionQuotaExhausted } from "../lib/session-quota-detector.js";
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -82,6 +84,11 @@ export type ProcessReviewerTranscriptResult =
        */
       next: "done-blocked-no-session-result";
       chatLog: string[];
+    }
+  | {
+      /** Story 4.12 AC6: reviewer transcript contained session-quota string. */
+      next: "done-blocked-session-quota-exhausted";
+      chatLog: string[];
     };
 
 // ---------------------------------------------------------------------------
@@ -93,6 +100,16 @@ export interface ProcessReviewerTranscriptOptions {
   sessionUlid: string;
   ref: string;
   manifestPath: string;
+  /** Epoch ms — when the reviewer subagent was spawned (Story 4.12 AC1). */
+  spawnStartedAt?: number;
+  /** Test seam — production callers omit. Story 4.12. */
+  now?: () => number;
+  /**
+   * Optional reviewer subagent transcript. When provided and matching the
+   * session-quota pattern, classifies as `SessionQuotaExhaustedError`
+   * (Story 4.12 AC6).
+   */
+  reviewerTranscript?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +147,41 @@ export async function processReviewerTranscript(
 ): Promise<ProcessReviewerTranscriptResult> {
   const { targetRepoRoot, ref, sessionUlid, manifestPath } = opts;
   const chatLog: string[] = [];
+
+  // Story 4.12 AC1: emit agent.invoke for the reviewer spawn.
+  if (opts.spawnStartedAt !== undefined) {
+    const nowFn = opts.now ?? (() => Date.now());
+    const runtimeMs = nowFn() - opts.spawnStartedAt;
+    try {
+      await writeAgentInvokeEvent({
+        targetRepoRoot,
+        sessionUlid,
+        agent: "generalist-reviewer",
+        ref,
+        runtimeMs,
+      });
+    } catch (err) {
+      chatLog.push(
+        `agent-invoke telemetry write failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // Story 4.12 AC6: detect session-quota strings in reviewer transcript.
+  if (
+    opts.reviewerTranscript &&
+    detectSessionQuotaExhausted(opts.reviewerTranscript)
+  ) {
+    const currentManifest = await readManifest(manifestPath);
+    await writeManifest(manifestPath, {
+      ...currentManifest,
+      blocked_by: "session-quota-exhausted",
+    });
+    chatLog.push(
+      `Story ${ref} paused — session quota exhausted; retry after quota resets`,
+    );
+    return { next: "done-blocked-session-quota-exhausted", chatLog };
+  }
 
   // Read the persisted reviewer-result.json file.
   const resultFile = await readReviewerResultFile(targetRepoRoot, sessionUlid);

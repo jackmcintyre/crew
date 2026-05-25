@@ -60,6 +60,7 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
         detail: z.ZodString;
     }, z.core.$strip>>>;
     claimed_by: z.ZodOptional<z.ZodString>;
+    claimed_at: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     rework_count: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strict>;
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;

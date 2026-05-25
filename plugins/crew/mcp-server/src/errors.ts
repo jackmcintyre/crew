@@ -1237,3 +1237,55 @@ export class DevOutcomeFileMalformedError extends DomainError {
     this.cause = opts.cause;
   }
 }
+
+/**
+ * The dev or reviewer subagent's transcript carried a Claude session-quota
+ * limit string ("You've hit your session limit" or equivalent). The session
+ * cannot continue until the quota resets.
+ *
+ * `recoverable: true` — the operator re-runs `/crew:start` after the quota
+ * resets and the blocked manifest auto-promotes.
+ *
+ * Story 4.12 retro AC6.
+ */
+export class SessionQuotaExhaustedError extends DomainError {
+  readonly recoverable = true as const;
+  readonly failureClass = "session-quota-exhausted" as const;
+  readonly storyRef: string;
+  readonly source: "dev" | "reviewer";
+
+  constructor(opts: { storyRef: string; source: "dev" | "reviewer" }) {
+    super(
+      `Session quota exhausted in ${opts.source} subagent transcript for story ${opts.storyRef}. ` +
+        `Retry after the quota resets. (Story 4.12 AC6)`,
+    );
+    this.storyRef = opts.storyRef;
+    this.source = opts.source;
+  }
+}
+
+/**
+ * The dev's pre-handoff verification (`pnpm -w typecheck && pnpm -w test --run`)
+ * exited non-zero, indicating the suite is red. The dev's locked-phrase
+ * emission alone is not sufficient to advance state.
+ *
+ * `recoverable: true` — the operator can clear the block, fix tests, and re-run.
+ *
+ * Story 4.12 retro AC7.
+ */
+export class PreHandoffSuiteRedError extends DomainError {
+  readonly recoverable = true as const;
+  readonly failureClass = "pre-handoff-suite-red" as const;
+  readonly exitCode: number;
+  readonly stderr: string;
+
+  constructor(opts: { exitCode: number; stderr: string }) {
+    super(
+      `Pre-handoff suite is red — typecheck/test exited with code ${opts.exitCode}. ` +
+        `stderr: ${opts.stderr || "(empty)"}. ` +
+        `Dev's locked-phrase emission is not sufficient to advance state. (Story 4.12 AC7)`,
+    );
+    this.exitCode = opts.exitCode;
+    this.stderr = opts.stderr;
+  }
+}

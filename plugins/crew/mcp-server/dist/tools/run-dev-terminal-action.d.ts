@@ -52,4 +52,10 @@ export declare function runDevTerminalAction(opts: {
     manifestPath: string;
     sessionUlid: string;
     execaImpl?: typeof defaultExeca;
+    /**
+     * Story 4.12 AC7: skip the pre-handoff `pnpm -w typecheck && pnpm -w test --run`
+     * gate. Production callers default to running the gate; tests opt out.
+     * `false` (default) → run the gate; `true` → skip.
+     */
+    skipPreHandoffSuite?: boolean;
 }): Promise<DevTerminalActionResult>;
