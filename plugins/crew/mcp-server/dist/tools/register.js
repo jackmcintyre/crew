@@ -27,6 +27,7 @@ import { runReviewerSession } from "./run-reviewer-session.js";
 import { postReviewerComments } from "./post-reviewer-comments.js";
 import { applyReviewerLabels } from "./apply-reviewer-labels.js";
 import { computeAgreement } from "./compute-agreement.js";
+import { runAutoMergeGate } from "./auto-merge-gate.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -1023,6 +1024,46 @@ export function registerAllTools(server) {
             return {
                 content: [{ type: "text", text: JSON.stringify(result) }],
             };
+        },
+    });
+    // Story 4.10b — runAutoMergeGate: decides auto-merge vs needs-human pause
+    // for the just-completed reviewer run on the READY-FOR-MERGE branch.
+    // Composes computeAgreement (4.10), riskTier from reviewer-result.json (4.9b),
+    // workspace config (plugin.agreement_threshold), and gh (pr-merge / api labels).
+    // FR40, FR41, FR42.
+    server.registerTool({
+        name: "runAutoMergeGate",
+        description: "Decide auto-merge vs needs-human pause for the just-completed reviewer run (FR40, FR41, FR42).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+            },
+            required: ["targetRepoRoot", "sessionUlid"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                sessionUlid: z.string().min(1),
+            })
+                .parse(args);
+            try {
+                const result = await runAutoMergeGate(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
         },
     });
 }
