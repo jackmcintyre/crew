@@ -106,3 +106,28 @@ export declare function readRecentCommitTitles(opts: {
     limit?: number;
     execaImpl?: typeof defaultExeca;
 }): Promise<string[]>;
+/**
+ * Initialise a fresh git repository at `cwd` and create an initial empty
+ * commit. Used by `createSmokeScratchRepo` to seed the smoke-harness
+ * scratch directory so downstream tools (notably the planner) don't see
+ * `git rev-parse failed: HEAD` against a repo with no commits yet.
+ *
+ * Sequence:
+ *   1. `git init -b main` — initialise the repo with a deterministic
+ *      default branch name (avoids depending on the operator's
+ *      `init.defaultBranch` config).
+ *   2. `git -c user.email -c user.name commit --allow-empty -m "<msg>"`
+ *      — author the empty commit with inline identity so the call
+ *      succeeds even when global git identity is unset (CI, fresh
+ *      containers). The `-c` flag scopes the identity to this one
+ *      `commit` invocation; the repo's persistent config is untouched.
+ *
+ * Lives in `lib/git.ts` so the AC6f static guard
+ * (`tests/canonical-fs-guard.test.ts`) stays satisfied — no other file
+ * may spawn `git` directly. Story 4.14.
+ */
+export declare function gitInitWithEmptyCommit(opts: {
+    cwd: string;
+    initialCommitMessage?: string;
+    execaImpl?: typeof defaultExeca;
+}): Promise<void>;

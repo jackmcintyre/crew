@@ -30,6 +30,7 @@ import { computeAgreement } from "./compute-agreement.js";
 import { runAutoMergeGate } from "./auto-merge-gate.js";
 import { getStuckDevClaims } from "./get-stuck-dev-claims.js";
 import { markReviewerTimeout } from "./mark-reviewer-timeout.js";
+import { createSmokeScratchRepo } from "./create-smoke-scratch-repo.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -1145,6 +1146,46 @@ export function registerAllTools(server) {
                 }
                 throw err;
             }
+        },
+    });
+    // Story 4.14 — createSmokeScratchRepo: seed a disposable scratch repo for
+    // operator-smoke runs. Initialises git + initial empty commit, writes a
+    // minimal native-adapter `.crew/config.yaml`, and copies the shipped
+    // standards-doc template to `.crew/standards.md`. Used by the
+    // `/crew:smoke-setup` skill as the first checkpoint step.
+    server.registerTool({
+        name: "createSmokeScratchRepo",
+        description: "Create a disposable smoke-harness scratch repo at " +
+            "`<parentDir>/crew-smoke-<label>-<ulid>/`. Initialises git with an " +
+            "initial empty commit, writes a minimal `.crew/config.yaml` selecting " +
+            "the native adapter, and copies the plugin's shipped standards.md " +
+            "template to `.crew/standards.md`. Returns { scratchRoot } — the " +
+            "cleanup closure is intentionally NOT exposed over MCP (operators inspect " +
+            "failed smokes by hand; `rm -rf` if needed). Story 4.14.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                parentDir: { type: "string" },
+                label: { type: "string" },
+            },
+            required: ["label"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                parentDir: z.string().min(1).optional(),
+                label: z.string().min(1),
+            })
+                .parse(args);
+            const result = await createSmokeScratchRepo(parsed);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify({ scratchRoot: result.scratchRoot }),
+                    },
+                ],
+            };
         },
     });
 }
