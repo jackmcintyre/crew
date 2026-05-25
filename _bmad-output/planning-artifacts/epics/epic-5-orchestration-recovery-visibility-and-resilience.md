@@ -178,4 +178,79 @@ So that I can debug and recover without consulting a remote service or running d
 
 **Given** the README, **When** I navigate to the "what to do if a session dies" page, **Then** it tells me (a) check `<target-repo>/.crew/sessions/` for stale heartbeats, (b) re-run the launching skill, (c) inspect the latest `failure-log/` entry if anything's amiss; the page fits on one screen. _(FR75)_
 
+## Story 5.10: Persist dev transcript to disk before any MCP call
+
+> Added 2026-05-25 as post-mortem follow-up from the dogfood rollback.
+> Source: `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md` § L1 (defect #3).
+
+As a plugin maintainer,
+I want the dev subagent's final message captured to a durable on-disk artefact the instant the subagent returns — before `processDevTranscript` or any other MCP call runs,
+So that an MCP reap mid-cycle does not lose the transcript that carries the handoff phrase and PR URL.
+
+**Acceptance Criteria:**
+
+**Given** a `/crew:start` outer loop with a dev subagent that has just returned,
+**When** the parent receives the subagent's final message,
+**Then** the raw transcript is written to `<target-repo>/.crew/state/transcripts/<session-ulid>.txt` (or equivalent durable path) **before** any MCP tool call is attempted.
+
+**Given** a transcript on disk, **When** MCP is later restarted (e.g. via `/reload-plugins` or a fresh Claude Code session), **Then** the transcript remains readable from the same path with the same content.
+
+**Given** a dev subagent that returned but whose `processDevTranscript` call failed (MCP disconnect, crash, or any error), **When** the operator inspects the workspace, **Then** the persisted transcript is locatable by session ULID alongside the still-in-progress manifest.
+
+**AC4 (integration):** vitest covers (a) transcript write happens before the tool-call attempt, (b) transcript survives a simulated MCP restart, (c) write is atomic (no partial files on crash).
+
+## Story 5.11: Orphan-recovery branch in `/crew:start`
+
+> Added 2026-05-25 as post-mortem follow-up from the dogfood rollback.
+> Source: `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md` § L1 (defect #2).
+> Depends on Story 5.10.
+
+As a plugin operator,
+I want `/crew:start` to detect an orphaned in-progress manifest (one whose `claimed_by` references a session that's no longer alive) and offer to replay its persisted transcript instead of silently moving on to the next claimable story,
+So that a mid-cycle MCP reap does not strand a real PR in `in-progress/` with no path to verdict.
+
+**Acceptance Criteria:**
+
+**Given** an in-progress manifest whose `claimed_by` session ULID is not the current session's ULID (and whose heartbeat — per Story 5.2 — is stale or absent),
+**When** the outer loop of `/crew:start` begins a new claim cycle,
+**Then** the loop surfaces the orphan with a one-line `[orphan] <ref> — claimed_by <stale-ulid>` and asks the operator whether to reattach or skip.
+
+**Given** the operator chooses to reattach **AND** a persisted transcript from Story 5.10 exists for the stale session ULID,
+**When** the loop proceeds,
+**Then** it replays `processDevTranscript` from the persisted transcript and resumes the inner cycle from the handoff step (reviewer spawn) — not from the dev step.
+
+**Given** the operator chooses to reattach **AND** no persisted transcript exists,
+**When** the loop proceeds,
+**Then** it routes the manifest to `blocked/` with `blocked_by: orphan-no-transcript` rather than silently dropping the work.
+
+**Given** the operator chooses to skip,
+**When** the loop proceeds,
+**Then** the orphan is left in `in-progress/` (operator's responsibility) and the loop alphabetically picks the next claimable story.
+
+**AC5 (integration):** vitest seeds an orphaned manifest with and without a persisted transcript and asserts (a) reattach-with-transcript replays the reviewer step exactly once, (b) reattach-without-transcript moves to `blocked/` with the typed reason, (c) skip preserves orphan state.
+
+## Story 5.12: MCP child resilient to parent stdin-close (or confirm host-side knob)
+
+> Added 2026-05-25 as post-mortem follow-up from the dogfood rollback.
+> Source: `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md` § L1 (defect #1).
+> Independent of 5.10 / 5.11.
+
+As a plugin maintainer,
+I want the crew MCP server child to survive Claude Code's parent stdin-close, OR — if that's structurally a host responsibility — confirmation that the host's idle-reap threshold is operator-configurable,
+So that long subagent runs (>10 min) do not trigger an MCP reap mid-cycle.
+
+**Acceptance Criteria:**
+
+**Given** the crew MCP server running as a stdio child of Claude Code, **When** the parent closes the child's stdin after an idle threshold (~10 min observed on 2026-05-25), **Then** at least one of:
+
+- (a) **client-side fix:** the MCP server child remains alive and responsive to new tool calls after stdin close, OR
+- (b) **host-side knob:** documented confirmation (linked from `plugins/crew/docs/`) that the host's idle threshold is configurable in `~/.claude/settings.json` and a recommended setting for crew users is published, OR
+- (c) **escalation artefact:** a written request to Anthropic with the reproduction (diag log from 2026-05-25 + minimal SDK repro) and a tracked response.
+
+**Given** the chosen path (a/b/c), **When** an operator runs `/crew:start` with a single subagent that takes 15+ min, **Then** the MCP server is still responsive on subagent return and `processDevTranscript` succeeds without `/reload-plugins`.
+
+**AC3 (integration):** if path (a) was taken, vitest covers an idle-survival test (kill parent stdin, assert server still answers a follow-up tool call). If path (b) or (c) was taken, the documented artefact is committed under `plugins/crew/docs/` and linked from the resilience guide (Story 5.9).
+
+**Note:** path (a) is preferred for durability. Paths (b)/(c) are acceptable fallbacks if Anthropic's host architecture makes (a) impossible. The diagnostic instrumentation that produced today's evidence is captured in the postmortem § L7 follow-up #5.
+
 ---
