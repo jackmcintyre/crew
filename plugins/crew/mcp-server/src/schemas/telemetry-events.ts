@@ -70,9 +70,42 @@ export const TelemetryInvalidEventSchema = TelemetryEventBase.extend({
     .strict(),
 }).strict();
 
+/**
+ * `reviewer.verdict` — emitted by the reviewer-session pipeline after a
+ * verdict comment is posted to a PR (Story 4.10 / FR67 / NFR24). Joins
+ * the discriminated union additively; existing callers compile unchanged.
+ *
+ * `eventual_merge_action` is `null` at verdict-post time (PR still open)
+ * and is backfilled by a future loop (Story 4.12) once the PR closes —
+ * `merged`, `closed-without-merge`, or `superseded-by-rework`. The
+ * `computeAgreement` helper treats `null` as "unresolved" and excludes
+ * the event from its window.
+ *
+ * `verdict` literals match the locked verdict-line grammar (Story 4.6b)
+ * verbatim — `READY FOR MERGE`, `NEEDS CHANGES`, `BLOCKED` (with spaces).
+ * The writer is responsible for emitting these unchanged; this schema
+ * does not canonicalise them.
+ */
+export const ReviewerVerdictEventSchema = TelemetryEventBase.extend({
+  type: z.literal("reviewer.verdict"),
+  data: z
+    .object({
+      pr_number: z.number().int().positive(),
+      verdict: z.enum(["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED"]),
+      standards_version: z.string().min(1),
+      plugin_version: z.string().min(1),
+      eventual_merge_action: z
+        .enum(["merged", "closed-without-merge", "superseded-by-rework"])
+        .nullable(),
+    })
+    .strict(),
+}).strict();
+
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
+  ReviewerVerdictEventSchema,
 ]);
 
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
+export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;

@@ -61,6 +61,44 @@ export declare const TelemetryInvalidEventSchema: z.ZodObject<{
         zod_message: z.ZodString;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/**
+ * `reviewer.verdict` — emitted by the reviewer-session pipeline after a
+ * verdict comment is posted to a PR (Story 4.10 / FR67 / NFR24). Joins
+ * the discriminated union additively; existing callers compile unchanged.
+ *
+ * `eventual_merge_action` is `null` at verdict-post time (PR still open)
+ * and is backfilled by a future loop (Story 4.12) once the PR closes —
+ * `merged`, `closed-without-merge`, or `superseded-by-rework`. The
+ * `computeAgreement` helper treats `null` as "unresolved" and excludes
+ * the event from its window.
+ *
+ * `verdict` literals match the locked verdict-line grammar (Story 4.6b)
+ * verbatim — `READY FOR MERGE`, `NEEDS CHANGES`, `BLOCKED` (with spaces).
+ * The writer is responsible for emitting these unchanged; this schema
+ * does not canonicalise them.
+ */
+export declare const ReviewerVerdictEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"reviewer.verdict">;
+    data: z.ZodObject<{
+        pr_number: z.ZodNumber;
+        verdict: z.ZodEnum<{
+            "READY FOR MERGE": "READY FOR MERGE";
+            "NEEDS CHANGES": "NEEDS CHANGES";
+            BLOCKED: "BLOCKED";
+        }>;
+        standards_version: z.ZodString;
+        plugin_version: z.ZodString;
+        eventual_merge_action: z.ZodNullable<z.ZodEnum<{
+            merged: "merged";
+            "closed-without-merge": "closed-without-merge";
+            "superseded-by-rework": "superseded-by-rework";
+        }>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     ts: z.ZodString;
     session_id: z.ZodString;
@@ -83,5 +121,27 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
         zod_path: z.ZodString;
         zod_message: z.ZodString;
     }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"reviewer.verdict">;
+    data: z.ZodObject<{
+        pr_number: z.ZodNumber;
+        verdict: z.ZodEnum<{
+            "READY FOR MERGE": "READY FOR MERGE";
+            "NEEDS CHANGES": "NEEDS CHANGES";
+            BLOCKED: "BLOCKED";
+        }>;
+        standards_version: z.ZodString;
+        plugin_version: z.ZodString;
+        eventual_merge_action: z.ZodNullable<z.ZodEnum<{
+            merged: "merged";
+            "closed-without-merge": "closed-without-merge";
+            "superseded-by-rework": "superseded-by-rework";
+        }>>;
+    }, z.core.$strict>;
 }, z.core.$strict>], "type">;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
+export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;
