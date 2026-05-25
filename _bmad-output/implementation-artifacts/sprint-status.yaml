@@ -71,7 +71,7 @@ development_status:
   5-7-back-to-back-idempotency-integration-test: backlog
   5-8-no-silent-failures-ci-pairing-assertion: backlog
   5-9-telemetry-as-files-and-session-death-recovery-guide: backlog
-  5-10-persist-dev-transcript-to-disk-before-any-mcp-call: backlog
+  5-10-persist-dev-transcript-to-disk-before-any-mcp-call: ready-for-dev
   5-11-orphan-recovery-branch-in-crew-start: backlog
   5-12-mcp-child-resilient-to-parent-stdin-close: backlog
   epic-5-retrospective: optional
