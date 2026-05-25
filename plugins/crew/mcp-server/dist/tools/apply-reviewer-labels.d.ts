@@ -5,7 +5,7 @@
  *   _bmad-output/implementation-artifacts/4-8-reviewer-labels-and-negative-capability-enforcement.md
  *
  * Reads the persisted `reviewer-result.json` written by `runReviewerSession`,
- * resolves owner/repo via `gh pr view --json baseRepository`, and applies
+ * resolves owner/repo via `gh pr view --json headRepository,headRepositoryOwner`, and applies
  * GitHub labels to the PR via `gh api POST /issues/{prNumber}/labels`.
  *
  * Label logic:

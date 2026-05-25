@@ -898,7 +898,7 @@ export class ReviewerResultFileMalformedError extends DomainError {
  * A `gh api` subcommand returned a response body that could not be parsed
  * as JSON or did not match the expected shape. Raised by
  * `postReviewerComments` when `gh api .../reviews` returns non-JSON stdout
- * or when `gh pr view --json baseRepository` returns an unexpected shape.
+ * or when `gh pr view --json headRepository,headRepositoryOwner` returns an unexpected shape.
  *
  * Fields:
  * - `subcommand` — the kebab-cased subcommand (e.g. `"api"`, `"pr-view"`).

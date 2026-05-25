@@ -5,7 +5,7 @@
  *   _bmad-output/implementation-artifacts/4-8-reviewer-labels-and-negative-capability-enforcement.md
  *
  * Reads the persisted `reviewer-result.json` written by `runReviewerSession`,
- * resolves owner/repo via `gh pr view --json baseRepository`, and applies
+ * resolves owner/repo via `gh pr view --json headRepository,headRepositoryOwner`, and applies
  * GitHub labels to the PR via `gh api POST /issues/{prNumber}/labels`.
  *
  * Label logic:
@@ -58,12 +58,12 @@ export async function applyReviewerLabels(opts) {
     const permissions = await loadRolePermissions({ role, pluginRoot });
     // Step 2: Resolve prNumber from the result file.
     const prNumber = resultFile.prNumber;
-    // Step 3: Resolve owner/repo via `gh pr view --json baseRepository`.
+    // Step 3: Resolve owner/repo via `gh pr view --json headRepository,headRepositoryOwner`.
     const prViewResult = await gh({
         role,
         permissions,
         subcommand: "pr-view",
-        args: [String(prNumber), "--json", "baseRepository"],
+        args: [String(prNumber), "--json", "headRepository,headRepositoryOwner"],
         execaImpl,
         pluginRootOverride: pluginRoot,
     });
@@ -71,10 +71,10 @@ export async function applyReviewerLabels(opts) {
     let repo;
     try {
         const prViewJson = JSON.parse(prViewResult.stdout);
-        owner = prViewJson.baseRepository?.owner?.login ?? "";
-        repo = prViewJson.baseRepository?.name ?? "";
+        owner = prViewJson.headRepositoryOwner?.login ?? "";
+        repo = prViewJson.headRepository?.name ?? "";
         if (!owner || !repo) {
-            throw new Error("missing owner or repo in baseRepository shape");
+            throw new Error("missing owner or repo in headRepository/headRepositoryOwner shape");
         }
     }
     catch (cause) {

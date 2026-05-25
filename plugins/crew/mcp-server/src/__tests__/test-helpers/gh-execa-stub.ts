@@ -2,7 +2,7 @@
  * Shared `gh` execa stub factory for integration tests.
  *
  * Extracted from `run-reviewer-session.test.ts` (Story 4.6 Issue 2).
- * Extended in Story 4.6b to support `gh pr view --json baseRepository`
+ * Extended in Story 4.6b to support `gh pr view --json headRepository,headRepositoryOwner`
  * and `gh api` routing.
  * Extended in Story 4.7 to support discriminated `gh api GET` and
  * `gh api PATCH` routing by URL pattern and method (Task 5.2).
@@ -38,7 +38,7 @@ export interface GhApiRoute {
 export interface GhExecaStubOpts {
   /** Override for `gh pr diff <prNumber>` calls. Default: empty diff, exitCode 0. */
   prDiff?: GhStubResult;
-  /** Override for `gh pr view --json baseRepository` calls. Default: crew repo JSON, exitCode 0. */
+  /** Override for `gh pr view --json headRepository,headRepositoryOwner` calls. Default: crew repo JSON, exitCode 0. */
   prView?: GhStubResult;
   /**
    * Discriminating routes for `gh api` calls, matched in order.
@@ -58,7 +58,8 @@ export interface GhExecaStubOpts {
 }
 
 const DEFAULT_PR_VIEW_JSON = JSON.stringify({
-  baseRepository: { name: "crew", owner: { login: "jackmcintyre" } },
+  headRepository: { name: "crew" },
+  headRepositoryOwner: { login: "jackmcintyre" },
 });
 
 const DEFAULT_API_RESPONSE = JSON.stringify({ id: 12345 });

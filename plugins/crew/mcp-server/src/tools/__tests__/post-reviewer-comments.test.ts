@@ -789,3 +789,48 @@ describe("(4.7 AC3) Null-bodied prior reviews skipped (Copilot/plain approval sh
     expect(patchInput).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: gh pr view must query headRepository,headRepositoryOwner
+//
+// gh CLI 2.92.0 does not expose a `baseRepository` JSON field — querying it
+// causes `Unknown JSON field: "baseRepository"` and halts the reviewer cycle.
+// The fields `headRepository` and `headRepositoryOwner` are available and,
+// for v1's no-fork-PR scope, semantically equivalent (head == base).
+// ---------------------------------------------------------------------------
+
+describe("(regression) gh pr view --json field", () => {
+  it("issues `gh pr view <prNumber> --json headRepository,headRepositoryOwner`", async () => {
+    const resultData = makeReviewerResult("READY FOR MERGE", {
+      1: makeArtifactPassResult(1),
+    });
+    await writeResultFile(resultData);
+
+    const stub = makeStubWithEmptyReviews({
+      prDiff: { stdout: FAKE_DIFF_WITHOUT_ARTIFACT },
+    });
+
+    await postReviewerComments({
+      targetRepoRoot: tmpRoot,
+      sessionUlid: SESSION_ULID,
+      execaImpl: stub,
+      pluginRootOverride: pluginRoot,
+      pluginVersionOverride: PLUGIN_VERSION,
+    });
+
+    const calls = (stub as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const prViewCall = calls.find(
+      (c) => c[0] === "gh" && Array.isArray(c[1]) && c[1][0] === "pr" && c[1][1] === "view",
+    );
+    expect(prViewCall, "expected a gh pr view call").toBeDefined();
+
+    const args = prViewCall![1] as string[];
+    expect(args).toEqual([
+      "pr",
+      "view",
+      String(PR_NUMBER),
+      "--json",
+      "headRepository,headRepositoryOwner",
+    ]);
+  });
+});
