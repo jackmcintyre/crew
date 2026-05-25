@@ -107,6 +107,18 @@ vitest covers (a) `agent.invoke` written on every spawn, (b) `reviewer.verdict` 
 
 <!-- Not user-surface: vitest integration suite — internal harness only. -->
 
+**AC6 (user-surface):**
+**Given** the dev or reviewer subagent's last terminal/agent output contains a Claude session-limit string (`/You'?ve hit your (session|account) limit/i` or equivalent — pin the exact regex set in dev notes),
+**When** `processDevTranscript` or `processReviewerTranscript` parses the transcript,
+**Then** the outcome is classified as typed `SessionQuotaExhaustedError`, the dev-outcome / reviewer-outcome JSON records `failure: { class: "session-quota-exhausted", recoverable: true }`, and `/crew:start` emits chat line `Story ${storyUlid} paused — session quota exhausted; retry after quota resets` and moves the manifest to `blocked/` (not `done/`). _(retro carry-forward #2 — see Retro Amendments below)_
+
+<!-- User-surface: the `Story ${storyUlid} paused — session quota exhausted` chat line is operator-visible on /crew:start. -->
+
+**AC7 (substrate):**
+**Given** the dev subagent has signalled handoff (locked-phrase emitted),
+**When** `runDevTerminalAction` runs the pre-handoff verification,
+**Then** the tool runs `pnpm -w typecheck && pnpm -w test --run` from the worktree root and on non-zero exit classifies the outcome as typed `PreHandoffSuiteRedError` (recoverable: true). The dev's locked-phrase emission alone is insufficient to advance state. _(retro carry-forward #8 — see Retro Amendments below)_
+
 ### Expanded acceptance specifics (folded into AC1–AC5 above; each clause maps to an AC for the AC-table gate)
 
 **AC1 unpacked.** Per-spawn `agent.invoke` emission:
@@ -121,7 +133,7 @@ vitest covers (a) `agent.invoke` written on every spawn, (b) `reviewer.verdict` 
     type: "agent.invoke",
     session_id: opts.sessionUlid,        // re-used across the session
     agent: "generalist-dev" | "generalist-reviewer",
-    story_id: opts.ref,                  // the manifest ref (e.g. "native:01HZ..." or "bmad:1.5")
+    story_id: opts.ref,                  // the manifest ref (e.g. a native or bmad-prefixed identifier)
     data: { runtime_ms: number },        // tokens_in / tokens_out omitted (see § What this story does NOT (e))
     // ts: stamped by logger.ts (Story 1.5 contract)
   }
@@ -137,7 +149,7 @@ vitest covers (a) `agent.invoke` written on every spawn, (b) `reviewer.verdict` 
 
 - (1h) **`session_id` carries the ULID from the parent SKILL prose.** Story 4.2's `mintSessionUlid` is called once per `/crew:start` invocation; the same ULID is the session_id on every `agent.invoke` event in that session.
 
-- (1i) **`story_id` is the manifest ref, not a story slug.** The ref includes the adapter prefix (`native:01HZ...` or `bmad:1.5`). This matches the schema's "opaque identifier" description and is the same value used in claim-flow telemetry seams.
+- (1i) **`story_id` is the manifest ref, not a story slug.** The ref includes the adapter prefix (a native ULID-shaped id or a bmad numeric id, in each case prefixed by the adapter name). This matches the schema's "opaque identifier" description and is the same value used in claim-flow telemetry seams.
 
 **AC2 unpacked.** Per-post `reviewer.verdict` emission:
 
@@ -626,23 +638,13 @@ Pattern: Epic 4 spec commits follow `spec(4-X): <subject>`. Implementation commi
 
 ## Retro Amendments — 2026-05-25
 
-Added during the mid-epic-4 retrospective ([epic-4-retro-2026-05-25.md](epic-4-retro-2026-05-25.md), carry-forwards #2 and #8). The original ACs above were validated and remain unchanged; the ACs below are additive.
+Added during the mid-epic-4 retrospective ([epic-4-retro-2026-05-25.md](epic-4-retro-2026-05-25.md), carry-forwards #2 and #8). AC6 and AC7 live in `## Acceptance Criteria` above; the why-and-context lives here.
 
-**AC-Q1 (user-surface) — Session-quota-exhausted as a typed failure:**
-**Given** the dev or reviewer subagent's last terminal/agent output contains a Claude session-limit string (`/You'?ve hit your (session|account) limit/i` or equivalent — pin the exact set in dev notes),
-**When** `processDevTranscript` or `processReviewerTranscript` parses the transcript,
-**Then** the outcome is classified as typed `SessionQuotaExhaustedError`, the dev-outcome / reviewer-outcome JSON records `failure: { class: "session-quota-exhausted", recoverable: true }`, and `/crew:start` emits chat line `Story ${storyUlid} paused — session quota exhausted; retry after quota resets` and moves the manifest to `blocked/` (not `done/`).
+**Why AC6 exists (session-quota-exhausted typed failure):** PR #138 was bricked by exactly this failure mode. The subagent output said *"You've hit your session limit"* verbatim, fell through as handoff-grammar drift, and Jack had to manually recover. On a clean install with no Jack-acting-as-operator, this would silently kill the "walk away" promise. Typed class makes the failure observable and recoverable.
 
-**Why:** PR #138 was bricked by exactly this failure mode. The subagent output said *"You've hit your session limit"* verbatim, fell through as handoff-grammar drift, and Jack had to manually recover. On a clean install with no Jack-acting-as-operator, this would silently kill the "walk away" promise. Typed class makes the failure observable and recoverable.
+**Operator-recovery doc (AC6):** add a one-page note under `plugins/crew/docs/troubleshooting/session-quota.md` describing what the operator sees, why, and how to resume (re-run `/crew:start` after the quota resets — the blocked manifest auto-promotes).
 
-**Operator-recovery doc:** add a one-page note under `plugins/crew/docs/troubleshooting/session-quota.md` describing what the operator sees, why, and how to resume (re-run `/crew:start` after the quota resets — the blocked manifest auto-promotes).
-
-**AC-Q2 (substrate) — Green-at-commit pre-handoff gate:**
-**Given** the dev subagent has signalled handoff (locked-phrase emitted),
-**When** `runDevTerminalAction` runs the pre-handoff verification,
-**Then** the tool runs `pnpm -w typecheck && pnpm -w test --run` from the worktree root, and on non-zero exit classifies the outcome as typed `PreHandoffSuiteRedError` (recoverable: true) — same shape as `SessionQuotaExhaustedError`. The dev's locked-phrase emission alone is insufficient to advance state.
-
-**Why:** PR #138's dev hit quota mid-cleanup and left the suite red across 5 files; the locked-phrase had already been emitted so the run advanced as if green. The architecture lesson — "if it lives in prose, move it to a tool" — applies: the suite-green claim was implicit in prose; making it an explicit tool-side gate closes the gap.
+**Why AC7 exists (green-at-commit pre-handoff gate):** PR #138's dev hit quota mid-cleanup and left the suite red across 5 files; the locked-phrase had already been emitted so the run advanced as if green. The architecture lesson — "if it lives in prose, move it to a tool" — applies: the suite-green claim was implicit in prose; making it an explicit tool-side gate closes the gap.
 
 **Schema impact:** two new error classes in `errors.ts` (`SessionQuotaExhaustedError`, `PreHandoffSuiteRedError`), additive to the `failure.class` enum. Telemetry events (this story's existing scope) record both as distinct classes for the dashboard's recoverable-vs-fatal split.
 

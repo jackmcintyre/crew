@@ -24,7 +24,15 @@ Context: surfaced as an Info-tier reviewer note on PR #122 (Story 4.8b's retro).
 **When** the test runs,
 **Then** the assertion uses `.rejects.toBeInstanceOf(DevOutcomeFileMalformedError)` instead of substring matching.
 
-**AC3 (integration):** The full vitest suite passes from `plugins/crew/mcp-server` (`pnpm test`) after the change. No production code modified.
+**AC3 (integration):**
+**Given** AC1 and AC2 are implemented,
+**When** `pnpm test` runs from `plugins/crew/mcp-server`,
+**Then** the full vitest suite passes and no production code is modified.
+
+**AC4 (substrate):**
+**Given** Epic 4 stories 4-10b, 4-11, and 4-12 add prose steps to one or more SKILL.md files,
+**When** this cleanup story runs,
+**Then** `plugins/crew/mcp-server/src/__tests__/start-skill-content.test.ts` (and the equivalent test for any other SKILL.md that grew new prose this epic) is extended with one structural-anchor assertion per new step — matching the existing anchor-test pattern. _(retro carry-forward #7 — see Retro Amendments below)_
 
 ## Tasks / Subtasks
 
@@ -62,14 +70,9 @@ Implementation order is not load-bearing — both ACs can be addressed in any or
 
 ## Retro Amendments — 2026-05-25
 
-Added during the mid-epic-4 retrospective ([epic-4-retro-2026-05-25.md](epic-4-retro-2026-05-25.md), carry-forward #7). The original AC1–AC3 above were validated and remain unchanged; the AC below is additive.
+Added during the mid-epic-4 retrospective ([epic-4-retro-2026-05-25.md](epic-4-retro-2026-05-25.md), carry-forward #7). AC4 lives in `## Acceptance Criteria` above; the why-and-context lives here. AC3 was also rewritten into Given/When/Then form so the discipline parser keeps it separate from AC2 (the parser was previously bundling AC3's prose into AC2's text block, hiding the integration-tagged AC).
 
-**AC4 (substrate) — Structural-anchor coverage for any new SKILL.md prose step added in Epic 4:**
-**Given** Epic 4 stories 4-10b, 4-11, and 4-12 add prose steps to one or more SKILL.md files (notably the `/crew:start` skill and the locked-phrase grammar in `plugins/crew/skills/*/SKILL.md`),
-**When** this cleanup story runs,
-**Then** `plugins/crew/mcp-server/src/__tests__/start-skill-content.test.ts` (and the equivalent test for any other SKILL.md that grew new prose this epic) is extended with one structural-anchor assertion per new step — matching the existing anchor-test pattern.
-
-**Why:** Locked-phrase grammar drift has three fresh examples this epic (4.6, 4.8, 4.10b reviewer Lows). The pattern of "new prose ships with no anchor test" is the root cause. This AC closes the gap retroactively for Epic 4 prose; the longer-term move (locked phrases out of prose, into config) is deferred to Epic 6.
+**Why AC4 exists:** Locked-phrase grammar drift has three fresh examples this epic (4.6, 4.8, 4.10b reviewer Lows). The pattern of "new prose ships with no anchor test" is the root cause. This AC closes the gap retroactively for Epic 4 prose; the longer-term move (locked phrases out of prose, into config) is deferred to Epic 6.
 
 **Scope marker:** this AC only covers prose added by stories 4-10b / 4-11 / 4-12. The dev agent runs `git log --since="2026-05-23" -- '**/SKILL.md'` (or equivalent — last 3 stories' diffs) to enumerate added steps, then writes one assertion per step. If any of those stories shipped without prose additions, the AC is satisfied trivially.
 

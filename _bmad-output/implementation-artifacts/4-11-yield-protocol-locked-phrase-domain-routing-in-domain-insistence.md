@@ -107,6 +107,16 @@ Three reasons this is its own story rather than folded into Story 4.6, 4.8b, or 
 **AC6 (integration):**
 vitest covers the five yield branches against a fixture with a hired security specialist.
 
+**AC7 (substrate):**
+**Given** `runDevTerminalAction` is invoked for an in-progress story,
+**When** the dev subagent attempts any tool write that touches the working tree,
+**Then** the tool first calls `assertOnWorktreeBranch({ targetRepoRoot, expectedStoryUlid })` which reads `git rev-parse --abbrev-ref HEAD` and `git worktree list --porcelain`, refuses with typed `WorktreeContractViolationError` if the current branch is `main` / `master` / the default branch OR if `cwd` is not a worktree path containing the expected story ULID in its basename, and otherwise returns `{ ok: true, worktreePath, branch }`. _(retro carry-forward #3 — see Retro Amendments below)_
+
+**AC8 (substrate):**
+**Given** `postReviewerComments` is called with a `prNumber` derived from `reviewer-result.json`,
+**When** the tool would invoke any `gh pr comment` / `gh pr review` / `gh pr edit` shell call,
+**Then** the tool first asserts the target `prNumber` matches `claim-manifest.prNumber` read from the story's in-progress manifest and refuses with typed `ReviewerPrScopeError` if they disagree. _(retro carry-forward #4 — see Retro Amendments below)_
+
 ### Expanded acceptance specifics (folded into AC1–AC6 above; each clause maps to an AC for the AC-table gate)
 
 **AC1 unpacked.** Parser contract, router contract, and SKILL.md dispatch:
@@ -474,25 +484,11 @@ Ultimate context engine analysis completed - comprehensive developer guide creat
 
 ## Retro Amendments — 2026-05-25
 
-Added during the mid-epic-4 retrospective ([epic-4-retro-2026-05-25.md](epic-4-retro-2026-05-25.md), carry-forwards #3 and #4). The original ACs above were validated and remain unchanged; the ACs below are additive.
+Added during the mid-epic-4 retrospective ([epic-4-retro-2026-05-25.md](epic-4-retro-2026-05-25.md), carry-forwards #3 and #4). AC7 and AC8 live in `## Acceptance Criteria` above; the why-and-context lives here.
 
-**AC-W1 (substrate) — Worktree-contract enforcement at dev-loop entry:**
-**Given** `runDevTerminalAction` is invoked for an in-progress story,
-**When** the dev subagent attempts any tool write that touches the working tree (commit / push / file edit through the tool layer),
-**Then** the tool first calls `assertOnWorktreeBranch({ targetRepoRoot, expectedStoryUlid })` which:
-  - reads `git rev-parse --abbrev-ref HEAD` and `git worktree list --porcelain`,
-  - refuses (typed `WorktreeContractViolationError`) if the current branch is `main`/`master`/the default branch, or if `cwd` is not a worktree path containing the expected story ULID in its basename,
-  - returns `{ ok: true, worktreePath, branch }` otherwise.
-The failure surface is the same dev-outcome.json path used for other typed failures (consistent with the `feedback_default_to_deterministic_seams` lesson).
+**Why AC7 exists (worktree-contract enforcement):** PR #138's dev subagent worked directly on `main` (8 modified + 6 untracked files) with no enforcement. Locked-phrase grammar has a parser; the worktree contract was honour-system. Asymmetry closes. The failure surface is the same dev-outcome.json path used for other typed failures (consistent with the `feedback_default_to_deterministic_seams` lesson).
 
-**Why:** PR #138's dev subagent worked directly on `main` (8 modified + 6 untracked files) with no enforcement. Locked-phrase grammar has a parser; the worktree contract was honour-system. Asymmetry closes.
-
-**AC-W2 (substrate) — Reviewer PR-scope guard:**
-**Given** `postReviewerComments` is called with a `prNumber` derived from `reviewer-result.json`,
-**When** the tool would invoke any `gh pr comment` / `gh pr review` / `gh pr edit` shell call,
-**Then** the tool first asserts the target `prNumber` matches `claim-manifest.prNumber` (read from the story's in-progress manifest) and refuses (typed `ReviewerPrScopeError`) if they disagree.
-
-**Why:** PR #109 trial 6 — a fake reviewer-target URL in a smoke persona happened to resolve to a real merged PR (#108), and the reviewer subagent posted a comment on it. ~20 lines of guard, but a single cross-PR leak onto a customer repo would be catastrophic for the product. Tool-layer seam; not prose.
+**Why AC8 exists (reviewer PR-scope guard):** PR #109 trial 6 — a fake reviewer-target URL in a smoke persona happened to resolve to a real merged PR (#108), and the reviewer subagent posted a comment on it. ~20 lines of guard, but a single cross-PR leak onto a customer repo would be catastrophic for the product. Tool-layer seam; not prose.
 
 **Schema impact:** `claim-manifest` already carries `prNumber` (Story 4.4). No schema change. New error classes added to `errors.ts`.
 

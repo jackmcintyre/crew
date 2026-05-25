@@ -16,12 +16,12 @@ So that a smoke failure surfaces at the step that broke, and per-story smoke-set
 
 > AC1 covers the new MCP tool that builds the scratch repo. AC2 covers the new skill file that chains the journey with checkpoints. AC3 is the integration test. There is no user-surface chat line — the value is removing trials, not adding surface. Story shape: substrate.
 
-**AC1 (substrate) — `createSmokeScratchRepo` MCP tool:**
+**AC1 (substrate):**
 **Given** a parent directory (default: `os.tmpdir()`) and a session label,
 **When** the `createSmokeScratchRepo({ parentDir?: string; label: string }): Promise<{ scratchRoot: string; cleanup: () => Promise<void> }>` tool is called,
 **Then** it creates a directory under `<parentDir>/crew-smoke-<label>-<ulid>/`, runs `git init` + an initial empty commit (so the planner doesn't emit `git rev-parse failed: HEAD`), writes a minimal `.crew/config.yaml` selecting the native adapter, copies the plugin's shipped `standards.md` template to `.crew/standards.md`, and returns the path plus a cleanup closure.
 
-**AC2 (substrate) — `crew:smoke-setup` skill chains the canonical journey with checkpoints:**
+**AC2 (substrate):**
 **Given** the operator invokes `/crew:smoke-setup <label>` from a Claude Code session launched with `--plugin-dir <crew>/plugins/crew`,
 **When** the skill runs,
 **Then** it executes the following steps in order, calling the listed MCP tool as a checkpoint **before** advancing to the next step, and emitting a single line per checkpoint of the form `[smoke-setup] step N (<name>): ok` (or `[smoke-setup] step N (<name>): FAILED — <reason>` and halt):
@@ -32,7 +32,10 @@ So that a smoke failure surfaces at the step that broke, and per-story smoke-set
   4. **scan** — invoke `/crew:scan`. Checkpoint: `listClaimableTodos({ targetRepoRoot })` returns ≥1 manifest in `to-do/`.
   5. **start** — return control to the operator with a printed `Ready. Run /crew:start in this scratch repo.` line. Do NOT auto-invoke `/crew:start` — the smoke is exactly what the operator is here to observe.
 
-**AC3 (integration):** vitest exercises `createSmokeScratchRepo` end-to-end against a real `os.tmpdir()` scratch — initial commit succeeds, files written, cleanup closure removes the tree. The skill's chained-checkpoint logic is exercised by a structural-anchor test (the same pattern used by `start-skill-content.test.ts`) asserting the five step labels and their checkpoint MCP-tool names are present in `SKILL.md`.
+**AC3 (integration):**
+**Given** AC1 and AC2 are implemented,
+**When** `pnpm test` runs from `plugins/crew/mcp-server`,
+**Then** vitest exercises `createSmokeScratchRepo` end-to-end against a real `os.tmpdir()` scratch (initial commit succeeds, files written, cleanup closure removes the tree) AND a structural-anchor test (mirroring `start-skill-content.test.ts`) asserts the five step labels and their checkpoint MCP-tool names are present in `SKILL.md`.
 
 ## Tasks / Subtasks
 
