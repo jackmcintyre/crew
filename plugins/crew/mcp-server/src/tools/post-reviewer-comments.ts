@@ -150,12 +150,12 @@ export async function postReviewerComments(
   });
   const diff = diffResult.stdout;
 
-  // Step 3: Resolve {owner} and {repo} via `gh pr view --json baseRepository`.
+  // Step 3: Resolve {owner} and {repo} via `gh pr view --json headRepository,headRepositoryOwner`.
   const prViewResult = await gh({
     role,
     permissions,
     subcommand: "pr-view",
-    args: [String(resultFile.prNumber), "--json", "baseRepository"],
+    args: [String(resultFile.prNumber), "--json", "headRepository,headRepositoryOwner"],
     execaImpl,
     pluginRootOverride: pluginRoot,
   });
@@ -164,12 +164,13 @@ export async function postReviewerComments(
   let repo: string;
   try {
     const prViewJson = JSON.parse(prViewResult.stdout) as {
-      baseRepository?: { name?: string; owner?: { login?: string } };
+      headRepository?: { name?: string };
+      headRepositoryOwner?: { login?: string };
     };
-    owner = prViewJson.baseRepository?.owner?.login ?? "";
-    repo = prViewJson.baseRepository?.name ?? "";
+    owner = prViewJson.headRepositoryOwner?.login ?? "";
+    repo = prViewJson.headRepository?.name ?? "";
     if (!owner || !repo) {
-      throw new Error("missing owner or repo in baseRepository shape");
+      throw new Error("missing owner or repo in headRepository/headRepositoryOwner shape");
     }
   } catch (cause) {
     throw new GhApiResponseShapeError({ subcommand: "pr-view", cause });
