@@ -26,6 +26,7 @@ import { runDevTerminalAction } from "./run-dev-terminal-action.js";
 import { runReviewerSession } from "./run-reviewer-session.js";
 import { postReviewerComments } from "./post-reviewer-comments.js";
 import { applyReviewerLabels } from "./apply-reviewer-labels.js";
+import { computeAgreement } from "./compute-agreement.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -988,6 +989,40 @@ export function registerAllTools(server) {
                 }
                 throw err;
             }
+        },
+    });
+    // Story 4.10 — computeAgreement: pure JSONL aggregator over
+    // `.crew/telemetry/<YYYY-MM>.jsonl` `reviewer.verdict` events. Returns
+    // the rolling agreement ratio used by the auto-merge gate (Story 4.10b)
+    // or `null` when there are insufficient resolved events to fill the
+    // window. FR67 / NFR24.
+    server.registerTool({
+        name: "computeAgreement",
+        description: "Compute the rolling reviewer-vs-eventual-action agreement ratio over the " +
+            "trailing N resolved `reviewer.verdict` events on disk. Default window is 50. " +
+            "Returns `{ ratio, agreementCount, windowSize, distribution, malformedLines, " +
+            "malformedFiles }` or `null` when the window cannot be filled (no telemetry, " +
+            "no resolved events, or fewer resolved events than the window). Pure read; " +
+            "no writes; no network. Story 4.10 / FR67 / NFR24.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                lastNVerdicts: { type: "number" },
+            },
+            required: ["targetRepoRoot"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                lastNVerdicts: z.number().int().positive().optional(),
+            })
+                .parse(args);
+            const result = await computeAgreement(parsed);
+            return {
+                content: [{ type: "text", text: JSON.stringify(result) }],
+            };
         },
     });
 }

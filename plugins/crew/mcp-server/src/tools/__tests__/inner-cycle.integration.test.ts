@@ -585,7 +585,8 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("postReviewerComments");
       expect(toolNames).not.toContain("runDevSession");
       expect(toolNames).toContain("applyReviewerLabels");
-      expect(toolNames.length).toBe(25);
+      expect(toolNames).toContain("computeAgreement");
+      expect(toolNames.length).toBe(26);
     } finally {
       await client.close();
       await server.close();
