@@ -624,6 +624,32 @@ Pattern: Epic 4 spec commits follow `spec(4-X): <subject>`. Implementation commi
 
 ---
 
+## Retro Amendments — 2026-05-25
+
+Added during the mid-epic-4 retrospective ([epic-4-retro-2026-05-25.md](epic-4-retro-2026-05-25.md), carry-forwards #2 and #8). The original ACs above were validated and remain unchanged; the ACs below are additive.
+
+**AC-Q1 (user-surface) — Session-quota-exhausted as a typed failure:**
+**Given** the dev or reviewer subagent's last terminal/agent output contains a Claude session-limit string (`/You'?ve hit your (session|account) limit/i` or equivalent — pin the exact set in dev notes),
+**When** `processDevTranscript` or `processReviewerTranscript` parses the transcript,
+**Then** the outcome is classified as typed `SessionQuotaExhaustedError`, the dev-outcome / reviewer-outcome JSON records `failure: { class: "session-quota-exhausted", recoverable: true }`, and `/crew:start` emits chat line `Story ${storyUlid} paused — session quota exhausted; retry after quota resets` and moves the manifest to `blocked/` (not `done/`).
+
+**Why:** PR #138 was bricked by exactly this failure mode. The subagent output said *"You've hit your session limit"* verbatim, fell through as handoff-grammar drift, and Jack had to manually recover. On a clean install with no Jack-acting-as-operator, this would silently kill the "walk away" promise. Typed class makes the failure observable and recoverable.
+
+**Operator-recovery doc:** add a one-page note under `plugins/crew/docs/troubleshooting/session-quota.md` describing what the operator sees, why, and how to resume (re-run `/crew:start` after the quota resets — the blocked manifest auto-promotes).
+
+**AC-Q2 (substrate) — Green-at-commit pre-handoff gate:**
+**Given** the dev subagent has signalled handoff (locked-phrase emitted),
+**When** `runDevTerminalAction` runs the pre-handoff verification,
+**Then** the tool runs `pnpm -w typecheck && pnpm -w test --run` from the worktree root, and on non-zero exit classifies the outcome as typed `PreHandoffSuiteRedError` (recoverable: true) — same shape as `SessionQuotaExhaustedError`. The dev's locked-phrase emission alone is insufficient to advance state.
+
+**Why:** PR #138's dev hit quota mid-cleanup and left the suite red across 5 files; the locked-phrase had already been emitted so the run advanced as if green. The architecture lesson — "if it lives in prose, move it to a tool" — applies: the suite-green claim was implicit in prose; making it an explicit tool-side gate closes the gap.
+
+**Schema impact:** two new error classes in `errors.ts` (`SessionQuotaExhaustedError`, `PreHandoffSuiteRedError`), additive to the `failure.class` enum. Telemetry events (this story's existing scope) record both as distinct classes for the dashboard's recoverable-vs-fatal split.
+
+**Out of scope for this story:**
+- Pre-quota heuristic / breadcrumb-on-`SIGTERM` (deferred — needs runtime-limits work this story already adds; revisit only if cheap inside the existing diff).
+- Auto-retry of session-quota-exhausted runs (operator-driven — `/crew:start` re-invocation is the recovery surface).
+
 ## Dev Agent Record
 
 ### Agent Model Used

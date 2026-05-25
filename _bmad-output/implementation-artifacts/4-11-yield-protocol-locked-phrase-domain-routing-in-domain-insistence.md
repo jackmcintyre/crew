@@ -469,3 +469,31 @@ No external library research required. All seams are internal to the plugin (`zo
 Ready for dev. All grounding artefacts identified, all seams pinned, all out-of-scope items enumerated. The dev agent has everything needed for a single-PR implementation that lands the yield protocol end-to-end with deterministic seams, additive telemetry widening, and integration coverage of every branch the operator can hit.
 
 Ultimate context engine analysis completed - comprehensive developer guide created.
+
+---
+
+## Retro Amendments — 2026-05-25
+
+Added during the mid-epic-4 retrospective ([epic-4-retro-2026-05-25.md](epic-4-retro-2026-05-25.md), carry-forwards #3 and #4). The original ACs above were validated and remain unchanged; the ACs below are additive.
+
+**AC-W1 (substrate) — Worktree-contract enforcement at dev-loop entry:**
+**Given** `runDevTerminalAction` is invoked for an in-progress story,
+**When** the dev subagent attempts any tool write that touches the working tree (commit / push / file edit through the tool layer),
+**Then** the tool first calls `assertOnWorktreeBranch({ targetRepoRoot, expectedStoryUlid })` which:
+  - reads `git rev-parse --abbrev-ref HEAD` and `git worktree list --porcelain`,
+  - refuses (typed `WorktreeContractViolationError`) if the current branch is `main`/`master`/the default branch, or if `cwd` is not a worktree path containing the expected story ULID in its basename,
+  - returns `{ ok: true, worktreePath, branch }` otherwise.
+The failure surface is the same dev-outcome.json path used for other typed failures (consistent with the `feedback_default_to_deterministic_seams` lesson).
+
+**Why:** PR #138's dev subagent worked directly on `main` (8 modified + 6 untracked files) with no enforcement. Locked-phrase grammar has a parser; the worktree contract was honour-system. Asymmetry closes.
+
+**AC-W2 (substrate) — Reviewer PR-scope guard:**
+**Given** `postReviewerComments` is called with a `prNumber` derived from `reviewer-result.json`,
+**When** the tool would invoke any `gh pr comment` / `gh pr review` / `gh pr edit` shell call,
+**Then** the tool first asserts the target `prNumber` matches `claim-manifest.prNumber` (read from the story's in-progress manifest) and refuses (typed `ReviewerPrScopeError`) if they disagree.
+
+**Why:** PR #109 trial 6 — a fake reviewer-target URL in a smoke persona happened to resolve to a real merged PR (#108), and the reviewer subagent posted a comment on it. ~20 lines of guard, but a single cross-PR leak onto a customer repo would be catastrophic for the product. Tool-layer seam; not prose.
+
+**Schema impact:** `claim-manifest` already carries `prNumber` (Story 4.4). No schema change. New error classes added to `errors.ts`.
+
+**Out of scope for this story:** rollback / cleanup of accidentally-committed `main` work (operator-handled), and any "auto-create worktree" recovery from an `assertOnWorktreeBranch` failure (operator-handled).

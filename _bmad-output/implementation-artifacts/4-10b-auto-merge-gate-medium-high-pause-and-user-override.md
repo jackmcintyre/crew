@@ -502,6 +502,21 @@ Pattern: spec commits follow `spec(<key>): <subject>`. This story's spec commit 
 
 ---
 
+## Retro Amendments — 2026-05-25
+
+Added during the mid-epic-4 retrospective ([epic-4-retro-2026-05-25.md](epic-4-retro-2026-05-25.md), carry-forward #6). The original AC1–AC5 above were validated and remain unchanged; the AC below is additive.
+
+**AC6 (substrate) — Medium+ findings cannot reach `merged` without an explicit override:**
+**Given** a PR with `verdict: READY FOR MERGE` and `risk_tier: low` and `agreement_metric ≥ threshold`,
+**When** `reviewer-result.json` contains any finding with `severity ∈ {"medium", "high"}` AND `reviewer-result.json.overrideToken` is absent or empty,
+**Then** `runAutoMergeGate` returns `{ next: "paused-residual-medium-or-higher", prNumber, residuals: { medium: number, high: number } }` and emits chat line `PR #${prNumber} paused — ${count} unresolved medium/high finding(s)`.
+
+**Why:** PR #109 carried a Medium-severity reviewer finding (PR-URL regex unanchored) across two PRs because no gate enforced override. The auto-merge gate is the right tool-layer seam for this rule. `overrideToken` is a string the operator writes into `reviewer-result.json` (out-of-band, via a future MCP tool or by hand) to explicitly accept the residuals; v1 has no override-set tool — the operator hand-edits.
+
+**Schema impact:** `reviewer-result.json` gains an optional `overrideToken?: string`. Existing readers tolerate the extra field (zod `.passthrough()` or explicit `.optional()`). No migration needed.
+
+**Out of scope for this story:** an MCP tool to write `overrideToken` (deferred — operator hand-edits for now). The chat surface for "how to override" — captured in the line text only.
+
 ## Dev Agent Record
 
 ### Agent Model Used

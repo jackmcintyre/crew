@@ -60,6 +60,23 @@ Implementation order is not load-bearing — both ACs can be addressed in any or
 
 **Previous story intelligence:** PR #122 (Story 4.8b) added these tests with substring assertions. The reviewer flagged the substring approach as Info-tier and shipped it; this story closes that note. See the PR retro comment at https://github.com/jackmcintyre/crew/pull/122#issuecomment-4528928199.
 
+## Retro Amendments — 2026-05-25
+
+Added during the mid-epic-4 retrospective ([epic-4-retro-2026-05-25.md](epic-4-retro-2026-05-25.md), carry-forward #7). The original AC1–AC3 above were validated and remain unchanged; the AC below is additive.
+
+**AC4 (substrate) — Structural-anchor coverage for any new SKILL.md prose step added in Epic 4:**
+**Given** Epic 4 stories 4-10b, 4-11, and 4-12 add prose steps to one or more SKILL.md files (notably the `/crew:start` skill and the locked-phrase grammar in `plugins/crew/skills/*/SKILL.md`),
+**When** this cleanup story runs,
+**Then** `plugins/crew/mcp-server/src/__tests__/start-skill-content.test.ts` (and the equivalent test for any other SKILL.md that grew new prose this epic) is extended with one structural-anchor assertion per new step — matching the existing anchor-test pattern.
+
+**Why:** Locked-phrase grammar drift has three fresh examples this epic (4.6, 4.8, 4.10b reviewer Lows). The pattern of "new prose ships with no anchor test" is the root cause. This AC closes the gap retroactively for Epic 4 prose; the longer-term move (locked phrases out of prose, into config) is deferred to Epic 6.
+
+**Scope marker:** this AC only covers prose added by stories 4-10b / 4-11 / 4-12. The dev agent runs `git log --since="2026-05-23" -- '**/SKILL.md'` (or equivalent — last 3 stories' diffs) to enumerate added steps, then writes one assertion per step. If any of those stories shipped without prose additions, the AC is satisfied trivially.
+
+**Out of scope for this story:**
+- A general "every new SKILL.md step must have an anchor test" lint (deferred — needs its own discipline-gate work).
+- Moving locked phrases to config (Epic 6 carry-forward).
+
 ## Dev Agent Record
 
 _(Populated by the dev agent during implementation.)_

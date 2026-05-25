@@ -63,6 +63,7 @@ development_status:
   4-12-per-invocation-telemetry-and-runtime-soft-hard-limits: ready-for-dev
   4-11-yield-protocol-locked-phrase-domain-routing-in-domain-insistence: ready-for-dev
   4-13-typed-error-class-assertions-in-dev-outcome-tests: ready-for-dev
+  4-14-smoke-harness-wrapper-skill: ready-for-dev
   epic-4-retrospective: optional
   epic-5: backlog
   5-1-block-story-mcp-tool-and-blocked-by-taxonomy: backlog

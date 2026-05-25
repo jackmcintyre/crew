@@ -359,4 +359,24 @@ So that the agreement metric, outcome stats, and skill effectiveness all have au
 
 **AC5 (integration):** vitest covers (a) `agent.invoke` written on every spawn, (b) `reviewer.verdict` written on every verdict comment, (c) hard-8-min substitution, (d) 30-min dev budget surfaces in the next poll.
 
+## Story 4.14: Smoke-harness wrapper skill
+
+As a plugin maintainer running operator-smokes for user-surface stories,
+I want a single skill that chains scratch-repo setup → `/crew:skip-hiring` → `/crew:plan` → `/crew:scan` → `/crew:start` with tool-layer assertion checkpoints between steps,
+So that a smoke failure surfaces at the step that broke, and per-story smoke-setup drift stops costing trials.
+
+Added during the mid-epic-4 retrospective (2026-05-25, carry-forward #1). Story 4.6 burned 7 smoke trials on setup drift; 4.8 hit the same friction. This story removes the tax for every remaining user-surface smoke in Epic 4 and beyond.
+
+**Acceptance Criteria:**
+
+**Given** a parent directory and a session label, **When** the new `createSmokeScratchRepo` MCP tool is called, **Then** it creates a tmpdir-based scratch with `git init` + initial commit, writes a minimal `.crew/config.yaml` (native adapter) and `.crew/standards.md`, and returns the path plus a cleanup closure.
+
+**Given** the operator invokes `/crew:smoke-setup <label>`, **When** the skill runs, **Then** it executes scratch-repo → skip-hiring → plan → scan → return-to-operator in order, calling an existing MCP tool as a checkpoint before each step advance (`getTeamSnapshot`, `readBacklogInventory`, `listClaimableTodos`), and emitting `[smoke-setup] step N (<name>): ok` per checkpoint.
+
+**Given** any checkpoint fails, **When** the skill detects the failure, **Then** it halts with `[smoke-setup] step N (<name>): FAILED — <reason>` — surfacing the break at the step that broke, not three steps later.
+
+**AC4 (integration):** vitest exercises `createSmokeScratchRepo` end-to-end against a real `os.tmpdir()` scratch; a structural-anchor test mirroring `start-skill-content.test.ts` asserts the five step labels and their checkpoint MCP-tool names are present in `SKILL.md`.
+
+Spec: `_bmad-output/implementation-artifacts/4-14-smoke-harness-wrapper-skill.md`.
+
 ---
