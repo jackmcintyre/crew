@@ -35,3 +35,9 @@ _bmad-output/planning-artifacts/archive/
 .claude/skills/ship-story/.runs/
 .worktrees/
 .claude/worktrees/
+
+# Crew plugin runtime — execution-layer manifests, sessions, caches.
+# Owned by the plugin per the two-layer architecture; never source.
+.crew/state/
+.crew/telemetry/
+.crew/logs/
