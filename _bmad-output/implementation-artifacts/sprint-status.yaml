@@ -74,7 +74,7 @@ development_status:
   5-8-no-silent-failures-ci-pairing-assertion: backlog
   5-9-telemetry-as-files-and-session-death-recovery-guide: backlog
   5-10-persist-dev-transcript-to-disk-before-any-mcp-call: done
-  5-11-orphan-recovery-branch-in-crew-start: ready-for-dev
+  5-11-orphan-recovery-branch-in-crew-start: done
   5-12-mcp-child-resilient-to-parent-stdin-close: backlog
   epic-5-retrospective: optional
   epic-6: backlog
