@@ -56,7 +56,7 @@ development_status:
   4-9-risk-tiering-spec-format-and-override-resolution: done
   4-9b-risk-tier-classifier-code-evidence-stamping-and-fallback: done
   4-10-agreement-metric-helper-compute-agreement: done
-  4-10b-auto-merge-gate-medium-high-pause-and-user-override: ready-for-dev
+  4-10b-auto-merge-gate-medium-high-pause-and-user-override: done
   4-11-yield-protocol-locked-phrase-domain-routing-in-domain-insistence: done
   4-12-per-invocation-telemetry-and-runtime-soft-hard-limits: done
   epic-4-retrospective: optional
