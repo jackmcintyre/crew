@@ -797,3 +797,41 @@ export declare class DevOutcomeFileMalformedError extends DomainError {
         cause: unknown;
     });
 }
+/**
+ * `docs/risk-tiering.md` was found (at either the target-repo override path or
+ * the shipped-default path) but failed the parser: either YAML frontmatter is
+ * missing or ill-formed, YAML syntax is invalid, a required field is missing or
+ * wrongly typed, or a post-Zod invariant was violated (duplicate rule id,
+ * min>max threshold, no signal fields on a rule).
+ *
+ * `reason` carries the one-line diagnostic; `copyTarget` is the shipped
+ * default path so the user-facing message can cite the canonical shape.
+ *
+ * (Story 4.9 Task 2 / FR40a)
+ */
+export declare class MalformedRiskTieringSpecError extends DomainError {
+    readonly sourcePath: string;
+    readonly reason: string;
+    readonly copyTarget: string;
+    constructor(opts: {
+        sourcePath: string;
+        reason: string;
+        copyTarget: string;
+    });
+}
+/**
+ * Both the target-repo override and the shipped default for `docs/risk-tiering.md`
+ * are absent. This indicates a broken plugin install — the shipped default should
+ * always be present in `plugins/crew/docs/risk-tiering.md`.
+ *
+ * Distinct from `MalformedRiskTieringSpecError` so callers (Story 4.9b) can
+ * tell the two failure modes apart and surface different recovery instructions.
+ *
+ * (Story 4.9 Task 2 / FR40a)
+ */
+export declare class ShippedRiskTieringDefaultMissingError extends DomainError {
+    readonly expectedPath: string;
+    constructor(opts: {
+        expectedPath: string;
+    });
+}
