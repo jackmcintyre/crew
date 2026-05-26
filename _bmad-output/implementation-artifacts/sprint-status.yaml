@@ -1,5 +1,5 @@
 generated: 2026-05-19
-last_updated: '2026-05-26'
+last_updated: '2026-05-27'
 project: crew
 project_key: NOKEY
 tracking_system: file-system
@@ -75,7 +75,7 @@ development_status:
   5-9-telemetry-as-files-and-session-death-recovery-guide: backlog
   5-10-persist-dev-transcript-to-disk-before-any-mcp-call: done
   5-11-orphan-recovery-branch-in-crew-start: done
-  5-12-mcp-child-resilient-to-parent-stdin-close: backlog
+  5-12-mcp-child-resilient-to-parent-stdin-close: done
   epic-5-retrospective: optional
   epic-6: backlog
   6-1-story-level-retro-entries-via-record-story-retro: backlog
