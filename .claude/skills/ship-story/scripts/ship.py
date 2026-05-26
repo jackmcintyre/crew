@@ -9,7 +9,9 @@ Subcommands:
   preflight                       sanity-check the environment before a run
   resolve [story_id]              pick story, extract ACs, return JSON, persist
                                   it to /tmp/ship-<key>.resolve.json
-  worktree <story_key>            create worktree + branch off origin/dev (TEMP: dev-as-trunk override; revisit when 5.x base-branch story lands)
+  worktree <story_key>            create worktree + branch off the configured
+                                  default_base (default: main). Reads
+                                  <repo>/.claude/skills/ship-story/config.yaml.
   set-status <key> <status>       atomic mutation of sprint-status.yaml
   verify-ac-table <results.json>  hard gate: fail if any AC row not green
   pre-pr-gate <story_key>         pre-PR smoke gate for user-surface ACs;
@@ -24,7 +26,7 @@ Subcommands:
                                   events.
   state <story_key> [--get STEP]  read run state for resume
   cleanup <story_key>             post-merge: status→done, remove worktree,
-                                  delete branch, sync main, tidy /tmp
+                                  delete branch, sync default_base, tidy /tmp
   pending-cleanup                 list stories with pr_opened but no cleaned
   reviewer-issues <story_key>     render reviewer-flagged issues (from
                                   review_pass events' data.issues) as a
@@ -32,6 +34,8 @@ Subcommands:
   review-budget <spec_path>       return the review-pass budget for a story
                                   based on story_shape tag (substrate=3,
                                   user-surface=5)
+  default-base                    print the resolved default_base to stdout
+                                  (for shell substitution in gh pr create)
 """
 from __future__ import annotations
 
@@ -83,6 +87,46 @@ _DEFAULT_RUNS_DIR = REPO / ".claude/skills/ship-story/.runs"
 
 def runs_dir() -> Path:
     return Path(os.environ.get("CREW_SHIP_RUNS_DIR", str(_DEFAULT_RUNS_DIR)))
+
+
+# ---------------------------------------------------------------- config helpers
+
+
+def resolve_default_base() -> str:
+    """Return the configured default_base trunk name.
+
+    Reads <repo>/.claude/skills/ship-story/config.yaml.  Falls back to
+    ``"main"`` when (i) the config file doesn't exist, (ii) the file isn't a
+    YAML mapping, (iii) the mapping lacks a ``default_base`` key, or (iv)
+    the value is not a non-empty string.  In the malformed-value case a
+    one-line warning is written to stderr so the operator can diagnose.
+
+    This function is intentionally pure (no side effects) and deterministic
+    by REPO; each caller re-reads the config so there is no stale-cache risk.
+    """
+    config_path = REPO / ".claude" / "skills" / "ship-story" / "config.yaml"
+    if not config_path.exists():
+        return "main"
+    try:
+        raw = yaml.safe_load(config_path.read_text())
+    except yaml.YAMLError:
+        sys.stderr.write(
+            f"ship.py: malformed config at {config_path}; falling back to main\n"
+        )
+        return "main"
+    if not isinstance(raw, dict):
+        sys.stderr.write(
+            f"ship.py: malformed config at {config_path}; falling back to main\n"
+        )
+        return "main"
+    base = raw.get("default_base")
+    if not isinstance(base, str) or not base.strip():
+        if "default_base" in raw:
+            sys.stderr.write(
+                f"ship.py: malformed config at {config_path}; falling back to main\n"
+            )
+        return "main"
+    return base
 
 
 def _cwd_sanity_check() -> None:
@@ -346,6 +390,13 @@ def _plugin_dir_hint(checkout_root: Path) -> dict:
 
 
 def cmd_worktree(args) -> None:
+    """Create a story worktree forked from the configured default_base.
+
+    The trunk branch is resolved from <repo>/.claude/skills/ship-story/config.yaml
+    (``default_base`` key).  Falls back to ``origin/main`` for green-field repos
+    with no config file.
+    """
+    base = resolve_default_base()
     worktrees_dir = REPO / ".worktrees"
     worktrees_dir.mkdir(parents=True, exist_ok=True)
     worktree = worktrees_dir / args.story_key
@@ -361,13 +412,13 @@ def cmd_worktree(args) -> None:
     if rc.returncode == 0:
         die(f"branch '{branch}' already exists — clean up before retry")
 
-    subprocess.check_call(["git", "fetch", "origin", "dev"], cwd=REPO)
+    subprocess.check_call(["git", "fetch", "origin", base], cwd=REPO)
     subprocess.check_call(
-        ["git", "worktree", "add", str(worktree), "-b", branch, "origin/dev"],
+        ["git", "worktree", "add", str(worktree), "-b", branch, f"origin/{base}"],
         cwd=REPO,
     )
     plugin_dir = _plugin_dir_hint(worktree)
-    print(json.dumps({"worktree": str(worktree), "branch": branch, "plugin_dir": plugin_dir}))
+    print(json.dumps({"worktree": str(worktree), "branch": branch, "base": base, "plugin_dir": plugin_dir}))
 
 
 # ---------------------------------------------------------------- status
@@ -542,6 +593,7 @@ def _find_pr_number(story_key: str) -> int:
 
 def cmd_cleanup(args) -> None:
     key = args.story_key
+    base = resolve_default_base()
     pr_number = _find_pr_number(key)
 
     rc = subprocess.run(
@@ -562,26 +614,26 @@ def cmd_cleanup(args) -> None:
     branch = f"story/{key}"
     summary: dict = {"pr": pr_number, "mergedAt": info.get("mergedAt")}
 
-    # 1. sync local main FIRST (only if currently on main; otherwise just
-    # fetch). Under the post-2026-05-24 flow the merged PR carries the
-    # `status: done` flip already, so syncing first avoids the redundant
-    # local write that would otherwise collide with the incoming ff-merge
-    # (the failure mode that surfaced cleaning up PR #122).
+    # 1. sync local base branch FIRST (only if currently on the base branch;
+    # otherwise just fetch). Under the post-2026-05-24 flow the merged PR
+    # carries the `status: done` flip already, so syncing first avoids the
+    # redundant local write that would otherwise collide with the incoming
+    # ff-merge (the failure mode that surfaced cleaning up PR #122).
     subprocess.check_call(
-        ["git", "fetch", "origin", "dev"], cwd=REPO,
+        ["git", "fetch", "origin", base], cwd=REPO,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     cur = subprocess.check_output(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=REPO, text=True,
     ).strip()
-    if cur == "dev":
+    if cur == base:
         rc = subprocess.run(
-            ["git", "merge", "--ff-only", "origin/dev"],
+            ["git", "merge", "--ff-only", f"origin/{base}"],
             cwd=REPO, capture_output=True, text=True,
         )
         if rc.returncode != 0:
             die(
-                "local dev is not fast-forwardable from origin/dev "
+                f"local {base} is not fast-forwardable from origin/{base} "
                 f"(diverged?): {rc.stderr.strip()}",
                 code=11,
             )
@@ -769,6 +821,11 @@ def cmd_review_budget(args) -> None:
     print(json.dumps({"spec_path": str(spec_path), "story_shape": shape, "budget": budget}))
 
 
+def cmd_default_base(_args) -> None:
+    """Print the resolved default_base to stdout (for shell substitution)."""
+    print(resolve_default_base())
+
+
 def cmd_pending_cleanup(args) -> None:
     """Stories whose last recorded run event is `pr_opened` (shipped, not yet cleaned)."""
     rd = runs_dir()
@@ -912,20 +969,71 @@ def _load_verification_events(story_key: str) -> dict:
     return out
 
 
+def _latest_event_data(story_key: str, event_type: str) -> dict | None:
+    """Return the ``data`` field of the latest event with the given type.
+
+    Reads the run-log JSONL for *story_key*, scans all lines, and returns
+    the ``data`` dict of the last line whose ``event`` field matches
+    *event_type*.  Returns ``None`` if the log file is absent, contains no
+    matching events, or if any line fails JSON parsing (malformed lines are
+    silently skipped — they don't abort the scan).
+    """
+    log = run_log(story_key)
+    if not log.exists():
+        return None
+    latest: dict | None = None
+    for line in log.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("event") == event_type:
+            latest = event.get("data") or {}
+    return latest
+
+
 def _resolve_spec_path(story_key: str, override: str | None) -> Path:
+    """Resolve the spec path for a story, in priority order.
+
+    Resolution order (first existing path wins):
+    1. ``override`` — the ``--spec-path`` flag (test hook / explicit override).
+    2. Worktree-first — if a ``worktree_ready`` event exists in the run log
+       AND the resulting ``<worktree_path>/<spec_rel>`` path exists, return
+       that path.  Handles the mid-ship window where the spec only lives
+       inside the worktree (not yet merged to the main repo).
+    3. Resolve-payload-first — ``spec_path`` from the persisted
+       ``/tmp/ship-<story_key>.resolve.json`` joined with REPO.
+    4. Convention fallback — ``REPO/_bmad-output/implementation-artifacts/<story_key>.md``.
+    """
     if override:
         return Path(override)
-    # Resolved-payload-first (matches the orchestrator's persisted JSON).
+
+    # Determine spec_rel from resolve payload (needed for branches 2 and 3).
     resolve_json = Path(f"/tmp/ship-{story_key}.resolve.json")
+    spec_rel: str | None = None
     if resolve_json.exists():
         try:
             info = json.loads(resolve_json.read_text())
         except json.JSONDecodeError:
             info = {}
         spec_rel = info.get("spec_path")
-        if spec_rel:
-            return REPO / spec_rel
-    # Fallback to convention.
+
+    # Worktree-first branch: check if we have a live worktree with the spec.
+    worktree_data = _latest_event_data(story_key, "worktree_ready")
+    if worktree_data is not None:
+        wt_path_str = worktree_data.get("path")
+        if wt_path_str and spec_rel:
+            candidate = Path(wt_path_str) / spec_rel
+            if candidate.exists():
+                return candidate
+
+    # Resolve-payload path.
+    if spec_rel:
+        return REPO / spec_rel
+
+    # Convention fallback.
     return REPO / f"_bmad-output/implementation-artifacts/{story_key}.md"
 
 
@@ -1113,6 +1221,8 @@ def main() -> None:
     rb = sub.add_parser("review-budget")
     rb.add_argument("spec_path", help="path to the story spec file")
     rb.set_defaults(func=cmd_review_budget)
+
+    sub.add_parser("default-base").set_defaults(func=cmd_default_base)
 
     args = p.parse_args()
     args.func(args)

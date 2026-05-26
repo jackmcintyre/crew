@@ -326,6 +326,8 @@ The gate resolves the spec path in order: `--spec-path <p>` flag if provided (te
 
 ### Step 9 — Open the PR
 
+PR base resolves from `<repo>/.claude/skills/ship-story/config.yaml` `default_base` (fallback: `main`).
+
 Build the body deterministically:
 
 ```bash
@@ -338,6 +340,7 @@ Run from the main repo cwd — do NOT `cd` into the worktree. Bash-tool cwd pers
 git -C <worktree_path> push -u origin "story/<story_key>"
 (cd <worktree_path> && gh pr create \
   --title "feat(<epic_num>): <title>" \
+  --base "$(python3 .claude/skills/ship-story/scripts/ship.py default-base)" \
   --body-file /tmp/ship-<story_key>.body.md)
 ```
 
