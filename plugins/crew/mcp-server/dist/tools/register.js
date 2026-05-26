@@ -32,6 +32,7 @@ import { processReviewerYield } from "./process-reviewer-yield.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
 import { computeAgreement, AgreementMetricResultSchema } from "./compute-agreement.js";
 import { runAutoMergeGate, AutoMergeGateResultSchema } from "./run-auto-merge-gate.js";
+import { createSmokeScratchRepo } from "./create-smoke-scratch-repo.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -1256,6 +1257,33 @@ export function registerAllTools(server) {
                 }
                 throw err;
             }
+        },
+    });
+    // Story 1.13 — createSmokeScratchRepo: create a disposable smoke-harness
+    // scratch repo seeded with git init + empty commit + minimal
+    // .crew/config.yaml + .crew/standards.md. Used by the /crew:smoke skill
+    // as the first checkpoint step (AC1).
+    server.registerTool({
+        name: "createSmokeScratchRepo",
+        description: "Create a disposable smoke-harness scratch repo seeded with git init + empty commit + minimal .crew/config.yaml + .crew/standards.md. Used by the /crew:smoke skill as the first checkpoint step.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                label: { type: "string" },
+                parentDir: { type: "string" },
+            },
+            required: ["label"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({ label: z.string().min(1), parentDir: z.string().min(1).optional() })
+                .parse(args);
+            const result = await createSmokeScratchRepo(parsed);
+            return {
+                content: [
+                    { type: "text", text: JSON.stringify({ scratchRoot: result.scratchRoot }) },
+                ],
+            };
         },
     });
     // Story 4.10b — runAutoMergeGate: auto-merge gate for done-ready-for-merge PRs.

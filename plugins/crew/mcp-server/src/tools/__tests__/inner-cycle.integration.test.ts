@@ -585,7 +585,7 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("postReviewerComments");
       expect(toolNames).not.toContain("runDevSession");
       expect(toolNames).toContain("applyReviewerLabels");
-      expect(toolNames.length).toBe(31); // Story 4.12 added recordAgentInvoke (26), recordPrCloseAction (27); Story 4.11 added processReviewerYield (28); Story 4.9b added classifyRiskTier (29); Story 4.10 added computeAgreement (30); Story 4.10b added runAutoMergeGate (31)
+      expect(toolNames.length).toBe(32); // Story 4.12 added recordAgentInvoke (26), recordPrCloseAction (27); Story 4.11 added processReviewerYield (28); Story 4.9b added classifyRiskTier (29); Story 4.10 added computeAgreement (30); Story 4.10b added runAutoMergeGate (31); Story 1.13 added createSmokeScratchRepo (32)
     } finally {
       await client.close();
       await server.close();

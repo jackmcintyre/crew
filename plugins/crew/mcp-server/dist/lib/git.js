@@ -208,6 +208,42 @@ export async function gitPush(opts) {
     }
 }
 // ---------------------------------------------------------------------------
+// gitInitWithEmptyCommit (Story 1.13 — smoke-harness scratch repo setup)
+// ---------------------------------------------------------------------------
+/**
+ * Initialise a fresh git repo at `cwd` with a deterministic default branch
+ * name (`main`) and create an initial empty commit so `rev-parse HEAD` is
+ * always resolvable.
+ *
+ * Two commands in order:
+ *  1. `git init -b main` — create the repo; `-b main` makes the default
+ *     branch deterministic regardless of the operator's `init.defaultBranch`
+ *     setting.
+ *  2. `git -c user.email=… -c user.name=… commit --allow-empty -m "chore: initial empty commit for smoke scratch repo"` —
+ *     inline identity scoped to this single `commit` invocation so the call
+ *     succeeds on fresh CI containers / containers with no global git config;
+ *     the `-c` flag does NOT persist identity to repo config.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (which
+ * forbids any file other than `lib/git.ts` from spawning `git`) stays
+ * satisfied.
+ */
+export async function gitInitWithEmptyCommit(opts) {
+    const { cwd } = opts;
+    const execaImpl = opts.execaImpl ?? defaultExeca;
+    await execaImpl("git", ["init", "-b", "main"], { cwd });
+    await execaImpl("git", [
+        "-c",
+        "user.email=crew-smoke@localhost",
+        "-c",
+        "user.name=crew-smoke",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "chore: initial empty commit for smoke scratch repo",
+    ], { cwd });
+}
+// ---------------------------------------------------------------------------
 // readRecentCommitTitles (Story 2.4 FR85)
 // ---------------------------------------------------------------------------
 /**

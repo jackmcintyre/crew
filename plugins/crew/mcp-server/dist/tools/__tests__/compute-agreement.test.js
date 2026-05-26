@@ -503,7 +503,7 @@ describe("AC4o — MCP tool registration smoke", () => {
         registerAllTools(fakeServer);
         expect(registeredTools).toContain("computeAgreement");
         expect(registeredTools).toContain("runAutoMergeGate");
-        expect(registeredTools.length).toBe(31);
+        expect(registeredTools.length).toBe(32);
     });
 });
 // ---------------------------------------------------------------------------

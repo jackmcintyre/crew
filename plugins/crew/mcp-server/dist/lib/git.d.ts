@@ -92,6 +92,28 @@ export declare function gitPush(opts: {
     execaImpl?: typeof defaultExeca;
 }): Promise<void>;
 /**
+ * Initialise a fresh git repo at `cwd` with a deterministic default branch
+ * name (`main`) and create an initial empty commit so `rev-parse HEAD` is
+ * always resolvable.
+ *
+ * Two commands in order:
+ *  1. `git init -b main` — create the repo; `-b main` makes the default
+ *     branch deterministic regardless of the operator's `init.defaultBranch`
+ *     setting.
+ *  2. `git -c user.email=… -c user.name=… commit --allow-empty -m "chore: initial empty commit for smoke scratch repo"` —
+ *     inline identity scoped to this single `commit` invocation so the call
+ *     succeeds on fresh CI containers / containers with no global git config;
+ *     the `-c` flag does NOT persist identity to repo config.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (which
+ * forbids any file other than `lib/git.ts` from spawning `git`) stays
+ * satisfied.
+ */
+export declare function gitInitWithEmptyCommit(opts: {
+    cwd: string;
+    execaImpl?: typeof defaultExeca;
+}): Promise<void>;
+/**
  * Read up to `limit` recent commit titles from the target repo via
  * `git log -<limit> --pretty=%s`. Best-effort: on non-zero exit (no
  * git, no commits, not a repo, etc.) returns `[]`. Used by
