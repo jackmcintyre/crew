@@ -10,7 +10,7 @@ gh_allow:
   - pr-view
 locked_phrases:
   handoff: "Handoff to <next role> — resuming work"
-  yield: "This sits in <role>'s domain — handing off"
+  yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
 ---
 

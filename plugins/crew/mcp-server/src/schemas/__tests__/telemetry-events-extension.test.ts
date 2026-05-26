@@ -14,6 +14,7 @@ import {
   ReviewerVerdictEventSchema,
   ReviewerVerdictMergeActionEventSchema,
   DevBudgetExceededEventSchema,
+  YieldHandoffEventSchema,
 } from "../telemetry-events.js";
 
 const BASE_TS = "2026-05-26T12:00:00.000Z";
@@ -290,11 +291,115 @@ describe("TelemetryEventSchema discriminated union — new types", () => {
     }
   });
 
+  it("routes yield.handoff to the correct schema branch", () => {
+    const result = TelemetryEventSchema.safeParse({
+      ...BASE_FIELDS,
+      type: "yield.handoff",
+      story_id: "native:01HZTEST",
+      data: {
+        from_role: "generalist-reviewer",
+        to_role: "security-specialist",
+        domain: "authentication authorization and secret handling",
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.type).toBe("yield.handoff");
+    }
+  });
+
   it("rejects an unknown event type", () => {
     const result = TelemetryEventSchema.safeParse({
       ...BASE_FIELDS,
       type: "unknown.event",
       data: {},
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// YieldHandoffEventSchema
+// ---------------------------------------------------------------------------
+
+describe("YieldHandoffEventSchema", () => {
+  it("accepts a valid yield.handoff event", () => {
+    const result = YieldHandoffEventSchema.safeParse({
+      ...BASE_FIELDS,
+      type: "yield.handoff",
+      story_id: "native:01HZTEST",
+      data: {
+        from_role: "generalist-reviewer",
+        to_role: "security-specialist",
+        domain: "authentication authorization and secret handling",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects unknown extra key in data (.strict())", () => {
+    const result = YieldHandoffEventSchema.safeParse({
+      ...BASE_FIELDS,
+      type: "yield.handoff",
+      data: {
+        from_role: "generalist-reviewer",
+        to_role: "security-specialist",
+        domain: "authentication authorization and secret handling",
+        extra_field: "bad",
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects unknown extra key at event level (.strict())", () => {
+    const result = YieldHandoffEventSchema.safeParse({
+      ...BASE_FIELDS,
+      type: "yield.handoff",
+      data: {
+        from_role: "generalist-reviewer",
+        to_role: "security-specialist",
+        domain: "authentication authorization and secret handling",
+      },
+      extra_top_level: "bad",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty string for from_role", () => {
+    const result = YieldHandoffEventSchema.safeParse({
+      ...BASE_FIELDS,
+      type: "yield.handoff",
+      data: {
+        from_role: "",
+        to_role: "security-specialist",
+        domain: "authentication authorization and secret handling",
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty string for to_role", () => {
+    const result = YieldHandoffEventSchema.safeParse({
+      ...BASE_FIELDS,
+      type: "yield.handoff",
+      data: {
+        from_role: "generalist-reviewer",
+        to_role: "",
+        domain: "authentication authorization and secret handling",
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty string for domain", () => {
+    const result = YieldHandoffEventSchema.safeParse({
+      ...BASE_FIELDS,
+      type: "yield.handoff",
+      data: {
+        from_role: "generalist-reviewer",
+        to_role: "security-specialist",
+        domain: "",
+      },
     });
     expect(result.success).toBe(false);
   });

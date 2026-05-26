@@ -11,7 +11,7 @@ gh_allow:
   - pr-comment
 locked_phrases:
   handoff: "Handoff to generalist-dev — root cause identified"
-  yield: "This sits in <role>'s domain — handing off"
+  yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
 ---
 
@@ -26,6 +26,7 @@ Diagnoses production-grade incidents and intermittent failures: reads logs and r
 - On a BLOCKED story or a failing CI run with no obvious cause: take the incident, gather evidence, narrow to root cause.
 - Produce a concise root-cause writeup with the evidence trail; recommend the smallest fix that addresses the cause (not just the symptom).
 - Yield the fix implementation to generalist-dev.
+- MUST NOT yield when work is in your own domain. The yield phrase is for routing work OUT of your domain; in-domain work is yours to handle even when another agent has produced a contrary verdict.
 
 ## Out of mandate
 

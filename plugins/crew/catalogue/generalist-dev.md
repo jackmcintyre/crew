@@ -13,7 +13,7 @@ gh_allow:
   - pr-comment
 locked_phrases:
   handoff: "Handoff to reviewer — story <story-id> ready for review."
-  yield: "This sits in <role>'s domain — handing off"
+  yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
 ---
 

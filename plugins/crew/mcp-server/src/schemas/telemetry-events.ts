@@ -124,15 +124,38 @@ export const DevBudgetExceededEventSchema = TelemetryEventBase.extend({
     .strict(),
 }).strict();
 
+/**
+ * `yield.handoff` — emitted by `processReviewerYield` when a generalist
+ * reviewer's yield is successfully routed to a hired specialist (FR103, NFR29).
+ * Only emitted on the success branch; routing-failure and self-yield branches
+ * write no JSONL. Story 4.11.
+ *
+ * `agent` at the event-base level is set to `from_role` (who emitted the yield).
+ * `data.from_role` is duplicated so downstream consumers reading only `data`
+ * (e.g. retro tools projecting handoffs) don't need to climb up the envelope.
+ */
+export const YieldHandoffEventSchema = TelemetryEventBase.extend({
+  type: z.literal("yield.handoff"),
+  data: z
+    .object({
+      from_role: z.string().min(1),
+      to_role: z.string().min(1),
+      domain: z.string().min(1),
+    })
+    .strict(),
+}).strict();
+
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
   ReviewerVerdictEventSchema,
   ReviewerVerdictMergeActionEventSchema,
   DevBudgetExceededEventSchema,
+  YieldHandoffEventSchema,
 ]);
 
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
 export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;
 export type ReviewerVerdictMergeActionEvent = z.infer<typeof ReviewerVerdictMergeActionEventSchema>;
 export type DevBudgetExceededEvent = z.infer<typeof DevBudgetExceededEventSchema>;
+export type YieldHandoffEvent = z.infer<typeof YieldHandoffEventSchema>;

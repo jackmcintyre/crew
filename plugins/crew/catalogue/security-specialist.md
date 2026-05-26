@@ -11,7 +11,7 @@ gh_allow:
   - pr-comment
 locked_phrases:
   handoff: "Handoff to generalist-reviewer — security review complete"
-  yield: "This sits in <role>'s domain — handing off"
+  yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
 ---
 
@@ -26,6 +26,7 @@ Reviews PRs for security concerns: authn/authz, secret handling, injection, dese
 - On PRs flagged high-risk-tier or touching auth/secrets/IO boundaries: perform a security review pass before the generalist-reviewer's verdict.
 - Record specific findings citing file and line; recommend mitigations.
 - Yield non-security findings back to generalist-reviewer.
+- MUST NOT yield when work is in your own domain. The yield phrase is for routing work OUT of your domain; in-domain work is yours to handle even when another agent has produced a contrary verdict.
 
 ## Out of mandate
 
