@@ -30,6 +30,7 @@ import { applyReviewerLabels } from "./apply-reviewer-labels.js";
 import { recordAgentInvoke } from "./record-agent-invoke.js";
 import { recordPrCloseAction } from "./record-pr-close-action.js";
 import { processReviewerYield } from "./process-reviewer-yield.js";
+import { classifyRiskTier } from "./classify-risk-tier.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -1178,6 +1179,57 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         .parse(args);
       try {
         const result = await runReviewerSession(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.9b — risk-tier classifier (FR40a, Pattern §11).
+  server.registerTool({
+    name: "classifyRiskTier",
+    description:
+      "Classify a PR's risk tier from its diff signals (changed paths, commit messages, diff size) using the " +
+      "loaded risk-tiering spec (Story 4.9). Returns the Pattern §11 output shape: " +
+      "{ story_id, tier: low|medium|high, matched_rule, evidence: { paths, change_types, diff_size } }. " +
+      "Walks rules in high→medium→low order (highest-tier-wins). Falls back to 'medium' with matched_rule='fallback' " +
+      "when no rule matches. Propagates MalformedRiskTieringSpecError and ShippedRiskTieringDefaultMissingError verbatim. " +
+      "In v1, this tool is called internally by runReviewerSession; it is exposed as an MCP tool for future direct callers. " +
+      "Story 4.9b.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        pluginRoot: { type: "string" },
+        storyId: { type: "string" },
+        changedPaths: { type: "array", items: { type: "string" } },
+        commitMessages: { type: "array", items: { type: "string" } },
+        diffSize: { type: "number" },
+      },
+      required: ["targetRepoRoot", "pluginRoot", "storyId", "changedPaths", "commitMessages", "diffSize"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          pluginRoot: z.string().min(1),
+          storyId: z.string().min(1),
+          changedPaths: z.array(z.string()),
+          commitMessages: z.array(z.string()),
+          diffSize: z.number().int().nonnegative(),
+        })
+        .parse(args);
+      try {
+        const result = await classifyRiskTier(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

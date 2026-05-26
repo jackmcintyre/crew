@@ -27,6 +27,7 @@
  *
  * Story 4.6b Task 4.
  */
+import * as path from "node:path";
 import { execa as defaultExeca } from "execa";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { gh } from "../lib/gh.js";
@@ -37,6 +38,7 @@ import { composeSummaryBody } from "../lib/compose-reviewer-summary.js";
 import { findHunkLineForPath } from "../lib/find-hunk-line.js";
 import { GhApiResponseShapeError, ReviewerResultMissingStandardsVersionError } from "../errors.js";
 import { logTelemetryEvent } from "../lib/logger.js";
+import { readManifest, writeManifest } from "../lib/manifest-io.js";
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -49,6 +51,45 @@ import { logTelemetryEvent } from "../lib/logger.js";
  */
 function escapeRegex(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+// ---------------------------------------------------------------------------
+// Manifest stamp helper (Story 4.9b Task 9 — AC3 unpacked 3g)
+// ---------------------------------------------------------------------------
+/**
+ * Stamp `risk_tier` and `risk_tier_evidence` onto the in-progress manifest
+ * after a successful POST/PATCH. Best-effort: stamp failures MUST NOT roll
+ * back a comment that is already on GitHub. On failure, logs and returns.
+ *
+ * @param targetRepoRoot - Absolute path to the target repository root.
+ * @param ref - Story reference (used to locate the manifest file).
+ * @param riskTier - The risk-tier block from the result file. No-op when undefined.
+ */
+async function stampRiskTierOnManifest(targetRepoRoot, ref, riskTier) {
+    if (riskTier === undefined) {
+        return; // Backward compat — no block to stamp (3h)
+    }
+    // The in-progress manifest lives at .crew/state/in-progress/<ref>.yaml.
+    // Refs may contain colons (e.g. "native:01HZ...") — use the full ref as
+    // the filename, matching the convention from claimStory.
+    const manifestPath = path.join(targetRepoRoot, ".crew", "state", "in-progress", `${ref}.yaml`);
+    try {
+        const manifest = await readManifest(manifestPath);
+        const updated = {
+            ...manifest,
+            risk_tier: riskTier.tier,
+            risk_tier_evidence: {
+                matched_rule: riskTier.matched_rule,
+                paths: riskTier.evidence.paths,
+                change_types: riskTier.evidence.change_types,
+                diff_size: riskTier.evidence.diff_size,
+            },
+        };
+        await writeManifest(manifestPath, updated);
+    }
+    catch {
+        // Stamp failure must not roll back the verdict comment (AC3g).
+        // The next reviewer run (PATCH path) will re-stamp.
+    }
 }
 // ---------------------------------------------------------------------------
 // Main entry
@@ -241,6 +282,8 @@ export async function postReviewerComments(opts) {
         }
         // Emit telemetry AFTER successful PATCH (Story 4.12 Task 3.1).
         await emitVerdictTelemetry();
+        // Stamp risk_tier on the manifest after telemetry (Story 4.9b Task 9 — AC3g).
+        await stampRiskTierOnManifest(opts.targetRepoRoot, resultFile.ref, resultFile.riskTier);
         return {
             next: "posted",
             postedReviewId: patchedId,
@@ -279,6 +322,8 @@ export async function postReviewerComments(opts) {
     }
     // Emit telemetry AFTER successful POST (Story 4.12 Task 3.1).
     await emitVerdictTelemetry();
+    // Stamp risk_tier on the manifest after telemetry (Story 4.9b Task 9 — AC3g).
+    await stampRiskTierOnManifest(opts.targetRepoRoot, resultFile.ref, resultFile.riskTier);
     return {
         next: "posted",
         postedReviewId,

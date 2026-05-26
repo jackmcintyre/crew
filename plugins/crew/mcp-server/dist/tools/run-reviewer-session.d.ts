@@ -33,6 +33,7 @@
 import { execa as defaultExeca } from "execa";
 import type { SourceStory } from "../adapters/adapter.js";
 import type { Criterion, StandardsDoc } from "../schemas/standards-doc.js";
+import type { RiskTierBlock } from "./classify-risk-tier.js";
 export type AcResult = {
     index: number;
     tag: string | null;
@@ -101,6 +102,13 @@ export interface ReviewerResultFileShape {
     prNumber: number;
     /** Semver version of the standards doc used to produce this verdict (Story 4.7). */
     standardsVersion: string;
+    /**
+     * Risk-tier classification result (Story 4.9b — FR40a, Pattern §11).
+     * Optional for backward compatibility with pre-4.9b session result files.
+     * Written by `runReviewerSession` after the AC-walk. Read by `postReviewerComments`
+     * to render the evidence block and stamp the manifest.
+     */
+    riskTier?: RiskTierBlock;
 }
 export interface RunReviewerSessionOptions {
     targetRepoRoot: string;

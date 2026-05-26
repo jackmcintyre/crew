@@ -61,6 +61,22 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     }, z.core.$strip>>>;
     claimed_by: z.ZodOptional<z.ZodString>;
     rework_count: z.ZodOptional<z.ZodNumber>;
+    risk_tier: z.ZodOptional<z.ZodEnum<{
+        medium: "medium";
+        low: "low";
+        high: "high";
+    }>>;
+    risk_tier_evidence: z.ZodOptional<z.ZodObject<{
+        matched_rule: z.ZodString;
+        paths: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        change_types: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+            revert: "revert";
+            migration: "migration";
+            schema: "schema";
+            "dep-bump": "dep-bump";
+        }>>>;
+        diff_size: z.ZodNumber;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
 /**

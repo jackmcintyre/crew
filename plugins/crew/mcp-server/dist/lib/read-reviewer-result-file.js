@@ -12,6 +12,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { ReviewerResultFileMalformedError } from "../errors.js";
+import { RiskTierBlockSchema } from "../tools/classify-risk-tier.js";
 /**
  * Read, parse, and validate the `reviewer-result.json` file written by
  * `runReviewerSession`. Returns `null` when the file is absent (ENOENT).
@@ -57,6 +58,22 @@ export async function readReviewerResultFile(targetRepoRoot, sessionUlid) {
     // Backfill standardsVersion for pre-4.7 projection files that lack the field.
     if (typeof asRecord["standardsVersion"] !== "string") {
         asRecord["standardsVersion"] = "";
+    }
+    // Optional riskTier block (Story 4.9b Task 6). Absent block → backward compatible.
+    // Present block → validate via RiskTierBlockSchema; malformed block → hard error.
+    if (asRecord["riskTier"] !== undefined) {
+        const riskTierResult = RiskTierBlockSchema.safeParse(asRecord["riskTier"]);
+        if (!riskTierResult.success) {
+            const firstIssue = riskTierResult.error.issues[0];
+            const detail = firstIssue
+                ? `${firstIssue.path.join(".")}: ${firstIssue.message}`
+                : "(no details)";
+            throw new ReviewerResultFileMalformedError({
+                path: filePath,
+                cause: `riskTier block failed schema validation: ${detail}`,
+            });
+        }
+        asRecord["riskTier"] = riskTierResult.data;
     }
     return asRecord;
 }
