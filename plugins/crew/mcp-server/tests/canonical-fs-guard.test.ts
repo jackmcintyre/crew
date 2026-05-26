@@ -26,6 +26,13 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // manifest YAML directly to tmpdir. This is a test file only; the production
   // tool is a gate decision + gh shell-out (no raw fs writes in production code).
   path.join(SRC_DIR, "tools", "__tests__", "run-auto-merge-gate.test.ts"),
+  // Story 5.11: orphan-recovery test files write manifest fixtures and transcript files
+  // directly to tmpdir. These are test files only; the production tools route writes
+  // through atomicWriteFile / writeManifest / moveBetweenStates (existing sanctioned seams).
+  path.join(SRC_DIR, "tools", "__tests__", "scan-orphaned-in-progress.test.ts"),
+  path.join(SRC_DIR, "tools", "__tests__", "reattach-orphan.test.ts"),
+  path.join(SRC_DIR, "tools", "__tests__", "block-orphan-no-transcript.test.ts"),
+  path.join(SRC_DIR, "__tests__", "orphan-recovery.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

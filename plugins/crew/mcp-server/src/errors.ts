@@ -1359,3 +1359,26 @@ export class AutoMergeGateThresholdInvalidError extends DomainError {
     this.reason = opts.reason;
   }
 }
+
+/**
+ * `reattachOrphan` was called on a manifest whose `claimed_by` already matches
+ * the current session ULID. This is a race condition where the orphan was
+ * claimed by another concurrent step between the scan and the rewrite attempt.
+ *
+ * Story 5.11 Task 2.2.
+ */
+export class NotAnOrphanError extends DomainError {
+  readonly ref: string;
+  readonly currentSessionUlid: string;
+
+  constructor(opts: { ref: string; currentSessionUlid: string }) {
+    super(
+      `reattach-orphan refused: '${opts.ref}' is already claimed by the current session ` +
+        `'${opts.currentSessionUlid}' — it is not an orphan. ` +
+        `This is typically a race between scanOrphanedInProgress and reattachOrphan. ` +
+        `(Story 5.11)`,
+    );
+    this.ref = opts.ref;
+    this.currentSessionUlid = opts.currentSessionUlid;
+  }
+}
