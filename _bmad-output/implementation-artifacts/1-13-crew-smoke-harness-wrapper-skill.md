@@ -44,7 +44,7 @@ The skill stops before `/crew:start`. The whole point of the smoke is for the op
 
 **AC1 (createSmokeScratchRepo MCP tool, vitest:).** A new MCP tool `createSmokeScratchRepo({ label, parentDir? })` lives at `plugins/crew/mcp-server/src/tools/create-smoke-scratch-repo.ts` and is registered in `register.ts` (bringing the tool count from 31 → 32). The tool:
 
-- mkdtemps `<parentDir>/crew-smoke-<label>-<ulid>/` (default `parentDir = os.tmpdir()`); `label` is validated as kebab-case (lowercase letters, digits, hyphens; min length 1).
+- mkdtemps a directory under `<parentDir>` whose name starts with `crew-smoke-<label>-` followed by the random suffix Node's `fs.mkdtemp` appends (no ULID — Node's suffix is already collision-free); default `parentDir = os.tmpdir()`. `label` is validated as kebab-case (lowercase letters, digits, hyphens; min length 1).
 - Runs git-init + an initial empty commit via `gitInitWithEmptyCommit(scratchRoot)` from `lib/git.ts` so the AC6f canonical-fs-guard static check stays satisfied — no `git` spawns outside `lib/git.ts`.
 - Writes a minimal native-adapter `.crew/config.yaml` via `writeManagedFile` (`adapter: native`, `standards: {}`).
 - Copies `plugins/crew/docs/standards-example.md` to `<scratchRoot>/.crew/standards.md` via `writeManagedFile`.
@@ -92,7 +92,7 @@ The body also contains a `# Failure modes` section documenting (a) scratch-repo 
   ];
   ```
 
-- (iv) The body contains the literal log-line shape `[smoke] step N (<name>): ok` (assert as a literal substring) AND the failure shape `[smoke] step N (<name>): FAILED — <reason>`.
+- (iv) For each entry in `STEPS` (steps 1–4 only — step 5 is its own check in (v)), the body contains the concrete success line for that step: e.g. `[smoke] step 1 (scratch-repo): ok`, `[smoke] step 2 (skip-hiring): ok`, … Assert each of the four concrete strings as a substring. Additionally, the body contains the failure-shape template `[smoke] step N (<name>): FAILED — <reason>` (the literal `N` and `<name>` placeholders are present here — this is the documented shape, not a per-step line).
 - (v) The body contains the literal handoff line `Ready. Run /crew:start in this scratch repo.`.
 - (vi) The body does NOT contain a literal Claude-Code-style invocation of `/crew:start` (i.e. `/crew:start` appears only inside the handoff line, never on its own line as an instruction the LLM would obey). Implementation: count occurrences of `/crew:start` and assert the count equals the number of occurrences inside the handoff line (today: 1).
 
@@ -128,7 +128,34 @@ Where the assertion sits next to an inline `// Story 4.x added …` comment trai
 
 - [ ] **Task 3** — Register the new tool in `plugins/crew/mcp-server/src/tools/register.ts` (AC1, AC4)
   - [ ] 3.1 — Import `createSmokeScratchRepo` from `./create-smoke-scratch-repo.js`.
-  - [ ] 3.2 — `server.tool("createSmokeScratchRepo", "Create a disposable smoke-harness scratch repo at <parentDir>/crew-smoke-<label>-<suffix>/ seeded with git init + empty commit + minimal .crew/config.yaml + .crew/standards.md. Used by the `/crew:smoke` skill as the first checkpoint step.", { type: "object", properties: { label: { type: "string" }, parentDir: { type: "string" } }, required: ["label"] }, async (args) => { … })`. Return type matches PR #146: `{ content: [{ type: "text", text: JSON.stringify({ scratchRoot }) }] }`.
+  - [ ] 3.2 — Use the project's `server.registerTool({ name, description, inputSchema, handler })` pattern (verified against current `dev` HEAD's `register.ts`; the `server.tool(...)` positional form from PR #146 predates this repo's API and does not exist on `AiEngineeringTeamServer`). Example shape, modelled on the existing `getStatus` registration at `register.ts:48`:
+
+    ```ts
+    server.registerTool({
+      name: "createSmokeScratchRepo",
+      description:
+        "Create a disposable smoke-harness scratch repo seeded with git init + empty commit + minimal .crew/config.yaml + .crew/standards.md. Used by the /crew:smoke skill as the first checkpoint step.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          parentDir: { type: "string" },
+        },
+        required: ["label"],
+      },
+      handler: async (args) => {
+        const parsed = z
+          .object({ label: z.string().min(1), parentDir: z.string().min(1).optional() })
+          .parse(args);
+        const result = await createSmokeScratchRepo(parsed);
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify({ scratchRoot: result.scratchRoot }) },
+          ],
+        };
+      },
+    });
+    ```
 
 - [ ] **Task 4** — Author `plugins/crew/skills/smoke/SKILL.md` (AC2, AC5, AC6)
   - [ ] 4.1 — Frontmatter exactly as in AC2.
@@ -147,7 +174,7 @@ Where the assertion sits next to an inline `// Story 4.x added …` comment trai
 
 - [ ] **Task 7** — Integration tests (AC1)
   - [ ] 7.1 — Create `plugins/crew/mcp-server/tests/create-smoke-scratch-repo.integration.test.ts`. Six scenarios: happy path; idempotent cleanup; kebab-case label validation; `parentDir` override; git repo initialised (HEAD resolvable via `git -C <scratchRoot> rev-parse HEAD` returning a 40-char SHA); standards.md byte-equals the shipped template.
-  - [ ] 7.2 — Use real `os.tmpdir()` and real `fs` calls — no stubs. Each test cleans up via `addfinalizer` / `afterEach` so failed runs don't leak directories.
+  - [ ] 7.2 — Use real `os.tmpdir()` and real `fs` calls — no stubs. Each test cleans up via vitest's `afterEach` hook so failed runs don't leak directories (mirror the existing pattern in `tests/scan-sources.test.ts` / `tests/read-custom-role.test.ts`).
 
 - [ ] **Task 8** — Local verification (process)
   - [ ] 8.1 — `pnpm build` from `plugins/crew/mcp-server/` — clean.
