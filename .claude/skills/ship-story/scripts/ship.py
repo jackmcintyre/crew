@@ -9,7 +9,7 @@ Subcommands:
   preflight                       sanity-check the environment before a run
   resolve [story_id]              pick story, extract ACs, return JSON, persist
                                   it to /tmp/ship-<key>.resolve.json
-  worktree <story_key>            create worktree + branch off origin/dev (TEMP: dev-as-trunk override; revisit when 5.x base-branch story lands)
+  worktree <story_key>            create worktree + branch off origin/main
   set-status <key> <status>       atomic mutation of sprint-status.yaml
   verify-ac-table <results.json>  hard gate: fail if any AC row not green
   pre-pr-gate <story_key>         pre-PR smoke gate for user-surface ACs;
@@ -361,9 +361,9 @@ def cmd_worktree(args) -> None:
     if rc.returncode == 0:
         die(f"branch '{branch}' already exists — clean up before retry")
 
-    subprocess.check_call(["git", "fetch", "origin", "dev"], cwd=REPO)
+    subprocess.check_call(["git", "fetch", "origin", "main"], cwd=REPO)
     subprocess.check_call(
-        ["git", "worktree", "add", str(worktree), "-b", branch, "origin/dev"],
+        ["git", "worktree", "add", str(worktree), "-b", branch, "origin/main"],
         cwd=REPO,
     )
     plugin_dir = _plugin_dir_hint(worktree)
@@ -568,20 +568,20 @@ def cmd_cleanup(args) -> None:
     # local write that would otherwise collide with the incoming ff-merge
     # (the failure mode that surfaced cleaning up PR #122).
     subprocess.check_call(
-        ["git", "fetch", "origin", "dev"], cwd=REPO,
+        ["git", "fetch", "origin", "main"], cwd=REPO,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     cur = subprocess.check_output(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=REPO, text=True,
     ).strip()
-    if cur == "dev":
+    if cur == "main":
         rc = subprocess.run(
-            ["git", "merge", "--ff-only", "origin/dev"],
+            ["git", "merge", "--ff-only", "origin/main"],
             cwd=REPO, capture_output=True, text=True,
         )
         if rc.returncode != 0:
             die(
-                "local dev is not fast-forwardable from origin/dev "
+                "local main is not fast-forwardable from origin/main "
                 f"(diverged?): {rc.stderr.strip()}",
                 code=11,
             )
