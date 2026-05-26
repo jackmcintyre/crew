@@ -43,8 +43,10 @@ import { slugifyStandardsCriterion } from "../lib/slugify-standards-criterion.js
 import { atomicWriteFile } from "../lib/managed-fs.js";
 import { DuplicateStandardsCriterionIdError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
+import { classifyRiskTier } from "./classify-risk-tier.js";
 import type { SourceStory } from "../adapters/adapter.js";
 import type { Criterion, StandardsDoc } from "../schemas/standards-doc.js";
+import type { RiskTierBlock } from "./classify-risk-tier.js";
 import type { execa } from "execa";
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,13 @@ export interface ReviewerResultFileShape {
   prNumber: number;
   /** Semver version of the standards doc used to produce this verdict (Story 4.7). */
   standardsVersion: string;
+  /**
+   * Risk-tier classification result (Story 4.9b — FR40a, Pattern §11).
+   * Optional for backward compatibility with pre-4.9b session result files.
+   * Written by `runReviewerSession` after the AC-walk. Read by `postReviewerComments`
+   * to render the evidence block and stamp the manifest.
+   */
+  riskTier?: RiskTierBlock;
 }
 
 export interface RunReviewerSessionOptions {
@@ -308,6 +317,48 @@ function deriveRecommendedVerdict(acResults: Record<number, AcResult>): Recommen
   return "READY FOR MERGE";
 }
 
+// ---------------------------------------------------------------------------
+// Diff analysis helpers (Story 4.9b Task 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract POSIX-style changed file paths from a unified diff string.
+ * Looks for `+++ b/<path>` lines (new-file headers in unified diff format).
+ * Paths are deduplicated and returned in appearance order.
+ *
+ * @internal
+ */
+function collectChangedPathsFromDiff(diff: string): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++ b/")) {
+      const p = line.slice(6).trim();
+      if (p && !seen.has(p)) {
+        seen.add(p);
+        result.push(p);
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Count the total lines added + removed in a unified diff (excludes +++ / --- headers).
+ *
+ * @internal
+ */
+function computeDiffSize(diff: string): number {
+  let count = 0;
+  for (const line of diff.split("\n")) {
+    if ((line.startsWith("+") && !line.startsWith("+++")) ||
+        (line.startsWith("-") && !line.startsWith("---"))) {
+      count++;
+    }
+  }
+  return count;
+}
+
 export async function runReviewerSession(
   opts: RunReviewerSessionOptions,
 ): Promise<ReviewerSessionResult> {
@@ -410,6 +461,59 @@ export async function runReviewerSession(
   const recommendedVerdict = deriveRecommendedVerdict(acResults);
 
   // -------------------------------------------------------------------------
+  // Risk-tier classification (Story 4.9b — FR40a, Pattern §11)
+  //
+  // Runs AFTER the AC-walk and BEFORE writing reviewer-result.json.
+  // Wrapped in try/catch: a malformed spec or missing default must not
+  // break the reviewer pass — the result file is written without riskTier
+  // and downstream consumers (postReviewerComments) silently omit the
+  // evidence block and manifest stamp.
+  // -------------------------------------------------------------------------
+  let riskTierBlock: RiskTierBlock | undefined;
+  try {
+    // Collect changed paths from the diff (lines starting with "+++ b/" or "--- a/" are headers)
+    const changedPaths = collectChangedPathsFromDiff(prDiff);
+
+    // Collect commit messages via `gh pr view --json commits`
+    const commitsResult = await gh({
+      role,
+      permissions,
+      subcommand: "pr-view",
+      args: [String(prNumber), "--json", "commits", "--jq", "[.commits[].messageHeadline]"],
+      execaImpl,
+      pluginRootOverride: pluginRoot,
+    });
+    let commitMessages: string[] = [];
+    try {
+      const parsed = JSON.parse(commitsResult.stdout) as unknown;
+      if (Array.isArray(parsed)) {
+        commitMessages = parsed.filter((m): m is string => typeof m === "string");
+      }
+    } catch {
+      // Failed to parse commits — use empty array (classifier still runs)
+    }
+
+    // Compute diffSize: count lines starting with + or - (excluding +++ and --- headers)
+    const diffSize = computeDiffSize(prDiff);
+
+    const classificationResult = await classifyRiskTier({
+      targetRepoRoot,
+      pluginRoot,
+      storyId: ref,
+      changedPaths,
+      commitMessages,
+      diffSize,
+    });
+
+    // Attach to result file as riskTier block (drop story_id — file already has ref)
+    const { story_id: _dropped, ...block } = classificationResult;
+    riskTierBlock = block;
+  } catch {
+    // Malformed spec, missing default, or unexpected error — continue without classification.
+    // postReviewerComments handles absent riskTier gracefully (no evidence block, no stamp).
+  }
+
+  // -------------------------------------------------------------------------
   // Persist reviewer-result.json (spec §3g — revision 2)
   //
   // Only the verdict-relevant projection is persisted — heavy fields
@@ -435,6 +539,7 @@ export async function runReviewerSession(
     sourceStoryRef: sourceStory.ref,
     prNumber,
     standardsVersion: standards.version,
+    ...(riskTierBlock !== undefined ? { riskTier: riskTierBlock } : {}),
   };
   await atomicWriteFile(resultFilePath, JSON.stringify(fileProjection, null, 2));
 

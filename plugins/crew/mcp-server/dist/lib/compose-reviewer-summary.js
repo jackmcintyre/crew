@@ -50,10 +50,45 @@ export function composeVerdictLine(result) {
     // A file that reaches here was mutated out-of-band — refuse to fabricate a reason.
     throw new UnreachableBlockedReasonError({ acResults });
 }
+// ---------------------------------------------------------------------------
+// Summary body composer
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Risk-tier evidence block helper (Story 4.9b AC3 unpacked 3f)
+// ---------------------------------------------------------------------------
+/**
+ * Compose the verbatim `## Risk tier evidence` block for the PR review body.
+ *
+ * Story 4.9b — AC3 unpacked (3f). The block format is byte-exact:
+ * tested in vitest for byte-equality.
+ *
+ * Returns `""` when `riskTier` is `undefined` (backward compat — legacy
+ * session results without classification omit the block entirely).
+ *
+ * @param riskTier - The optional risk-tier block from the result file.
+ */
+export function composeRiskTierEvidenceBlock(riskTier) {
+    if (riskTier === undefined) {
+        return "";
+    }
+    const { tier, matched_rule, evidence } = riskTier;
+    const pathsStr = evidence.paths.length > 0 ? evidence.paths.join(", ") : "_none_";
+    const changeTypesStr = evidence.change_types.length > 0 ? evidence.change_types.join(", ") : "_none_";
+    const matchedRuleStr = matched_rule === "fallback" ? "fallback (no rule matched)" : matched_rule;
+    return [
+        `## Risk tier evidence`,
+        ``,
+        `- **tier:** ${tier}`,
+        `- **matched rule:** ${matchedRuleStr}`,
+        `- **paths:** ${pathsStr}`,
+        `- **change types:** ${changeTypesStr}`,
+        `- **diff size:** ${evidence.diff_size} lines`,
+    ].join("\n");
+}
 /**
  * Compose the full PR review summary body from the persisted result.
  *
- * Body skeleton (Story 4.6b spec §2a, extended by Story 4.7):
+ * Body skeleton (Story 4.6b spec §2a, extended by Story 4.7, Story 4.9b):
  *   # Reviewer summary — ${ref}
  *   ## Acceptance criteria
  *   <per-AC lines>
@@ -63,9 +98,11 @@ export function composeVerdictLine(result) {
  *   <verdict line>
  *
  *   `standards_version: <standardsVersion>` · `plugin_version: <pluginVersion>`
+ *   [## Risk tier evidence]  (Story 4.9b — only when resultFile.riskTier is present)
  *   <!-- crew:verdict:<pluginVersion>:<ref> -->
  *
  * The footer marker is the absolute last line (no trailing newline).
+ * The `## Risk tier evidence` block appears BEFORE the footer marker (Story 4.9b AC3f).
  */
 export function composeSummaryBody(result, versionInfo) {
     const { ref, acResults, standardsByCriterionId } = result;
@@ -125,8 +162,13 @@ export function composeSummaryBody(result, versionInfo) {
     const displayStandardsVersion = standardsVersion || "(unknown)";
     const versionLine = `\`standards_version: ${displayStandardsVersion}\` · \`plugin_version: ${pluginVersion}\``;
     const footerMarker = `<!-- crew:verdict:${pluginVersion}:${ref} -->`;
-    // Append blank line, version line, footer marker (no trailing newline after marker)
+    // Append blank line, version line
     parts.push(``, versionLine);
+    // --- Risk tier evidence block (Story 4.9b AC3f) — BEFORE footer marker ---
+    const evidenceBlock = composeRiskTierEvidenceBlock(result.riskTier);
+    if (evidenceBlock) {
+        parts.push(``, evidenceBlock);
+    }
     return parts.join("\n") + "\n" + footerMarker;
 }
 // ---------------------------------------------------------------------------

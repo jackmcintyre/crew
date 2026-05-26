@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MalformedExecutionManifestError } from "../errors.js";
+import { ChangeTypeSchema } from "./risk-tiering-spec.js";
 /**
  * Zod schema for execution manifests.
  *
@@ -156,6 +157,26 @@ export const ExecutionManifestSchema = z
      * Added in Story 4.3 (FR28).
      */
     rework_count: z.number().int().nonnegative().optional(),
+    /**
+     * Risk tier verdict from the classifier (Story 4.9b — FR40a, Pattern §11).
+     * Written by `postReviewerComments` after a successful POST/PATCH.
+     * Optional so existing manifests (to-do/, blocked/) parse unchanged.
+     */
+    risk_tier: z.enum(["low", "medium", "high"]).optional(),
+    /**
+     * Evidence block from the risk-tier classifier (Story 4.9b — Pattern §11).
+     * Mirrors the `evidence` sub-object from `RiskTierClassifierResult`.
+     * Optional so existing manifests parse unchanged.
+     */
+    risk_tier_evidence: z
+        .object({
+        matched_rule: z.string().min(1),
+        paths: z.array(z.string()).default([]),
+        change_types: z.array(ChangeTypeSchema).default([]),
+        diff_size: z.number().int().nonnegative(),
+    })
+        .strict()
+        .optional(),
 })
     .strict();
 /**

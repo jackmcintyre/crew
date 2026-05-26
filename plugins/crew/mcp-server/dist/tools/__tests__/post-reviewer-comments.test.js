@@ -21,6 +21,8 @@ import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 import { __resetPluginVersionCacheForTests } from "../../lib/plugin-version.js";
 import { GhRecoverableError, GhApiResponseShapeError, ReviewerResultFileMalformedError } from "../../errors.js";
 import { makeGhExecaStub } from "../../__tests__/test-helpers/gh-execa-stub.js";
+import { readManifest } from "../../lib/manifest-io.js";
+import * as manifestIo from "../../lib/manifest-io.js";
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -783,5 +785,167 @@ describe("(4.7 AC3) Null-bodied prior reviews skipped (Copilot/plain approval sh
         // PATCH URL targets review 1
         expect(patchUrl).toContain("/reviews/1");
         expect(patchInput).toBeDefined();
+    });
+});
+// ---------------------------------------------------------------------------
+// Story 4.9b — AC4 sub-cases (4g), (4h), (4i)
+// Risk-tier evidence block + manifest stamp integration tests
+// ---------------------------------------------------------------------------
+// Minimal valid in-progress manifest YAML
+function makeInProgressManifestYaml(ref) {
+    return [
+        `ref: "${ref}"`,
+        `status: in-progress`,
+        `adapter: native`,
+        `source_path: _bmad-output/implementation-artifacts/test-story.md`,
+        `source_hash: ${"a".repeat(64)}`,
+        `depends_on: []`,
+        `acceptance_criteria:`,
+        `  - text: "AC1 - test"`,
+        `    kind: unit`,
+        `title: "Test story"`,
+        `narrative: "As a dev / I want tests / so that things work."`,
+        `withdrawn: false`,
+        `claimed_by: "01HZ_TEST_SESSION_ULID_______"`,
+    ].join("\n") + "\n";
+}
+// A synthetic riskTier block simulating a completed classifyRiskTier call
+const SAMPLE_RISK_TIER_BLOCK = {
+    tier: "high",
+    matched_rule: "high.migration",
+    evidence: {
+        paths: ["db/migrations/0001.sql"],
+        change_types: ["migration"],
+        diff_size: 50,
+    },
+};
+/**
+ * Build a result file shape with an optional riskTier block.
+ */
+function makeReviewerResultWith4gb(verdict, riskTier) {
+    return {
+        sessionUlid: SESSION_ULID,
+        ref: STORY_REF,
+        recommendedVerdict: verdict,
+        acResults: { 1: { index: 1, tag: null, applicability: "runnable-artifact-check", artifactPath: "foo.txt", status: "pass", reason: "ok" } },
+        standardsByCriterionId: STANDARDS,
+        sourceStoryRef: STORY_REF,
+        prNumber: PR_NUMBER,
+        standardsVersion: "1.2.3",
+        ...(riskTier !== undefined ? { riskTier } : {}),
+    };
+}
+describe("Story 4.9b AC4 (4g): stamp-both-places integration", () => {
+    it("POST body contains evidence block; manifest is stamped; telemetry fires once", async () => {
+        // Fixture: in-progress manifest
+        const manifestDir = path.join(tmpRoot, ".crew", "state", "in-progress");
+        await fs.mkdir(manifestDir, { recursive: true });
+        await atomicWriteFile(path.join(manifestDir, `${STORY_REF}.yaml`), makeInProgressManifestYaml(STORY_REF));
+        // Fixture: result file with riskTier block
+        const resultData = makeReviewerResultWith4gb("READY FOR MERGE", SAMPLE_RISK_TIER_BLOCK);
+        await writeResultFile(resultData);
+        let capturedInput;
+        const stub = makeStubWithEmptyReviews({
+            prDiff: { stdout: FAKE_DIFF_WITHOUT_ARTIFACT },
+            onPostCall: (input) => { capturedInput = input; },
+        });
+        const result = await postReviewerComments({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            execaImpl: stub,
+            pluginRootOverride: pluginRoot,
+            pluginVersionOverride: PLUGIN_VERSION,
+        });
+        expect(result.next).toBe("posted");
+        // Assert POST body contains verbatim evidence block
+        const body = JSON.parse(capturedInput);
+        expect(body.body).toContain("## Risk tier evidence");
+        expect(body.body).toContain("- **tier:** high");
+        expect(body.body).toContain("- **matched rule:** high.migration");
+        expect(body.body).toContain("- **paths:** db/migrations/0001.sql");
+        expect(body.body).toContain("- **change types:** migration");
+        expect(body.body).toContain("- **diff size:** 50 lines");
+        // Assert footer marker is still last line
+        expect(body.body.split("\n").at(-1)).toBe(EXPECTED_FOOTER_MARKER);
+        // Assert manifest was stamped
+        const manifestPath = path.join(manifestDir, `${STORY_REF}.yaml`);
+        const manifest = await readManifest(manifestPath);
+        expect(manifest.risk_tier).toBe("high");
+        expect(manifest.risk_tier_evidence).toEqual({
+            matched_rule: "high.migration",
+            paths: ["db/migrations/0001.sql"],
+            change_types: ["migration"],
+            diff_size: 50,
+        });
+    });
+});
+describe("Story 4.9b AC4 (4h): backward-compat — missing classification", () => {
+    it("postReviewerComments succeeds; no evidence block in body; manifest NOT stamped", async () => {
+        // Fixture: in-progress manifest
+        const manifestDir = path.join(tmpRoot, ".crew", "state", "in-progress");
+        await fs.mkdir(manifestDir, { recursive: true });
+        await atomicWriteFile(path.join(manifestDir, `${STORY_REF}.yaml`), makeInProgressManifestYaml(STORY_REF));
+        // Fixture: result file WITHOUT riskTier
+        const resultData = makeReviewerResultWith4gb("READY FOR MERGE");
+        await writeResultFile(resultData);
+        let capturedInput;
+        const stub = makeStubWithEmptyReviews({
+            prDiff: { stdout: FAKE_DIFF_WITHOUT_ARTIFACT },
+            onPostCall: (input) => { capturedInput = input; },
+        });
+        const result = await postReviewerComments({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            execaImpl: stub,
+            pluginRootOverride: pluginRoot,
+            pluginVersionOverride: PLUGIN_VERSION,
+        });
+        expect(result.next).toBe("posted");
+        const body = JSON.parse(capturedInput);
+        // No evidence block in body
+        expect(body.body).not.toContain("## Risk tier evidence");
+        // Footer marker is still last line
+        expect(body.body.split("\n").at(-1)).toBe(EXPECTED_FOOTER_MARKER);
+        // Manifest NOT stamped (optional fields remain undefined)
+        const manifestPath = path.join(manifestDir, `${STORY_REF}.yaml`);
+        const manifest = await readManifest(manifestPath);
+        expect(manifest.risk_tier).toBeUndefined();
+        expect(manifest.risk_tier_evidence).toBeUndefined();
+    });
+});
+describe("Story 4.9b AC4 (4i): manifest stamp best-effort — writeManifest throws EACCES", () => {
+    it("postReviewerComments returns successfully; POST body has evidence block; telemetry fires", async () => {
+        // Fixture: in-progress manifest
+        const manifestDir = path.join(tmpRoot, ".crew", "state", "in-progress");
+        await fs.mkdir(manifestDir, { recursive: true });
+        await atomicWriteFile(path.join(manifestDir, `${STORY_REF}.yaml`), makeInProgressManifestYaml(STORY_REF));
+        // Fixture: result file WITH riskTier
+        const resultData = makeReviewerResultWith4gb("READY FOR MERGE", SAMPLE_RISK_TIER_BLOCK);
+        await writeResultFile(resultData);
+        // Stub writeManifest to throw EACCES
+        const writeError = new Error("EACCES: permission denied");
+        writeError.code = "EACCES";
+        vi.spyOn(manifestIo, "writeManifest").mockRejectedValueOnce(writeError);
+        let capturedInput;
+        const stub = makeStubWithEmptyReviews({
+            prDiff: { stdout: FAKE_DIFF_WITHOUT_ARTIFACT },
+            onPostCall: (input) => { capturedInput = input; },
+        });
+        // Must NOT throw even though writeManifest throws
+        const result = await postReviewerComments({
+            targetRepoRoot: tmpRoot,
+            sessionUlid: SESSION_ULID,
+            execaImpl: stub,
+            pluginRootOverride: pluginRoot,
+            pluginVersionOverride: PLUGIN_VERSION,
+        });
+        // postReviewerComments returns successfully
+        expect(result.next).toBe("posted");
+        // POST body still contains the evidence block
+        const body = JSON.parse(capturedInput);
+        expect(body.body).toContain("## Risk tier evidence");
+        expect(body.body).toContain("- **tier:** high");
+        // Footer marker is still last line (original POST not rolled back)
+        expect(body.body.split("\n").at(-1)).toBe(EXPECTED_FOOTER_MARKER);
     });
 });
