@@ -14,7 +14,7 @@ so that **planner-author mistakes are caught at scan time (before claim time, wh
 
 ### What this story is, in one sentence
 
-Close the last functional pre-dogfood gap from the pre-Epic-5 enhancement plan: (1) extract dep references from the spec body using a small, conservative set of patterns and refuse the scan write when those references drift from the manifest's `depends_on`; (2) turn `blocked_by` from a `union(literals, z.string())` fallback into a closed `z.enum([...])` of ten typed members; (3) update `/crew:start`'s blocked-recovery surface to render a per-case operator hint keyed off the typed value.
+Close the last functional pre-dogfood gap from the pre-Epic-5 enhancement plan: (1) extract dep references from the spec body using a small, conservative set of patterns and refuse the scan write when those references drift from the manifest's `depends_on`; (2) turn `blocked_by` from a `union(literals, z.string())` fallback into a closed `z.enum([...])` of thirteen typed members; (3) update `/crew:start`'s blocked-recovery surface to render a per-case operator hint keyed off the typed value.
 
 ### Why this is independent of 5.10 / 5.11 / 5.12
 
@@ -24,7 +24,7 @@ Close the last functional pre-dogfood gap from the pre-Epic-5 enhancement plan: 
 
 - (a) Add a generic prose-vs-manifest validator for every field. The validator is scoped to `depends_on` only.
 - (b) Re-author or re-format any spec body to make dep extraction easier. The patterns are chosen to match what authors already write in 5.10 / 5.11 / 5.12.
-- (c) Add new `blocked_by` reasons beyond the ten members listed in AC2. Every existing writer must map cleanly; if one does not, the spec author flagged that for promotion to AC discussion (see Migration table below — all current writers map).
+- (c) Add new `blocked_by` reasons beyond the thirteen members listed in AC2. Every existing writer must map cleanly; if one does not, the spec author flagged that for promotion to AC discussion (see Migration table below — all current writers map).
 - (d) Migrate `/crew:scan`'s rendered output away from its current structured-text shape (see `renderScanResult` in `scan-sources.ts`). A new `blocked:` summary line line for `deps-drift` is added; the existing block/skipped/created/updated lines stay.
 - (e) Change the runtime semantics of any existing `blocked_by` writer beyond replacing the string literal with the typed value (the Zod boundary catches future drift; the call sites do not change).
 
@@ -59,43 +59,43 @@ Rejected candidates and reasoning:
 - `## Dependencies` H2 headers — the native adapter's `parseDependencies` already reads this section for `depends_on` (see `parse-native-story.ts:84` and `parseDependencies` at line 181). Re-extracting it would just re-read the same source the manifest was built from, producing no drift signal. The whole point of AC1 is to catch drift between the *spec body's prose* (what a human author wrote) and the *manifest's depends_on* (what the adapter parsed) — extracting from the same source defeats this.
 - AC-text story-key regex (`\d+-\d+[a-z]?-[a-z0-9-]+`) — too lossy. Story keys are mentioned in AC text for context ("see Story 5.10 for transcript shape") without implying a build-time dep. False positives would dominate.
 
-Ref-token grammar inside (i) and (ii): a ref token is matched by either `^native:[0-9A-HJKMNP-TV-Z]{26}$` (native ULID) or `^bmad:\d+\.\d+$` (BMad story id) — same as `NATIVE_REF_RE` / `BMAD_REF_RE` in `parse-native-story.ts:178-179`. Tokens that fail both regexes are warned to stderr (see Implementation Strategy § Edge cases) but do NOT trigger drift on their own.
+Ref-token grammar inside (i) and (ii): a ref token is matched by either `^native:[0-9A-HJKMNP-TV-Z]{26}$` (native ULID) or `^bmad:\d+\.\d+$` (BMad story id) — same as `NATIVE_REF_RE` / `BMAD_REF_RE` in `parse-native-story.ts:178-179`. Tokens that fail both regexes are silently dropped in v1; a v2 may add a stderr warning (see Implementation Strategy § Edge cases). Malformed tokens do NOT trigger drift on their own.
 -->
 
 **AC2:**
 **Given** the `ExecutionManifestSchema` in `plugins/crew/mcp-server/src/schemas/execution-manifest.ts`,
 **When** the schema is parsed,
-**Then** `blocked_by` is a closed `z.enum([...])` with exactly these ten members and no `z.string()` fallback: `handoff-grammar`, `deps-drift`, `quota-exhausted`, `worktree-leak`, `reviewer-verdict-needs-changes`, `reviewer-verdict-blocked`, `reviewer-no-session-result`, `gh-defer`, `gh-needs-human`, `orphan-no-transcript`. Any manifest write attempting a value outside this set fails the Zod parse at the schema boundary with the canonical Zod enum error.
+**Then** `blocked_by` is a closed `z.enum([...])` with exactly these thirteen members and no `z.string()` fallback (the closed enum required by this story, audit-derived from live writers + one reserved schema member; `deps-drift` is the new member this story introduces): `handoff-grammar`, `gh-defer`, `gh-retry`, `gh-needs-human`, `reviewer-no-session-result`, `reviewer-verdict-needs-changes`, `reviewer-verdict-blocked`, `routing-failure`, `routing-self-yield`, `planning-discipline`, `orphan-no-transcript`, `reviewer-grammar`, `deps-drift`. Any manifest write attempting a value outside this set fails the Zod parse at the schema boundary with the canonical Zod enum error.
 
 <!--
-Migration table — every current writer maps cleanly to one of the ten members. No new members are proposed for v1.
+Migration table — every current writer maps cleanly to one of the thirteen members.
+
+Note on enum count: the epic block at Story 5.1 lists nine members. The spec author's codebase audit found ten live writers + one reserved schema member (`reviewer-grammar`, retained from Story 4.3), and this story adds one new writer (`deps-drift`) — totalling thirteen members. The spec's enum count diverges from the epic by intent (audit-driven): `source-drift` is dropped (no live writer), and `gh-retry`, `routing-failure`, `routing-self-yield`, `planning-discipline`, and `reviewer-grammar` are added based on live or schema-reserved writers.
 
 | File | Line | Current value | Target enum member | Notes |
 |------|------|---------------|---------------------|-------|
-| `tools/process-dev-transcript.ts` | 122 | `gh-${errorClass}` (defer/retry/needs-human) | `gh-defer`, `gh-needs-human` (+ `gh-retry` — see Notes) | `gh-retry` is the third `errorClass` member. **Decision:** add `gh-retry` to the enum (eleven members, not ten) — this is the only writer-discovered miss. See Migration § notes below for justification. |
+| `tools/process-dev-transcript.ts` | 122 | `gh-${errorClass}` (defer/retry/needs-human) | `gh-defer`, `gh-retry`, `gh-needs-human` | All three `errorClass` members are in the v1 enum. |
 | `tools/process-dev-transcript.ts` | 152 | `handoff-grammar` | `handoff-grammar` | exact match. |
 | `tools/process-reviewer-transcript.ts` | 142 | `reviewer-no-session-result` | `reviewer-no-session-result` | exact match. |
 | `tools/process-reviewer-transcript.ts` | 171 | `reviewer-verdict-needs-changes` | `reviewer-verdict-needs-changes` | exact match. |
 | `tools/process-reviewer-transcript.ts` | 187 | `reviewer-verdict-blocked` | `reviewer-verdict-blocked` | exact match. |
-| `tools/process-reviewer-yield.ts` | 131 | `routing-failure` | **does not map** — see § Notes (`routing-failure` is added as the 12th member; the enum is then `handoff-grammar | deps-drift | quota-exhausted | worktree-leak | reviewer-verdict-needs-changes | reviewer-verdict-blocked | reviewer-no-session-result | gh-defer | gh-retry | gh-needs-human | orphan-no-transcript | routing-failure | routing-self-yield`). |
-| `tools/process-reviewer-yield.ts` | 154 | `routing-self-yield` | **does not map** — see § Notes (add 13th member). |
-| `tools/scan-sources.ts` | 331, 385 | `planning-discipline` | **does not map** — see § Notes (add 14th member). |
+| `tools/process-reviewer-yield.ts` | 131 | `routing-failure` | `routing-failure` | added to the v1 enum based on the live writer. |
+| `tools/process-reviewer-yield.ts` | 154 | `routing-self-yield` | `routing-self-yield` | added to the v1 enum based on the live writer. |
+| `tools/scan-sources.ts` | 331, 385 | `planning-discipline` | `planning-discipline` | added to the v1 enum based on the live writer. |
 | `tools/block-orphan-no-transcript.ts` | 81 | `orphan-no-transcript` | `orphan-no-transcript` | exact match (Story 5.11's existing path; the epic block's AC2 text explicitly says this entry "rides on 5.11's existing `blockOrphanNoTranscript` path"). |
 | (Story 5.13 NEW) | new line in `scan-sources.ts` | `deps-drift` | `deps-drift` | new writer added by this story. |
 
 § Notes on the enum membership decision:
 
-The epic block lists ten members. The current codebase has writers for four members that the epic's ten-member list omits: `routing-failure`, `routing-self-yield`, `planning-discipline`, `source-drift` (the last in `execution-manifest.ts:133` as a literal even though no live writer is present — this was the original Story 3.5 taxonomy). The author's reasonable call here is **two-fold**:
+The v1 enum has **thirteen members**, derived from a codebase audit: ten live writers + one reserved schema literal (`reviewer-grammar`, retained from Story 4.3) + one new writer added by this story (`deps-drift`) + the `gh-retry` member (the third `errorClass` value at `process-dev-transcript.ts:122`). The literal `source-drift` is removed (no live writer; no test). The dev agent MUST NOT drop any existing writer's literal; the dev agent MUST NOT add members beyond the thirteen listed.
 
-1. **Adopt the epic's ten members verbatim AS THE STARTING POINT** and extend with the four writer-required members for a final v1 enum of fourteen: the ten from the epic + `gh-retry` + `routing-failure` + `routing-self-yield` + `planning-discipline`. The literal `source-drift` is removed (no writer; no test). The dev agent MUST NOT drop any existing writer's literal; the dev agent MAY add only these four, with no others.
-
-2. **Document the reasoning verbatim in the schema's JSDoc** so the next planner knows the v1 enum is closed and any new reason needs a deliberate schema-change story, not a free-string sneak-in. (This is the load-bearing change — see project memory `feedback_default_to_deterministic_seams`: load-bearing decisions live in tool-written artefacts, not LLM prose. The closed enum is the deterministic seam.)
+**Document the reasoning verbatim in the schema's JSDoc** so the next planner knows the v1 enum is closed and any new reason needs a deliberate schema-change story, not a free-string sneak-in. (This is the load-bearing change — see project memory `feedback_default_to_deterministic_seams`: load-bearing decisions live in tool-written artefacts, not LLM prose. The closed enum is the deterministic seam.)
 
 Existing test fixtures that reference `blocked_by` — every match found by grep `-rn "blocked_by"` under `__tests__/`:
 
 | File | Lines | Current value(s) | Target enum member(s) |
 |------|------|------|------|
-| `schemas/__tests__/execution-manifest.test.ts` | 90, 98, 106, 114, 122, 130 | `handoff-grammar`, `reviewer-grammar`, `planning-discipline`, `source-drift`, `some-future-value`, undefined | `handoff-grammar`, `reviewer-grammar` is **not in the enum** — see Notes below, `planning-discipline`, **`source-drift` removed**, `some-future-value` will now fail Zod (this is the test of the enum's closedness; flip the assertion to `.toThrow`), undefined |
+| `schemas/__tests__/execution-manifest.test.ts` | 90, 98, 106, 114, 122, 130 | `handoff-grammar`, `reviewer-grammar`, `planning-discipline`, `source-drift`, `some-future-value`, undefined | `handoff-grammar`, `reviewer-grammar` (retained in the v1 enum — see Note below), `planning-discipline`, **`source-drift` removed** (drop this fixture line entirely), `some-future-value` will now fail Zod (this is the test of the enum's closedness; flip the assertion to `.toThrow`), undefined |
 | `tools/__tests__/gh-recoverable.integration.test.ts` | 283, 329, 373, 410, 529, 530, 554 | `gh-defer`, `gh-needs-human`, `gh-retry`, undefined, `handoff-grammar`, n/a (regex), `gh-defer` | exact matches; all already in enum. |
 | `tools/__tests__/process-dev-transcript.test.ts` | 213, 237, 261, 280, 331, 353, 375, 396, 397, 417, 422, 429, 443 | undefined, `handoff-grammar` (multi), `gh-defer`, `gh-retry`, `gh-needs-human`, regex match | exact matches; all already in enum. |
 | `tools/__tests__/block-orphan-no-transcript.test.ts` | 5, 77, 81 | `orphan-no-transcript` (comments + assertions) | exact match. |
@@ -109,15 +109,15 @@ Existing test fixtures that reference `blocked_by` — every match found by grep
 | `__tests__/operator-smoke-helpers/ac5-4-6b-post-reviewer-comments.smoke.test.ts` | 504, 518, 520 | `reviewer-verdict-needs-changes` | exact match. |
 | `skills/__tests__/start-skill-content.test.ts` | 165 | `handoff-grammar` (asserts skill text contains this) | exact match. |
 
-Note: `reviewer-grammar` appears in the existing schema literal-union (line 135) and in one test (`execution-manifest.test.ts:96-101`) but has NO live writer. **Decision:** keep `reviewer-grammar` in the enum (15th member total) — it was deliberately added in Story 4.3 as part of the handoff/reviewer grammar pair. Removing it would mean re-removing a literal the planner of 4.3 already justified, and the test for it stays valid as a forward-compat reservation. The final v1 enum is **fifteen members**: the ten from the epic + `gh-retry`, `routing-failure`, `routing-self-yield`, `planning-discipline`, `reviewer-grammar`.
+Note: `reviewer-grammar` appears in the existing schema literal-union (line 135) and in one test (`execution-manifest.test.ts:96-101`) but has NO live writer. **Decision:** keep `reviewer-grammar` in the enum as a reserved member — it was deliberately added in Story 4.3 as part of the handoff/reviewer grammar pair. Removing it would mean re-removing a literal the planner of 4.3 already justified, and the test for it stays valid as a forward-compat reservation. The final v1 enum is **thirteen members**: `handoff-grammar`, `gh-defer`, `gh-retry`, `gh-needs-human`, `reviewer-no-session-result`, `reviewer-verdict-needs-changes`, `reviewer-verdict-blocked`, `routing-failure`, `routing-self-yield`, `planning-discipline`, `orphan-no-transcript`, `reviewer-grammar` (reserved), `deps-drift` (new).
 
-Summary: **8 live writers** identified (process-dev-transcript ×2, process-reviewer-transcript ×3, process-reviewer-yield ×2, block-orphan-no-transcript ×1) + **1 NEW writer** added by this story (scan-sources `deps-drift`) = **9 total writers** post-migration. **12 test files** carry `blocked_by` literals to migrate (per the grep audit above); the dev agent re-greps to confirm zero free-string survivors before merging.
+Summary: **10 live writers** identified (process-dev-transcript ×2, process-reviewer-transcript ×3, process-reviewer-yield ×2, scan-sources `planning-discipline` ×1 site, block-orphan-no-transcript ×1) + **1 reserved schema member** (`reviewer-grammar`) + **1 NEW writer** added by this story (scan-sources `deps-drift`) = **13 enum members** total. **12 test files** carry `blocked_by` literals to migrate (per the grep audit above); the dev agent re-greps to confirm zero free-string survivors before merging.
 -->
 
 **AC3 (user-surface):**
 **Given** `/crew:start` encountering a `blocked/` manifest in its outer-loop blocked-recovery surface (per project memory `project_blocked_recovery_prose_lies`),
 **When** the start skill renders the per-case operator hint for that manifest,
-**Then** the rendered hint is keyed off the typed `blocked_by` value (case-of-fifteen) — no generic `clear blocked_by and re-run` fallback for known reasons — and each enum member resolves to a verbatim hint of the form `[<enum-member>] <ref> — <operator action>` (e.g. `[deps-drift] <ref> — fix the spec's "Depends on:" prose or the source story's ## Dependencies section, then re-run /crew:scan`). The fifteen hints are written into a single exported `BLOCKED_BY_HINTS: Readonly<Record<BlockedBy, string>>` in `mcp-server/src/lib/blocked-by-hints.ts`. The `/crew:start` SKILL.md is updated only to reference this seam via tool return; the hint text itself lives in the tool-written artefact (deterministic seam — per memory `feedback_default_to_deterministic_seams`).
+**Then** the rendered hint is keyed off the typed `blocked_by` value (case-of-thirteen) — no generic `clear blocked_by and re-run` fallback for known reasons — and each enum member resolves to a verbatim hint of the form `[<enum-member>] <ref> — <operator action>` (e.g. `[deps-drift] <ref> — fix the spec's "Depends on:" prose or the source story's ## Dependencies section, then re-run /crew:scan`). The thirteen hints are written into a single exported `BLOCKED_BY_HINTS: Readonly<Record<BlockedBy, string>>` in `mcp-server/src/lib/blocked-by-hints.ts`. The `/crew:start` SKILL.md is updated only to reference this seam via tool return; the hint text itself lives in the tool-written artefact (deterministic seam — per memory `feedback_default_to_deterministic_seams`).
 
 <!--
 Rationale for AC3 user-surface tag: the rendered hint appears in the operator's chat output (TUI) when /crew:start hits a blocked manifest. The text is directly observable per project memory `project_blocked_recovery_prose_lies` — the whole point of this AC is that the OLD generic prose was a paper-only fix; the NEW typed hints are the load-bearing one. Tagging.
@@ -126,12 +126,12 @@ Rationale for AC3 user-surface tag: the rendered hint appears in the operator's 
 **AC4 (integration):**
 **Given** the vitest harness for `scan-sources` and `execution-manifest`,
 **When** the suite runs,
-**Then** vitest covers: (a) a synthetic spec whose prose declares one dep ref the manifest omits → `scanSources` writes the manifest to `blocked/` with `blocked_by: "deps-drift"` AND the rendered result string contains `[deps-drift] <ref> — prose: {...}, manifest: {...}`; (b) a `blocked_by` write with a value outside the enum (e.g. the literal string `"some-future-value"`) → Zod parse throws; (c) for every fifteen enum members, `BLOCKED_BY_HINTS[member]` returns a non-empty string starting with `[<member>] ` and not equal to the generic legacy phrase `clear blocked_by and re-run`. _(integration)_
+**Then** vitest covers: (a) a synthetic spec whose prose declares one dep ref the manifest omits → `scanSources` writes the manifest to `blocked/` with `blocked_by: "deps-drift"` AND the rendered result string contains `[deps-drift] <ref> — prose: {...}, manifest: {...}`; (b) a `blocked_by` write with a value outside the enum (e.g. the literal string `"some-future-value"`) → Zod parse throws; (c) for every one of the thirteen enum members, `BLOCKED_BY_HINTS[member]` returns a non-empty string starting with `[<member>] ` and not equal to the generic legacy phrase `clear blocked_by and re-run`. _(integration)_
 
 **AC5 (integration):**
 **Given** the codebase post-migration,
 **When** the dev agent runs `pnpm -r test` AND a separate `grep -rn 'blocked_by:' plugins/crew/mcp-server/src/` ignoring `.d.ts` and JSDoc-comment lines,
-**Then** every test passes AND every `blocked_by` string literal in non-test source maps to one of the fifteen enum members. Tests that previously asserted free-string fallback behaviour (the `"some-future-value"` test at `execution-manifest.test.ts:120-126`) are flipped to assert the Zod throw. No test references a `blocked_by` value not in the enum. _(integration)_
+**Then** every test passes AND every `blocked_by` string literal in non-test source maps to one of the thirteen enum members. Tests that previously asserted free-string fallback behaviour (the `"some-future-value"` test at `execution-manifest.test.ts:120-126`) are flipped to assert the Zod throw. No test references a `blocked_by` value not in the enum. _(integration)_
 
 ---
 
@@ -146,7 +146,7 @@ Rationale for AC3 user-surface tag: the rendered hint appears in the operator's 
 
 **MODIFY:**
 
-- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` — replace the `blocked_by` union (lines 130-138) with `z.enum([...])` of fifteen members; export the inferred type `BlockedBy = z.infer<...>`. Update JSDoc to enumerate the fifteen members and link to `_bmad-output/implementation-artifacts/5-13-*.md § AC2` for the closed-enum rationale.
+- `plugins/crew/mcp-server/src/schemas/execution-manifest.ts` — replace the `blocked_by` union (lines 130-138) with `z.enum([...])` of thirteen members; export the inferred type `BlockedBy = z.infer<...>`. Update JSDoc to enumerate the thirteen members and link to `_bmad-output/implementation-artifacts/5-13-*.md § AC2` for the closed-enum rationale.
 - `plugins/crew/mcp-server/src/tools/scan-sources.ts` — within the `currentState === null` branch (today's discipline-violation path lives at line 362-404), insert a new prior gate: extract prose refs from `story.raw_path`'s contents (re-read the source file's bytes; the parsed `SourceStory` does not retain the raw body — see § Edge cases for the no-double-read decision). Compute symmetric difference vs `story.depends_on`. If non-empty: write a `blocked/` manifest with `blocked_by: "deps-drift"` and `discipline_violations: [{ code: "deps-drift-prose-vs-manifest", field: "depends_on", detail: <human description of the drift set> }]`. Append the ref to `result.blockedRefs`. Add a new field `depsDriftRefs: Array<{ ref: string; proseRefs: string[]; manifestRefs: string[] }>` to `ScanResult` (a typed addition next to `blockedRefs`). Update `renderScanResult` to emit one `[deps-drift] <ref> — prose: {...}, manifest: {...}` line per entry, immediately above the existing `blocked:` summary line. Also runs in the existing `currentState === "blocked"` re-evaluation branch (line 284-355) symmetrically — if the source's drift changes from `planning-discipline` to `deps-drift` or vice versa, the blocked manifest is rewritten with the new typed reason. The `deps-drift` gate runs **before** `validateAgainstDiscipline` (a drift is a planner-author mistake; surfacing it before discipline gives the operator the more actionable signal first).
 - `plugins/crew/mcp-server/src/tools/process-dev-transcript.ts` (lines 122, 152) — no semantic change; the literal strings already match enum members. Verify post-Zod that the existing `blocked_by: \`gh-${errorClass}\`` template expression produces only `gh-defer | gh-retry | gh-needs-human` (the only three `errorClass` values) — if a future `errorClass` value were added, Zod would catch it at write time.
 - `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts` (lines 142, 171, 187) — no semantic change.
@@ -195,7 +195,7 @@ After any change in `plugins/crew/mcp-server/src/`, the dev agent MUST run `pnpm
 - `lib/__tests__/extract-dep-refs.test.ts` — table-driven, covering:
   - empty body → empty set
   - single `Depends on: native:<ULID>` line → set with one element
-  - `> Depends on Story 5.10` blockquote → set with `native:` ref if the story key resolves (note: the blockquote convention uses `Story 5.10` not a `native:` ULID — see § Edge case below)
+  - `> Depends on Story 5.10` blockquote → set containing `bmad:5.10` (per the § Edge case → blockquote ref tokens section below: `5.10` matching `^\d+\.\d+$` is normalised to `bmad:5.10`; native ULIDs would have to be cited verbatim as `> Depends on native:01HZ...`).
   - multiple lines, mixed patterns, with dedupe
   - malformed refs silently dropped
   - case sensitivity preserved (the regex is anchored on `Depends on:` exactly)
@@ -209,7 +209,7 @@ After any change in `plugins/crew/mcp-server/src/`, the dev agent MUST run `pnpm
   - (b) prose declares `native:01HZ...A` + manifest `depends_on: [native:01HZ...A]` → scan writes `to-do/` (no drift).
   - (c) prose declares `native:01HZ...A` + manifest `depends_on: [native:01HZ...A, native:01HZ...B]` → scan writes `blocked/` (symmetric drift).
   - (d) operator fixes the spec body so prose + manifest agree → re-scan promotes from `blocked/` to `to-do/`.
-- AC4(c): `lib/__tests__/blocked-by-hints.test.ts` covers the "no generic phrase" assertion across all fifteen members.
+- AC4(c): `lib/__tests__/blocked-by-hints.test.ts` covers the "no generic phrase" assertion across all thirteen members.
 
 ### Edge case → blockquote ref tokens
 
@@ -239,7 +239,7 @@ Two memory entries are directly load-bearing:
 
 - **Story 5.11** (`5-11-orphan-recovery-branch-in-crew-start.md`) added the `block-orphan-no-transcript.ts` tool that writes `blocked_by: "orphan-no-transcript"`. AC2 of this story preserves that literal verbatim. Re-read `block-orphan-no-transcript.ts:81` to confirm before writing the enum.
 - **Story 4.3** (handoff-grammar + reviewer-grammar) added the `handoff-grammar` and `reviewer-grammar` literals to the schema. Both are in the v1 enum.
-- **Story 4.5** (`gh-error-map`) defined the `gh-defer | gh-retry | gh-needs-human` triad. All three are in the v1 enum (the dev-agent migration note above flags that the epic block's ten-member list undercounts by one — `gh-retry` was missed).
+- **Story 4.5** (`gh-error-map`) defined the `gh-defer | gh-retry | gh-needs-human` triad. All three are in the v1 enum (the Migration table § Notes above explains why the v1 enum has thirteen members rather than the nine listed in the epic block — the codebase audit found extra live writers + `reviewer-grammar` as a reserved member).
 
 ### Project memories cited
 
@@ -262,7 +262,7 @@ Two memory entries are directly load-bearing:
 
 - [ ] `extract-dep-refs.ts` + tests land; unit-test coverage for all six edge cases in § Test Plan.
 - [ ] `blocked-by-hints.ts` + test land; every enum member has a non-generic hint.
-- [ ] `execution-manifest.ts` `blocked_by` is `z.enum([...])` of fifteen members; JSDoc updated; type `BlockedBy` exported.
+- [ ] `execution-manifest.ts` `blocked_by` is `z.enum([...])` of thirteen members; JSDoc updated; type `BlockedBy` exported.
 - [ ] `scan-sources.ts` writes `blocked/` with `blocked_by: "deps-drift"` on prose/manifest drift; `renderScanResult` emits `[deps-drift]` lines; integration test covers (a)/(b)/(c)/(d) above.
 - [ ] All twelve test files in the Migration table audited; no free-string `blocked_by` literal survives in `__tests__/**`; the `some-future-value` test flips to assert Zod throw.
 - [ ] `/crew:start` SKILL.md blocked-recovery surface references `BLOCKED_BY_HINTS` (or its rendered output) rather than inlining the legacy `clear blocked_by and re-run` text.
