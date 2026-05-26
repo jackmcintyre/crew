@@ -31,6 +31,7 @@ import { recordAgentInvoke } from "./record-agent-invoke.js";
 import { recordPrCloseAction } from "./record-pr-close-action.js";
 import { processReviewerYield } from "./process-reviewer-yield.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
+import { computeAgreement, AgreementMetricResultSchema } from "./compute-agreement.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -1237,6 +1238,58 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         if (err instanceof DomainError) {
           return {
             content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.10 — computeAgreement: rolling reviewer-verdict vs human-merge-action
+  // agreement ratio. Reads all *.jsonl files under <targetRepoRoot>/.crew/telemetry/,
+  // joins reviewer.verdict and reviewer.verdict.merge_action events by (pr_number,
+  // session_id), and returns a deterministic { ratio, distribution, window_size,
+  // sample_size, ... } shape or null on insufficient data. (FR67, NFR24)
+  // v1 callers: Story 4.10b's auto-merge gate (internal import, same pattern as
+  // classifyRiskTier). NOT in subagent allowlists in v1.
+  server.registerTool({
+    name: "computeAgreement",
+    description:
+      "Compute the rolling reviewer-verdict vs human-merge-action agreement ratio (FR67, NFR24). " +
+      "Reads every *.jsonl file under <targetRepoRoot>/.crew/telemetry/, joins reviewer.verdict and " +
+      "reviewer.verdict.merge_action events by (pr_number, session_id), excludes reviewer-failure verdicts " +
+      "and still-open merge actions, sorts newest-first by verdict ts, takes the first lastNVerdicts pairs. " +
+      "Returns { ratio, distribution, window_size, sample_size, skipped_unresolved, skipped_excluded, malformed_lines } " +
+      "or null when resolved-pair count < lastNVerdicts (insufficient data). " +
+      "Throws AgreementWindowInvalidError on invalid lastNVerdicts (0, negative, non-integer). " +
+      "Story 4.10.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        lastNVerdicts: { type: "number" },
+      },
+      required: ["targetRepoRoot"],
+    },
+    handler: async (args) => {
+      const parsed = {
+        targetRepoRoot: args.targetRepoRoot as string,
+        lastNVerdicts: args.lastNVerdicts as number | undefined,
+      };
+      try {
+        const result = await computeAgreement(parsed);
+        // Validate return shape before surfacing (round-trip guard)
+        if (result !== null) {
+          AgreementMetricResultSchema.parse(result);
+        }
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
             isError: true,
           };
         }
