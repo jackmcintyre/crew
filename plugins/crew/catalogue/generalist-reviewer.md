@@ -13,7 +13,7 @@ gh_allow:
   - api
 locked_phrases:
   handoff: "Handoff to generalist-dev — verdict recorded"
-  yield: "This sits in <role>'s domain — handing off"
+  yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
   # enforcement: deprecated — see Story 4.6 revision 2 (the binding verdict is the recommendedVerdict field
   # of the file written by runReviewerSession). The locked phrase is retained as authoring guidance only.

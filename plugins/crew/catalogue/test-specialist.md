@@ -12,7 +12,7 @@ gh_allow:
   - pr-comment
 locked_phrases:
   handoff: "Handoff to generalist-dev — tests scaffolded"
-  yield: "This sits in <role>'s domain — handing off"
+  yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
 ---
 
@@ -28,6 +28,7 @@ Designs test strategy for stories whose AC implies non-trivial test coverage: in
 - Identify gaps in the test pyramid; recommend the right test level (unit / integration / e2e).
 - Diagnose flaky tests; recommend isolation or quarantine.
 - Yield implementation back to generalist-dev once the strategy is captured.
+- MUST NOT yield when work is in your own domain. The yield phrase is for routing work OUT of your domain; in-domain work is yours to handle even when another agent has produced a contrary verdict.
 
 ## Out of mandate
 

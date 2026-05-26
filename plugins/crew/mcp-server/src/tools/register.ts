@@ -29,6 +29,7 @@ import { postReviewerComments } from "./post-reviewer-comments.js";
 import { applyReviewerLabels } from "./apply-reviewer-labels.js";
 import { recordAgentInvoke } from "./record-agent-invoke.js";
 import { recordPrCloseAction } from "./record-pr-close-action.js";
+import { processReviewerYield } from "./process-reviewer-yield.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -1073,6 +1074,64 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         if (err instanceof DomainError) {
           return {
             content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.11 — processReviewerYield: parse the reviewer subagent's transcript
+  // for the verbatim locked yield phrase and route the review to the appropriate
+  // hired specialist. Called by SKILL.md prose BEFORE postReviewerComments /
+  // processReviewerTranscript. Returns a discriminated next: value. Story 4.11.
+  server.registerTool({
+    name: "processReviewerYield",
+    description:
+      "Parse the reviewer subagent's transcript for the verbatim locked yield phrase " +
+      "`This sits in <domain>'s domain — handing off.` and route the review to the appropriate " +
+      "hired specialist. " +
+      "Returns { next: 'no-yield', chatLog } (common path — pass through to existing flow), " +
+      "{ next: 'spawn-specialist-reviewer', toRole, specialistPrompt, chatLog } on a successful yield, " +
+      "{ next: 'done-blocked-routing-failure', chatLog } when no hired role matches the domain " +
+      "(stamps blocked_by: routing-failure on the manifest), or " +
+      "{ next: 'done-blocked-routing-self-yield', chatLog } when the yielder named its own domain " +
+      "(stamps blocked_by: routing-self-yield). " +
+      "Emits a yield.handoff telemetry event on the success branch only (FR103, NFR29). " +
+      "NOT in subagent allowlists — called by SKILL.md prose only. Story 4.11.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        sessionUlid: { type: "string" },
+        ref: { type: "string" },
+        fromRole: { type: "string" },
+        reviewerTranscript: { type: "string" },
+        manifestPath: { type: "string" },
+      },
+      required: ["targetRepoRoot", "sessionUlid", "ref", "fromRole", "reviewerTranscript", "manifestPath"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          sessionUlid: z.string().min(1),
+          ref: z.string().min(1),
+          fromRole: z.string().min(1),
+          reviewerTranscript: z.string(),
+          manifestPath: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await processReviewerYield(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
             isError: true,
           };
         }

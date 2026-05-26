@@ -9,7 +9,7 @@ tools_allow:
 gh_allow: []
 locked_phrases:
   handoff: "Handoff to <next role> — <intent>"
-  yield: "This sits in <role>'s domain — handing off"
+  yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
 ---
 

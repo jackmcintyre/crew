@@ -124,6 +124,28 @@ export declare const DevBudgetExceededEventSchema: z.ZodObject<{
         triggering_invocation_runtime_ms: z.ZodNumber;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/**
+ * `yield.handoff` — emitted by `processReviewerYield` when a generalist
+ * reviewer's yield is successfully routed to a hired specialist (FR103, NFR29).
+ * Only emitted on the success branch; routing-failure and self-yield branches
+ * write no JSONL. Story 4.11.
+ *
+ * `agent` at the event-base level is set to `from_role` (who emitted the yield).
+ * `data.from_role` is duplicated so downstream consumers reading only `data`
+ * (e.g. retro tools projecting handoffs) don't need to climb up the envelope.
+ */
+export declare const YieldHandoffEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"yield.handoff">;
+    data: z.ZodObject<{
+        from_role: z.ZodString;
+        to_role: z.ZodString;
+        domain: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     ts: z.ZodString;
     session_id: z.ZodString;
@@ -190,8 +212,20 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
         budget_ms: z.ZodNumber;
         triggering_invocation_runtime_ms: z.ZodNumber;
     }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"yield.handoff">;
+    data: z.ZodObject<{
+        from_role: z.ZodString;
+        to_role: z.ZodString;
+        domain: z.ZodString;
+    }, z.core.$strict>;
 }, z.core.$strict>], "type">;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
 export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;
 export type ReviewerVerdictMergeActionEvent = z.infer<typeof ReviewerVerdictMergeActionEventSchema>;
 export type DevBudgetExceededEvent = z.infer<typeof DevBudgetExceededEventSchema>;
+export type YieldHandoffEvent = z.infer<typeof YieldHandoffEventSchema>;

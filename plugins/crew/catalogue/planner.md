@@ -15,7 +15,7 @@ gh_allow:
   - pr-view
 locked_phrases:
   handoff: "Handoff to generalist-dev — story <story-id> ready to claim"
-  yield: "This sits in <role>'s domain — handing off"
+  yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
 ---
 

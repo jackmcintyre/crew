@@ -11,7 +11,7 @@ gh_allow:
   - pr-comment
 locked_phrases:
   handoff: "Handoff to generalist-reviewer — docs updated"
-  yield: "This sits in <role>'s domain — handing off"
+  yield: "This sits in <domain>'s domain — handing off."
   verdict: "**Verdict: <SENTINEL>**"
 ---
 
@@ -26,6 +26,7 @@ Owns READMEs, install guides, public-facing docs, and changelog entries. Ensures
 - On stories that change a user-visible surface: update README / install / changelog as part of the same PR.
 - Audit docs against the actual behaviour periodically; surface drift as a proposal to retro-analyst.
 - Maintain plain-language framing for a non-engineer reader (see project's CLAUDE.md guidance).
+- MUST NOT yield when work is in your own domain. The yield phrase is for routing work OUT of your domain; in-domain work is yours to handle even when another agent has produced a contrary verdict.
 
 ## Out of mandate
 
