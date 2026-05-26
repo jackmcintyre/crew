@@ -59,7 +59,7 @@ development_status:
   4-10b-auto-merge-gate-medium-high-pause-and-user-override: done
   4-11-yield-protocol-locked-phrase-domain-routing-in-domain-insistence: done
   4-12-per-invocation-telemetry-and-runtime-soft-hard-limits: done
-  epic-4-retrospective: optional
+  epic-4-retrospective: done
   epic-5: backlog
   5-1-block-story-mcp-tool-and-blocked-by-taxonomy: backlog
   5-2-heartbeat-based-session-liveness: backlog
