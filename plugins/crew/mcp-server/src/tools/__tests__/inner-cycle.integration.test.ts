@@ -555,7 +555,7 @@ describe("AC4(f): reviewer BLOCKED → done-blocked-reviewer-blocked (revision 2
 // ---------------------------------------------------------------------------
 
 describe("AC4(g): tool count and required tools present", () => {
-  it("registered tool list has exactly 25 entries and contains the required tools but NOT runDevSession", async () => {
+  it("registered tool list has exactly 27 entries and contains the required tools but NOT runDevSession", async () => {
     const server = createServer();
     registerAllTools(server);
 
@@ -585,7 +585,7 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).toContain("postReviewerComments");
       expect(toolNames).not.toContain("runDevSession");
       expect(toolNames).toContain("applyReviewerLabels");
-      expect(toolNames.length).toBe(25);
+      expect(toolNames.length).toBe(27); // Story 4.12 added recordAgentInvoke (26), recordPrCloseAction (27)
     } finally {
       await client.close();
       await server.close();

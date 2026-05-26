@@ -835,3 +835,42 @@ export declare class ShippedRiskTieringDefaultMissingError extends DomainError {
         expectedPath: string;
     });
 }
+/**
+ * `recordAgentInvoke` received a `startedAt` / `completedAt` pair whose
+ * derived `runtime_ms` is invalid — either a timestamp is malformed (not
+ * parseable as ISO-8601) or `completedAt < startedAt` (negative runtime,
+ * e.g. from clock skew on the operator's machine).
+ *
+ * No telemetry event is written; no substitution or budget check runs.
+ * The dev session SKILL.md is expected to propagate this error to chat.
+ *
+ * Story 4.12 (NFR2/NFR3).
+ */
+export declare class RuntimeBoundsInvalidError extends DomainError {
+    readonly sessionUlid: string;
+    readonly agent: string;
+    readonly startedAt: string;
+    readonly completedAt: string;
+    readonly reason: string;
+    constructor(opts: {
+        sessionUlid: string;
+        agent: string;
+        startedAt: string;
+        completedAt: string;
+        reason: string;
+    });
+}
+/**
+ * `postReviewerComments` found `reviewer-result.json` but its
+ * `standardsVersion` field is absent or empty. Raised instead of emitting
+ * a malformed `reviewer.verdict` event — structurally impossible post-4.7
+ * but pinned as a hard guard.
+ *
+ * Story 4.12 (FR66).
+ */
+export declare class ReviewerResultMissingStandardsVersionError extends DomainError {
+    readonly sessionUlid: string;
+    constructor(opts: {
+        sessionUlid: string;
+    });
+}

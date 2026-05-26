@@ -20,7 +20,7 @@
  * On malformed JSON: propagates `ReviewerResultFileMalformedError` uncaught.
  * On `GhRecoverableError`, `GhApiResponseShapeError`: propagates uncaught.
  *
- * TODO(4.12): wire `reviewer.labels_applied` telemetry event here.
+ * TODO(future): wire `reviewer.labels_applied` telemetry event here.
  *
  * Story 4.8.
  */

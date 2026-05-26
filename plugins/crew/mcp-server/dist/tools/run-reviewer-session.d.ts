@@ -26,7 +26,9 @@
  *   - Mutate any manifest (only the sessions/reviewer-result.json file is written).
  *   - Swallow typed errors — all read/execution errors propagate uncaught.
  *
- * TODO(4.12): wire `agent.invoke` and `reviewer.verdict` telemetry events here.
+ * Telemetry wiring: `agent.invoke` is recorded by the dev session's SKILL.md caller
+ * via `recordAgentInvoke` (Story 4.12); `reviewer.verdict` is emitted by
+ * `postReviewerComments` on POST success (Story 4.12 Task 3).
  */
 import { execa as defaultExeca } from "execa";
 import type { SourceStory } from "../adapters/adapter.js";

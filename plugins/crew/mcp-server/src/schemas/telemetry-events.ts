@@ -70,9 +70,69 @@ export const TelemetryInvalidEventSchema = TelemetryEventBase.extend({
     .strict(),
 }).strict();
 
+/**
+ * `reviewer.verdict` — per-reviewer-verdict telemetry (FR66). Emitted inside
+ * `postReviewerComments` on POST success. No body/diff/contents strings (NFR14).
+ * The `timed_out` flag is `true` only on the AC3 substitution path (8-min cap).
+ */
+export const ReviewerVerdictEventSchema = TelemetryEventBase.extend({
+  type: z.literal("reviewer.verdict"),
+  data: z
+    .object({
+      pr_number: z.number().int().positive(),
+      verdict: z.enum(["READY FOR MERGE", "NEEDS CHANGES", "BLOCKED", "reviewer-failure"]),
+      standards_version: z.string().regex(/^\d+\.\d+\.\d+$/),
+      plugin_version: z.string().regex(/^\d+\.\d+\.\d+$/),
+      timed_out: z.boolean(),
+    })
+    .strict(),
+}).strict();
+
+/**
+ * `reviewer.verdict.merge_action` — retroactive merge-action event (FR66).
+ * Emitted by `recordPrCloseAction` (typically Story 5.3's polling loop).
+ * Join key for `compute-agreement` (Story 4.10): `(pr_number, session_id)`.
+ */
+export const ReviewerVerdictMergeActionEventSchema = TelemetryEventBase.extend({
+  type: z.literal("reviewer.verdict.merge_action"),
+  data: z
+    .object({
+      pr_number: z.number().int().positive(),
+      merge_action: z.enum(["merged", "closed-unmerged", "still-open"]),
+      resolved_at: z
+        .string()
+        .datetime({ offset: false })
+        .refine((s) => s.endsWith("Z"), "must be UTC"),
+    })
+    .strict(),
+}).strict();
+
+/**
+ * `dev.budget_exceeded` — emitted by `recordAgentInvoke` when cumulative dev
+ * subagent runtime for a story crosses the 30-min budget (NFR3). One-shot per
+ * `(story_id, current_month)` pair. Story 5.3's polling loop reads this to
+ * surface stuck stories to the operator.
+ */
+export const DevBudgetExceededEventSchema = TelemetryEventBase.extend({
+  type: z.literal("dev.budget_exceeded"),
+  data: z
+    .object({
+      cumulative_runtime_ms: z.number().int().nonnegative(),
+      budget_ms: z.number().int().positive(),
+      triggering_invocation_runtime_ms: z.number().int().nonnegative(),
+    })
+    .strict(),
+}).strict();
+
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
+  ReviewerVerdictEventSchema,
+  ReviewerVerdictMergeActionEventSchema,
+  DevBudgetExceededEventSchema,
 ]);
 
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
+export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;
+export type ReviewerVerdictMergeActionEvent = z.infer<typeof ReviewerVerdictMergeActionEventSchema>;
+export type DevBudgetExceededEvent = z.infer<typeof DevBudgetExceededEventSchema>;

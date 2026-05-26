@@ -528,6 +528,153 @@ describe("(4.7 AC3) Two-run idempotent rerun — POST then PATCH", () => {
     });
 });
 // ---------------------------------------------------------------------------
+// Story 4.12 (AC5 b1): reviewer.verdict telemetry — normal POST-success path
+// ---------------------------------------------------------------------------
+describe("(4.12 AC5 b1) reviewer.verdict telemetry — normal POST-success path", () => {
+    it("writes exactly one reviewer.verdict event with correct fields to tmpdir JSONL", async () => {
+        // Use a dedicated tmpdir so we can inspect the JSONL without interference.
+        const telemetryTmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "post-reviewer-"));
+        // Use a plain semver string — the telemetry schema requires /^\d+\.\d+\.\d+$/.
+        const TELEMETRY_PLUGIN_VERSION = "1.0.0";
+        try {
+            // Set up plugin permissions inside this separate tmpdir.
+            const telemetryPluginRoot = path.join(telemetryTmpRoot, "plugin");
+            await fs.mkdir(path.join(telemetryTmpRoot, ".crew"), { recursive: true });
+            await atomicWriteFile(path.join(telemetryTmpRoot, ".crew", "config.yaml"), "adapter: native\nadapter_config: {}\n");
+            await fs.mkdir(path.join(telemetryPluginRoot, "permissions"), { recursive: true });
+            await atomicWriteFile(path.join(telemetryPluginRoot, "permissions", "gh-error-map.yaml"), `entries:\n  - exit_code: 4\n    stderr_regex: "API rate limit exceeded"\n    class: defer\n`);
+            await atomicWriteFile(path.join(telemetryPluginRoot, "permissions", "generalist-reviewer.yaml"), [
+                "role: generalist-reviewer",
+                "tools_allow:",
+                "  - runReviewerSession",
+                "gh_allow:",
+                "  - pr-view",
+                "  - pr-diff",
+                "  - api",
+                "gh_allow_args: {}",
+            ].join("\n"));
+            // Write reviewer-result.json so standardsVersion and recommendedVerdict resolve.
+            const resultData = makeReviewerResult("READY FOR MERGE", {
+                1: makeArtifactPassResult(1),
+            });
+            const sessDir = path.join(telemetryTmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+            await fs.mkdir(sessDir, { recursive: true });
+            await atomicWriteFile(path.join(sessDir, "reviewer-result.json"), JSON.stringify(resultData));
+            // Stub gh to succeed — no overrides means normal POST path.
+            const stub = makeStubWithEmptyReviews({
+                prDiff: { stdout: FAKE_DIFF_WITHOUT_ARTIFACT },
+            });
+            // Call postReviewerComments with no overrides (normal path).
+            const result = await postReviewerComments({
+                targetRepoRoot: telemetryTmpRoot,
+                sessionUlid: SESSION_ULID,
+                execaImpl: stub,
+                pluginRootOverride: telemetryPluginRoot,
+                pluginVersionOverride: TELEMETRY_PLUGIN_VERSION,
+            });
+            expect(result.next).toBe("posted");
+            // Read and parse the JSONL file written by the real logTelemetryEvent.
+            const now = new Date();
+            const monthBucket = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+            const jsonlPath = path.join(telemetryTmpRoot, ".crew", "telemetry", `${monthBucket}.jsonl`);
+            const jsonlContent = await fs.readFile(jsonlPath, "utf8");
+            const lines = jsonlContent.trim().split("\n").filter(Boolean);
+            // Filter to reviewer.verdict events only.
+            const verdictEvents = lines
+                .map((l) => JSON.parse(l))
+                .filter((e) => e.type === "reviewer.verdict");
+            // Exactly one reviewer.verdict event.
+            expect(verdictEvents).toHaveLength(1);
+            const event = verdictEvents[0];
+            expect(event.data?.verdict).toBe("READY FOR MERGE");
+            expect(event.data?.timed_out).toBe(false);
+            expect(event.data?.pr_number).toBe(PR_NUMBER);
+            expect(event.data?.standards_version).toBe(resultData.standardsVersion);
+            expect(event.data?.plugin_version).toBe(TELEMETRY_PLUGIN_VERSION);
+        }
+        finally {
+            rmSync(telemetryTmpRoot, { recursive: true, force: true });
+        }
+    });
+});
+// ---------------------------------------------------------------------------
+// Story 4.12 (AC5 c2): reviewer.verdict telemetry — substitution-override path
+// ---------------------------------------------------------------------------
+describe("(4.12 AC5 c2) reviewer.verdict telemetry — substitution-override (reviewer-failure) path", () => {
+    it("writes reviewer.verdict event with verdict=reviewer-failure and timed_out=true; gh receives verbatim substituted body", async () => {
+        const telemetryTmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "post-reviewer-"));
+        // Use a plain semver string — the telemetry schema requires /^\d+\.\d+\.\d+$/.
+        const TELEMETRY_PLUGIN_VERSION = "1.0.0";
+        try {
+            // Set up plugin permissions.
+            const telemetryPluginRoot = path.join(telemetryTmpRoot, "plugin");
+            await fs.mkdir(path.join(telemetryTmpRoot, ".crew"), { recursive: true });
+            await atomicWriteFile(path.join(telemetryTmpRoot, ".crew", "config.yaml"), "adapter: native\nadapter_config: {}\n");
+            await fs.mkdir(path.join(telemetryPluginRoot, "permissions"), { recursive: true });
+            await atomicWriteFile(path.join(telemetryPluginRoot, "permissions", "gh-error-map.yaml"), `entries:\n  - exit_code: 4\n    stderr_regex: "API rate limit exceeded"\n    class: defer\n`);
+            await atomicWriteFile(path.join(telemetryPluginRoot, "permissions", "generalist-reviewer.yaml"), [
+                "role: generalist-reviewer",
+                "tools_allow:",
+                "  - runReviewerSession",
+                "gh_allow:",
+                "  - pr-view",
+                "  - pr-diff",
+                "  - api",
+                "gh_allow_args: {}",
+            ].join("\n"));
+            // Seed reviewer-result.json.
+            const resultData = makeReviewerResult("NEEDS CHANGES", {
+                1: makeArtifactPassResult(1),
+            });
+            const sessDir = path.join(telemetryTmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+            await fs.mkdir(sessDir, { recursive: true });
+            await atomicWriteFile(path.join(sessDir, "reviewer-result.json"), JSON.stringify(resultData));
+            // The substituted body that recordAgentInvoke would supply on timeout.
+            const SUBSTITUTED_BODY = `**Verdict: reviewer-failure** — reviewer timed out\n\n` +
+                `<!-- crew:verdict:${TELEMETRY_PLUGIN_VERSION}:${STORY_REF} -->`;
+            let capturedPostBody;
+            const stub = makeStubWithEmptyReviews({
+                prDiff: { stdout: FAKE_DIFF_WITHOUT_ARTIFACT },
+                onPostCall: (input) => { capturedPostBody = input; },
+            });
+            // Call with verdictBodyOverride + reviewerVerdictOverride (substitution path).
+            const result = await postReviewerComments({
+                targetRepoRoot: telemetryTmpRoot,
+                sessionUlid: SESSION_ULID,
+                execaImpl: stub,
+                pluginRootOverride: telemetryPluginRoot,
+                pluginVersionOverride: TELEMETRY_PLUGIN_VERSION,
+                verdictBodyOverride: SUBSTITUTED_BODY,
+                reviewerVerdictOverride: "reviewer-failure",
+            });
+            expect(result.next).toBe("posted");
+            // Assert the body sent to gh was the substituted body verbatim.
+            expect(capturedPostBody).toBeDefined();
+            const postedPayload = JSON.parse(capturedPostBody);
+            expect(postedPayload.body).toBe(SUBSTITUTED_BODY);
+            // Read the JSONL and assert reviewer.verdict event fields.
+            const now = new Date();
+            const monthBucket = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+            const jsonlPath = path.join(telemetryTmpRoot, ".crew", "telemetry", `${monthBucket}.jsonl`);
+            const jsonlContent = await fs.readFile(jsonlPath, "utf8");
+            const lines = jsonlContent.trim().split("\n").filter(Boolean);
+            const verdictEvents = lines
+                .map((l) => JSON.parse(l))
+                .filter((e) => e.type === "reviewer.verdict");
+            expect(verdictEvents).toHaveLength(1);
+            const event = verdictEvents[0];
+            expect(event.data?.verdict).toBe("reviewer-failure");
+            expect(event.data?.timed_out).toBe(true);
+            expect(event.data?.pr_number).toBe(PR_NUMBER);
+            expect(event.data?.standards_version).toBe(resultData.standardsVersion);
+            expect(event.data?.plugin_version).toBe(TELEMETRY_PLUGIN_VERSION);
+        }
+        finally {
+            rmSync(telemetryTmpRoot, { recursive: true, force: true });
+        }
+    });
+});
+// ---------------------------------------------------------------------------
 // Story 4.7: Wrong-ref non-match — different story ref → POST path taken
 // ---------------------------------------------------------------------------
 describe("(4.7 AC3 3e) Wrong-ref non-match — POST path when prior verdict is for different ref", () => {

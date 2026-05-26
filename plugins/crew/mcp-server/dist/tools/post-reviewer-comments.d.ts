@@ -23,7 +23,7 @@
  * On `GhRecoverableError`, `GhApiResponseShapeError`, `GhSubcommandDeniedError`:
  * propagates verbatim (no retry, no swallow).
  *
- * TODO(4.12): wire `reviewer.comments_posted` telemetry event here.
+ * TODO(future): wire `reviewer.comments_posted` telemetry event here.
  *
  * Story 4.6b Task 4.
  */
@@ -60,6 +60,20 @@ export interface PostReviewerCommentsOptions {
      * Named with `Override` suffix per project conventions (cf. `pluginRootOverride`).
      */
     pluginVersionOverride?: string;
+    /**
+     * When provided, use this body verbatim as the PR review summary instead of
+     * composing from `composeSummaryBody`. All other behaviour (locked-marker grep,
+     * edit-in-place idempotency) is unchanged. Used by `recordAgentInvoke` in the
+     * 8-min reviewer hard-cap substitution path (AC3). Story 4.12 Task 4.
+     */
+    verdictBodyOverride?: string;
+    /**
+     * When provided, the emitted `reviewer.verdict` telemetry event carries this value
+     * as its `verdict` field and `timed_out: true`. When absent, the verdict comes from
+     * `resultFile.recommendedVerdict` and `timed_out: false`.
+     * Only `"reviewer-failure"` is valid in v1. Story 4.12 Task 4.
+     */
+    reviewerVerdictOverride?: "reviewer-failure";
 }
 /**
  * Post the reviewer's verdict as a PR review with inline comments and a
