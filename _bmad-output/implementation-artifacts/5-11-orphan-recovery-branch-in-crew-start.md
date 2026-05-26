@@ -130,7 +130,7 @@ _(vitest: — `blocked/` routing + `blocked_by: orphan-no-transcript` stamp; cov
 <!-- Not user-surface: AC4 is a no-op state assertion. The operator already observed the orphan via AC1; the absence of state mutation is the contract. -->
 
 **AC5 (integration, vitest:):**
-vitest covers three fixture scenarios, each seeding a target-repo tmpdir with the relevant manifests and (where applicable) transcript files:
+vitest covers five fixture scenarios (5a–5e), each seeding a target-repo tmpdir with the relevant manifests and (where applicable) transcript files:
 
 - **(5a) Fixture A — reattach with transcript present.** Seed `in-progress/<ref>.yaml` with `claimed_by: <stale-ulid>` and `<targetRepoRoot>/.crew/state/sessions/<stale-ulid>/dev-transcript.txt` containing a valid handoff transcript (locked handoff phrase + PR URL). Drive the orphan-recovery branch with operator input `reattach`. Assert: (i) the orphan chat line matches the AC1 literal, (ii) the manifest's `claimed_by` is rewritten to the current `<sessionUlid>`, (iii) `processDevTranscript` is invoked exactly once with the verbatim transcript bytes, (iv) the inner cycle proceeds to reviewer spawn (NOT dev spawn) — observed via call-order assertion against a mocked `Task` tool.
 
