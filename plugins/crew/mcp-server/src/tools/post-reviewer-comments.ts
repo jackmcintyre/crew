@@ -23,7 +23,7 @@
  * On `GhRecoverableError`, `GhApiResponseShapeError`, `GhSubcommandDeniedError`:
  * propagates verbatim (no retry, no swallow).
  *
- * TODO(4.12): wire `reviewer.comments_posted` telemetry event here.
+ * TODO(future): wire `reviewer.comments_posted` telemetry event here.
  *
  * Story 4.6b Task 4.
  */
