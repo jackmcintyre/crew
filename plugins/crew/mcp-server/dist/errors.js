@@ -957,3 +957,45 @@ export class DevOutcomeFileMalformedError extends DomainError {
         this.cause = opts.cause;
     }
 }
+/**
+ * `docs/risk-tiering.md` was found (at either the target-repo override path or
+ * the shipped-default path) but failed the parser: either YAML frontmatter is
+ * missing or ill-formed, YAML syntax is invalid, a required field is missing or
+ * wrongly typed, or a post-Zod invariant was violated (duplicate rule id,
+ * min>max threshold, no signal fields on a rule).
+ *
+ * `reason` carries the one-line diagnostic; `copyTarget` is the shipped
+ * default path so the user-facing message can cite the canonical shape.
+ *
+ * (Story 4.9 Task 2 / FR40a)
+ */
+export class MalformedRiskTieringSpecError extends DomainError {
+    sourcePath;
+    reason;
+    copyTarget;
+    constructor(opts) {
+        super(`docs/risk-tiering.md at ${opts.sourcePath} is malformed: ${opts.reason}. ` +
+            `See the canonical shape in ${opts.copyTarget}. (FR40a)`);
+        this.sourcePath = opts.sourcePath;
+        this.reason = opts.reason;
+        this.copyTarget = opts.copyTarget;
+    }
+}
+/**
+ * Both the target-repo override and the shipped default for `docs/risk-tiering.md`
+ * are absent. This indicates a broken plugin install — the shipped default should
+ * always be present in `plugins/crew/docs/risk-tiering.md`.
+ *
+ * Distinct from `MalformedRiskTieringSpecError` so callers (Story 4.9b) can
+ * tell the two failure modes apart and surface different recovery instructions.
+ *
+ * (Story 4.9 Task 2 / FR40a)
+ */
+export class ShippedRiskTieringDefaultMissingError extends DomainError {
+    expectedPath;
+    constructor(opts) {
+        super(`Shipped risk-tiering default not found at ${opts.expectedPath}. ` +
+            `This is a plugin-install bug; please file an issue. (FR40a)`);
+        this.expectedPath = opts.expectedPath;
+    }
+}
