@@ -1,0 +1,202 @@
+# Story 1.13: `/crew:smoke` harness wrapper skill
+
+story_shape: substrate
+
+Status: ready-for-dev
+
+<!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
+
+## Story
+
+As an **operator running per-story operator-smokes against the plugin**,
+I want **a single `/crew:smoke <label>` skill that stands up a clean scratch repo and chains `skip-hiring → plan → scan` with a tool-layer checkpoint between every step**,
+so that **smoke runs start from a known-good state instead of burning 1–3 trials on setup drift (missing persona frontmatter, missing standards.md, planner failing on a no-commit repo) before the actual subject-under-test is ever exercised**.
+
+### What this story is, in one sentence
+
+Ship a new MCP tool `createSmokeScratchRepo` (mkdtemp + git-init + `.crew/config.yaml` + `.crew/standards.md` + cleanup closure) plus a new skill `plugins/crew/skills/smoke/SKILL.md` (frontmatter `name: crew:smoke`) that chains four MCP-tool checkpoint steps in order — `createSmokeScratchRepo`, `getTeamSnapshot`, `readBacklogInventory`, `listClaimableTodos` — with `[smoke] step N (<name>): ok` log lines between each, then halts at a fifth `start` step that prints `Ready. Run /crew:start in this scratch repo.` and returns control to the operator without auto-invoking `/crew:start`.
+
+### What this story does (and why it needs its own story)
+
+Operator-smokes are the only artefact that catches user-surface regressions before merge (the dev/reviewer loop only sees the code path). Every operator-smoke this epic has paid a setup tax — Story 4.6 alone took seven trials before the smoke even reached the subject-under-test. The root cause is the same every time: a tiny shape defect in step-zero scaffolding (missing persona frontmatter, missing `.crew/standards.md`, planner choking on a repo with no commits) that has nothing to do with the story actually being smoked.
+
+The memory entry `project_smoke_harness_wrapper` flagged this as "overdue" twice. Story 4.14 (PR #146) implemented exactly this wrapper but was closed unmerged in the 2026-05-25 rollback. The implementation logic transfers cleanly to current `dev` HEAD; the rebase work is:
+
+1. **Rename `/crew:smoke-setup` → `/crew:smoke`** to match the `/crew:<verb>` catalogue convention (the original predated the convention). Log prefix `[smoke-setup]` → `[smoke]` follows.
+2. **Tool-count assertion rebase** — PR #146 bumped 29 → 30. Current `dev` HEAD is 31 (Story 4.10b's `runAutoMergeGate` landed since). 1.13 bumps 31 → 32 across six assertion sites.
+3. **No skill-name collision check** — `plugins/crew/skills/` does not currently contain a `smoke/` directory (verified pre-authoring), so the rename is a clean create rather than a move.
+
+The skill stops before `/crew:start`. The whole point of the smoke is for the operator to observe `/crew:start`; chaining it through the skill would defeat the purpose.
+
+### Substrate decisions worth pinning
+
+1. **Skill name is `/crew:smoke`, log prefix is `[smoke]`.** Convention rationale: every other crew skill is `/crew:<single-verb>` (`/crew:plan`, `/crew:scan`, `/crew:status`, `/crew:hire`, `/crew:start`, `/crew:team`, `/crew:ask`, `/crew:skip-hiring`). `/crew:smoke-setup` would be the only two-word verb. The `smoke` verb itself is sufficient — the operator already knows this is the pre-roll for a smoke run.
+
+2. **`createSmokeScratchRepo` is an MCP tool, not a script.** Three reasons: (a) `writeManagedFile` for `.crew/config.yaml` and `.crew/standards.md` is only available inside the MCP server; (b) the static guard `tests/canonical-fs-guard.test.ts` requires all `git` spawns to live in `lib/git.ts`, so the helper has to compose with the existing MCP `lib/`; (c) the skill needs a tool to call as its step-1 checkpoint and the tool _is_ the checkpoint.
+
+3. **`gitInitWithEmptyCommit` is added to `lib/git.ts`.** Required by the canonical-fs-guard. Two commands: `git init -b main` (deterministic default branch, no dependency on operator's `init.defaultBranch`), then `git -c user.email=… -c user.name=… commit --allow-empty -m "<msg>"` (inline identity so the call succeeds on fresh CI containers / containers with no global git config; the `-c` flag scopes identity to this one `commit` invocation, repo persistent config untouched).
+
+4. **`.crew/standards.md` is copied from `plugins/crew/docs/standards-example.md`** (the shipped template per Story 1.3). No new template file — reuse the existing one.
+
+5. **Step 5 does NOT auto-invoke `/crew:start`.** Verified structurally by AC3(vi) — the SKILL.md body must not contain a literal `/crew:start` invocation pattern. The string `/crew:start` appears in the `Ready. Run /crew:start in this scratch repo.` handoff line only.
+
+## Acceptance Criteria
+
+**AC1 (createSmokeScratchRepo MCP tool, vitest:).** A new MCP tool `createSmokeScratchRepo({ label, parentDir? })` lives at `plugins/crew/mcp-server/src/tools/create-smoke-scratch-repo.ts` and is registered in `register.ts` (bringing the tool count from 31 → 32). The tool:
+
+- mkdtemps `<parentDir>/crew-smoke-<label>-<ulid>/` (default `parentDir = os.tmpdir()`); `label` is validated as kebab-case (lowercase letters, digits, hyphens; min length 1).
+- Runs git-init + an initial empty commit via `gitInitWithEmptyCommit(scratchRoot)` from `lib/git.ts` so the AC6f canonical-fs-guard static check stays satisfied — no `git` spawns outside `lib/git.ts`.
+- Writes a minimal native-adapter `.crew/config.yaml` via `writeManagedFile` (`adapter: native`, `standards: {}`).
+- Copies `plugins/crew/docs/standards-example.md` to `<scratchRoot>/.crew/standards.md` via `writeManagedFile`.
+- Returns `{ scratchRoot: string, cleanup: () => Promise<void> }` where `cleanup` is an idempotent `fs.rm(scratchRoot, { recursive: true, force: true })` closure.
+
+Verifiable via `plugins/crew/mcp-server/tests/create-smoke-scratch-repo.integration.test.ts` exercising real `os.tmpdir()` (no fs stubs). Tests cover: happy path (returns valid `scratchRoot` containing both `.crew/config.yaml` and `.crew/standards.md`); idempotent cleanup (calling twice succeeds); label validation (rejects empty string and non-kebab-case); `parentDir` override; git repo is initialised (HEAD ref resolvable); standards.md contents match the shipped template byte-for-byte.
+
+**AC2 (/crew:smoke SKILL.md, artifact:).** A new skill file at `plugins/crew/skills/smoke/SKILL.md` with YAML frontmatter:
+
+```yaml
+---
+name: crew:smoke
+description: Stand up a clean smoke-harness scratch repo and chain skip-hiring → plan → scan with assertion checkpoints so smokes start from a known-good state.
+allowed_tools: [createSmokeScratchRepo, getTeamSnapshot, readBacklogInventory, listClaimableTodos]
+---
+```
+
+The body contains five numbered steps in order, each with the listed checkpoint tool call before advancing:
+
+1. **scratch-repo** — call `createSmokeScratchRepo({ label })`; capture `scratchRoot`. Checkpoint: confirm the returned path exists and contains both `.crew/config.yaml` and `.crew/standards.md`. On success: print `[smoke] step 1 (scratch-repo): ok` followed by `scratch_root: <scratchRoot>`. On failure: print `[smoke] step 1 (scratch-repo): FAILED — <reason>` and halt.
+
+2. **skip-hiring** — operator invokes `/crew:skip-hiring` against the scratch repo. Checkpoint: call `getTeamSnapshot({ targetRepoRoot: scratchRoot })` and assert the returned roster has ≥1 role whose persona frontmatter populates both `hired_at` and `catalogue_version` (the exact frontmatter that bit Story 4.6 — verify it here, fail fast if drift returns). On success: print `[smoke] step 2 (skip-hiring): ok`. On failure: print `[smoke] step 2 (skip-hiring): FAILED — <reason>` and halt.
+
+3. **plan** — operator invokes `/crew:plan` against the scratch repo, exits planner with a minimal authored backlog (1 trivial source story suffices). Checkpoint: call `readBacklogInventory({ targetRepoRoot: scratchRoot })` and assert ≥1 source story is now present. On success: print `[smoke] step 3 (plan): ok`. On failure: print `[smoke] step 3 (plan): FAILED — <reason>` and halt.
+
+4. **scan** — operator invokes `/crew:scan` against the scratch repo. Checkpoint: call `listClaimableTodos({ targetRepoRoot: scratchRoot })` and assert ≥1 manifest is now present in `.crew/state/to-do/`. On success: print `[smoke] step 4 (scan): ok`. On failure: print `[smoke] step 4 (scan): FAILED — <reason>` and halt.
+
+5. **start** — print `[smoke] step 5 (start): ok` followed by `Ready. Run /crew:start in this scratch repo.` and return control to the operator. Do NOT auto-invoke `/crew:start`.
+
+The body also contains a `# Failure modes` section documenting (a) scratch-repo creation failure (filesystem error propagated verbatim), (b) `hired_at` / `catalogue_version` missing from persona frontmatter (Story 4.6 regression signal — re-check `instantiatePersona`'s frontmatter writer), (c) planner exited without authoring any source story, (d) `/crew:scan` produced zero claimable manifests (most often a source-story shape defect — see memory `project_native_scan_silent_skip`), (e) operator forgot `--plugin-dir` (every MCP-tool call will fail with `tool not found`).
+
+**AC3 (structural-anchor test, vitest:).** A new test at `plugins/crew/mcp-server/src/skills/__tests__/smoke-skill-content.test.ts` mirrors the shape of `start-skill-content.test.ts` (same `splitFrontmatter` helper, same path-resolution pattern walking `..` segments from `__dirname` to the repo-root SKILL.md). It reads `plugins/crew/skills/smoke/SKILL.md` and asserts:
+
+- (i) Frontmatter `name` equals `crew:smoke`.
+- (ii) Frontmatter `allowed_tools` is exactly `[createSmokeScratchRepo, getTeamSnapshot, readBacklogInventory, listClaimableTodos]` — four tools, no extras.
+- (iii) All five step labels appear in the body, each paired with its expected checkpoint tool name (or `null` for step 5):
+
+  ```ts
+  const STEPS: ReadonlyArray<{ stepNumber: number; name: string; tool: string | null }> = [
+    { stepNumber: 1, name: "scratch-repo", tool: "createSmokeScratchRepo" },
+    { stepNumber: 2, name: "skip-hiring", tool: "getTeamSnapshot" },
+    { stepNumber: 3, name: "plan", tool: "readBacklogInventory" },
+    { stepNumber: 4, name: "scan", tool: "listClaimableTodos" },
+    { stepNumber: 5, name: "start", tool: null },
+  ];
+  ```
+
+- (iv) The body contains the literal log-line shape `[smoke] step N (<name>): ok` (assert as a literal substring) AND the failure shape `[smoke] step N (<name>): FAILED — <reason>`.
+- (v) The body contains the literal handoff line `Ready. Run /crew:start in this scratch repo.`.
+- (vi) The body does NOT contain a literal Claude-Code-style invocation of `/crew:start` (i.e. `/crew:start` appears only inside the handoff line, never on its own line as an instruction the LLM would obey). Implementation: count occurrences of `/crew:start` and assert the count equals the number of occurrences inside the handoff line (today: 1).
+
+**AC4 (tool-count rebase, vitest:).** The tool-count assertions in the following six locations are updated from 31 → 32:
+
+- `plugins/crew/mcp-server/tests/ask-mode-enforcement.test.ts:461`
+- `plugins/crew/mcp-server/tests/ask-skill.test.ts:525`
+- `plugins/crew/mcp-server/tests/get-team-snapshot.test.ts:641`
+- `plugins/crew/mcp-server/src/tools/__tests__/inner-cycle.integration.test.ts:588`
+- `plugins/crew/mcp-server/src/tools/__tests__/compute-agreement.test.ts:604`
+- `plugins/crew/mcp-server/src/tools/__tests__/run-auto-merge-gate.test.ts:695`
+
+Where the assertion sits next to an inline `// Story 4.x added …` comment trail (the `inner-cycle.integration.test.ts` one is the canonical example), extend the trail with `; Story 1.13 added createSmokeScratchRepo (32)`. Any missed assertion will fail CI — verifiable by running `pnpm test` from `plugins/crew/mcp-server/` and seeing 0 failures.
+
+**AC5 (log-prefix non-collision, artifact:).** The `[smoke] step N (<name>): ok` and `[smoke] step N (<name>): FAILED — <reason>` prefixes do not collide with the dev/reviewer parser sentinels. Verifiable by `grep -E '\[smoke\]|Handoff to reviewer|Verdict:|READY FOR MERGE|done-blocked' plugins/crew/mcp-server/src/tools/process-dev-transcript.ts plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts plugins/crew/skills/smoke/SKILL.md` returning the `[smoke]` literals only in `SKILL.md` and the sentinel literals only in the parser sources. The `[smoke]` token does not appear in either parser source.
+
+**AC6 (no /crew:start auto-invocation, artifact:).** Covered structurally by AC3(vi). Called out separately because this is the load-bearing design choice: the operator is here to observe `/crew:start` themselves. The dev agent MUST NOT add a step 5 instruction like "Now invoke `/crew:start`" — step 5's only output is the handoff line.
+
+## Tasks / Subtasks
+
+- [ ] **Task 1** — Add `gitInitWithEmptyCommit(cwd)` to `plugins/crew/mcp-server/src/lib/git.ts` (AC1)
+  - [ ] 1.1 — Two-command implementation: `git init -b main`, then `git -c user.email=<inline> -c user.name=<inline> commit --allow-empty -m "<msg>"`. Use the inline-identity pattern from the PR #146 diff (commit message: `chore: initial empty commit for smoke scratch repo`).
+  - [ ] 1.2 — Export from `lib/git.ts`. Note: the existing `lib/git.ts` JSDoc block in PR #146 (lines 4–22 of the diff) is a good template for the helper's docstring; keep it short.
+
+- [ ] **Task 2** — Create `plugins/crew/mcp-server/src/tools/create-smoke-scratch-repo.ts` (AC1)
+  - [ ] 2.1 — Define `CreateSmokeScratchRepoOptions = { label: string; parentDir?: string }` and `CreateSmokeScratchRepoResult = { scratchRoot: string; cleanup: () => Promise<void> }`.
+  - [ ] 2.2 — Validate `label` is kebab-case via Zod (`z.string().regex(/^[a-z0-9-]+$/).min(1)`); validate `parentDir` is optional non-empty string.
+  - [ ] 2.3 — mkdtemp under `<parentDir ?? os.tmpdir()>/crew-smoke-<label>-` (Node `fs.mkdtemp` adds the random suffix; the ULID flavour in PR #146 is unnecessary — Node's suffix is already collision-free).
+  - [ ] 2.4 — Call `gitInitWithEmptyCommit(scratchRoot)`.
+  - [ ] 2.5 — Write `.crew/config.yaml` via `writeManagedFile` (skip `mcpToolContext` since `.crew/config.yaml` is a non-canonical path; confirm by checking `writeManagedFile`'s call signature in current `dev` HEAD).
+  - [ ] 2.6 — Copy `plugins/crew/docs/standards-example.md` to `<scratchRoot>/.crew/standards.md` via `writeManagedFile`. Read the template via `fs.readFile` from the bundled location (resolve path the same way `start-skill-content.test.ts` does — `import.meta.url` + `..` segments).
+  - [ ] 2.7 — Return `{ scratchRoot, cleanup }` where `cleanup` does `await fs.rm(scratchRoot, { recursive: true, force: true })` (idempotent — the `force: true` flag swallows ENOENT on second call).
+
+- [ ] **Task 3** — Register the new tool in `plugins/crew/mcp-server/src/tools/register.ts` (AC1, AC4)
+  - [ ] 3.1 — Import `createSmokeScratchRepo` from `./create-smoke-scratch-repo.js`.
+  - [ ] 3.2 — `server.tool("createSmokeScratchRepo", "Create a disposable smoke-harness scratch repo at <parentDir>/crew-smoke-<label>-<suffix>/ seeded with git init + empty commit + minimal .crew/config.yaml + .crew/standards.md. Used by the `/crew:smoke` skill as the first checkpoint step.", { type: "object", properties: { label: { type: "string" }, parentDir: { type: "string" } }, required: ["label"] }, async (args) => { … })`. Return type matches PR #146: `{ content: [{ type: "text", text: JSON.stringify({ scratchRoot }) }] }`.
+
+- [ ] **Task 4** — Author `plugins/crew/skills/smoke/SKILL.md` (AC2, AC5, AC6)
+  - [ ] 4.1 — Frontmatter exactly as in AC2.
+  - [ ] 4.2 — Body sections: `# What this skill does`, `# Prerequisites`, `# Steps`, `# Failure modes`, `# Out of scope (deferred)`. Use PR #146's smoke-setup SKILL.md as a structural template (it's in `/tmp/pr146.diff` from the create-story session; if not available, regenerate via `gh pr diff 146 | awk '/skills\/smoke-setup\/SKILL.md/,0'`).
+  - [ ] 4.3 — Find-and-replace `smoke-setup` → `smoke` and `[smoke-setup]` → `[smoke]` throughout. Verify no `smoke-setup` remains via grep.
+  - [ ] 4.4 — Step 5 wording is exactly `[smoke] step 5 (start): ok` followed by `Ready. Run /crew:start in this scratch repo.` — and nothing else. Do NOT add "now run …" or "next: …" prose; that would tempt the LLM to auto-invoke.
+
+- [ ] **Task 5** — Author `plugins/crew/mcp-server/src/skills/__tests__/smoke-skill-content.test.ts` (AC3)
+  - [ ] 5.1 — Copy `start-skill-content.test.ts` as a template. Replace the SKILL_FILE path constant to point at `plugins/crew/skills/smoke/SKILL.md`.
+  - [ ] 5.2 — Replace the assertions with AC3's six checks (i–vi). The `STEPS` constant is the central anchor — keep it as a `ReadonlyArray<{ stepNumber, name, tool }>` literal and iterate.
+  - [ ] 5.3 — For AC3(vi), use a regex count: `(skillBody.match(/\/crew:start/g) ?? []).length` and assert it equals the count inside the handoff line (today: 1).
+
+- [ ] **Task 6** — Rebase tool-count assertions (AC4)
+  - [ ] 6.1 — Bump each of the six assertion sites listed in AC4 from `31` → `32`.
+  - [ ] 6.2 — Extend the `inner-cycle.integration.test.ts` inline comment trail at line 588 with `; Story 1.13 added createSmokeScratchRepo (32)`. The other five sites have shorter or no comments — leave them alone.
+
+- [ ] **Task 7** — Integration tests (AC1)
+  - [ ] 7.1 — Create `plugins/crew/mcp-server/tests/create-smoke-scratch-repo.integration.test.ts`. Six scenarios: happy path; idempotent cleanup; kebab-case label validation; `parentDir` override; git repo initialised (HEAD resolvable via `git -C <scratchRoot> rev-parse HEAD` returning a 40-char SHA); standards.md byte-equals the shipped template.
+  - [ ] 7.2 — Use real `os.tmpdir()` and real `fs` calls — no stubs. Each test cleans up via `addfinalizer` / `afterEach` so failed runs don't leak directories.
+
+- [ ] **Task 8** — Local verification (process)
+  - [ ] 8.1 — `pnpm build` from `plugins/crew/mcp-server/` — clean.
+  - [ ] 8.2 — `pnpm test` from `plugins/crew/mcp-server/` — 100% green; ≥6 new tests passing.
+  - [ ] 8.3 — Commit `dist/` updates alongside `src/` (per CLAUDE.md § Plugin build output).
+
+## Dev Notes
+
+- **Seed PR (closed unmerged):** PR #146 (`feat(4.14): smoke-harness wrapper skill`). The diff is salvageable as a structural template; the rename (`smoke-setup` → `smoke`, `[smoke-setup]` → `[smoke]`) and the tool-count rebase (29 → 30 → 32) are the only material differences. Pull the diff with `gh pr diff 146` if not still cached at `/tmp/pr146.diff`.
+
+- **Memory grounding (auto-loaded):** `project_smoke_harness_wrapper`, `project_operator_smokes_via_plan`, `project_native_scan_silent_skip` (Failure mode (d) in AC2 references this). Memory `feedback_planner_prose_must_match_manifest` is also relevant — the scan-step checkpoint is the safety net for that class of defect.
+
+- **Static guard to respect:** `plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts` asserts that no file outside `lib/git.ts` spawns a `git` subprocess. The new `gitInitWithEmptyCommit` helper is the only place `git init` / `git commit` may be invoked from.
+
+- **`writeManagedFile` usage:** `.crew/config.yaml` and `.crew/standards.md` are non-canonical paths (canonical = files the MCP server's path validator enforces, like `.crew/state/to-do/<ulid>.json`). They don't need an `mcpToolContext` arg. Verify the call signature against current `dev` — PR #146 was authored against pre-rollback state and the signature may have evolved.
+
+- **Standards template:** `plugins/crew/docs/standards-example.md` is the shipped template per Story 1.3. Resolve its path the same way `start-skill-content.test.ts` resolves the SKILL.md path — `import.meta.url` + `..` segments to `plugins/crew/docs/`.
+
+- **Skill directory placement:** `plugins/crew/skills/smoke/SKILL.md`. The existing `plugins/crew/skills/` contains `ask/`, `hire/`, `plan/`, `scan/`, `skip-hiring/`, `start/`, `status/`, `team/`. No collision.
+
+- **Verification command for AC3:** `pnpm vitest run src/skills/__tests__/smoke-skill-content.test.ts` from `plugins/crew/mcp-server/`.
+
+### Project Structure Notes
+
+- Skill lives at `plugins/crew/skills/smoke/SKILL.md` (alongside other crew skills).
+- Tool lives at `plugins/crew/mcp-server/src/tools/create-smoke-scratch-repo.ts` (next to the other `*-scratch-*`-style helpers if any, otherwise alongside `claim-next-story.ts` etc.).
+- Tests:
+  - Structural-anchor: `plugins/crew/mcp-server/src/skills/__tests__/smoke-skill-content.test.ts` (mirror of `start-skill-content.test.ts`).
+  - Integration: `plugins/crew/mcp-server/tests/create-smoke-scratch-repo.integration.test.ts` (top-level `tests/` like other integration tests).
+- No conflicts with existing structure. The skill name `smoke` and the tool name `createSmokeScratchRepo` were both unused on `dev` as of the authoring scan.
+
+### References
+
+- [Epic 1 § Story 1.13](/_bmad-output/planning-artifacts/epics/epic-1-plugin-foundation-target-repo-bootstrap.md) — story block with AC1–AC6 source-of-truth.
+- [PR #146 diff](https://github.com/jackmcintyre/crew/pull/146) (closed unmerged 2026-05-25) — structural template for tool + SKILL.md + tests. Pull via `gh pr diff 146`.
+- [Story 4.6 retrospective](/_bmad-output/implementation-artifacts/epic-4-retrospective.md) — the seven-trial smoke that motivated this story.
+- [Memory: project_smoke_harness_wrapper](/Users/jackmcintyre/.claude/projects/-Users-jackmcintyre-projects-crew/memory/project_smoke_harness_wrapper.md) — "overdue" flag.
+- [`start-skill-content.test.ts`](/plugins/crew/mcp-server/src/skills/__tests__/start-skill-content.test.ts) — structural-anchor test template to mirror.
+- [`canonical-fs-guard.test.ts`](/plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts) — static guard requiring all `git` spawns in `lib/git.ts`.
+- [`docs/standards-example.md`](/plugins/crew/docs/standards-example.md) — the shipped standards template (copied to `.crew/standards.md` in step 1).
+
+## Dev Agent Record
+
+### Agent Model Used
+
+claude-opus-4-7
+
+### Debug Log References
+
+### Completion Notes List
+
+### File List
