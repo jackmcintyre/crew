@@ -31,6 +31,16 @@ export interface ScanResult {
     }>;
     /** Story 3.5: refs that failed planning-discipline and were written to blocked/. */
     blockedRefs: string[];
+    /**
+     * Story 5.13: refs blocked because prose dep declarations and the manifest's
+     * `depends_on` set are not equal (symmetric difference is non-empty).
+     * Each entry carries the symmetric-difference detail for the rendered output.
+     */
+    depsDriftRefs: Array<{
+        ref: string;
+        proseRefs: string[];
+        manifestRefs: string[];
+    }>;
 }
 /**
  * Render a `ScanResult` as a human-readable text summary.

@@ -107,19 +107,50 @@ export const ExecutionManifestSchema = z
     /**
      * When set, names the reason the manifest was placed in `blocked/`
      * instead of `to-do/`. Only populated for blocked manifests.
-     * Forward-compat: a string fallback is included for future block reasons
-     * beyond the recognised literals.
      *
-     * Added in Story 3.5 Task 6.2. Extended in Story 4.3 with
-     * `"handoff-grammar"` and `"reviewer-grammar"`.
+     * **Closed enum — v1 (Story 5.13, AC2).**
+     * This field is a closed `z.enum([...])` of exactly **thirteen** members.
+     * Any new block reason requires a deliberate schema-change story — the
+     * closed enum is the deterministic seam (project memory
+     * `feedback_default_to_deterministic_seams`). Do NOT add a `z.string()`
+     * fallback here; the Zod boundary must catch unknown values at write time.
+     *
+     * Enum member derivation (codebase audit, 2026-05-27):
+     *   - `handoff-grammar`              — Story 4.3 (process-dev-transcript)
+     *   - `gh-defer`                     — Story 4.5 (process-dev-transcript)
+     *   - `gh-retry`                     — Story 4.5 (process-dev-transcript)
+     *   - `gh-needs-human`               — Story 4.5 (process-dev-transcript)
+     *   - `reviewer-no-session-result`   — Story 4.6 (process-reviewer-transcript)
+     *   - `reviewer-verdict-needs-changes` — Story 4.6 (process-reviewer-transcript)
+     *   - `reviewer-verdict-blocked`     — Story 4.6 (process-reviewer-transcript)
+     *   - `routing-failure`              — Story 4.x (process-reviewer-yield)
+     *   - `routing-self-yield`           — Story 4.x (process-reviewer-yield)
+     *   - `planning-discipline`          — Story 3.5 (scan-sources)
+     *   - `orphan-no-transcript`         — Story 5.11 (block-orphan-no-transcript)
+     *   - `reviewer-grammar`             — Story 4.3 RESERVED (no live writer; kept
+     *                                      as forward-compat reservation per 4.3 rationale)
+     *   - `deps-drift`                   — Story 5.13 NEW (scan-sources deps-drift gate)
+     *
+     * See `_bmad-output/implementation-artifacts/5-13-*.md § AC2` for the
+     * full closed-enum rationale and migration table.
+     *
+     * Added in Story 3.5 Task 6.2. Closed enum added in Story 5.13.
      */
     blocked_by: z
-        .union([
-        z.literal("planning-discipline"),
-        z.literal("source-drift"),
-        z.literal("handoff-grammar"),
-        z.literal("reviewer-grammar"),
-        z.string(),
+        .enum([
+        "handoff-grammar",
+        "gh-defer",
+        "gh-retry",
+        "gh-needs-human",
+        "reviewer-no-session-result",
+        "reviewer-verdict-needs-changes",
+        "reviewer-verdict-blocked",
+        "routing-failure",
+        "routing-self-yield",
+        "planning-discipline",
+        "orphan-no-transcript",
+        "reviewer-grammar",
+        "deps-drift",
     ])
         .optional(),
     /**

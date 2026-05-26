@@ -8,6 +8,8 @@ As a **fixture story**,
 I want **to depend on fixture story A**,
 so that **the scan-sources integration test can assert depends_on is carried verbatim**.
 
+Depends on: bmad:1.1
+
 ## Acceptance Criteria
 
 **AC1 (integration):**
