@@ -22,6 +22,10 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // directly via fs.writeFile — no logTelemetryEvent"). This is a test file only;
   // the production tool is a read-only consumer.
   path.join(SRC_DIR, "tools", "__tests__", "compute-agreement.test.ts"),
+  // Story 4.10b: run-auto-merge-gate tests write JSONL fixture files and done
+  // manifest YAML directly to tmpdir. This is a test file only; the production
+  // tool is a gate decision + gh shell-out (no raw fs writes in production code).
+  path.join(SRC_DIR, "tools", "__tests__", "run-auto-merge-gate.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

@@ -890,3 +890,21 @@ export declare class ReviewerResultMissingStandardsVersionError extends DomainEr
         sessionUlid: string;
     });
 }
+/**
+ * `runAutoMergeGate` was called with a `thresholdOverride` value that is
+ * outside the valid range `[0, 1]`, is `NaN`, or is non-finite.
+ *
+ * The caller-supplied override bypasses the workspace-config read entirely
+ * (test-seam only), so validation must be strict — a mis-typed value should
+ * never silently promote a PR that didn't meet the threshold.
+ *
+ * Story 4.10b (FR40).
+ */
+export declare class AutoMergeGateThresholdInvalidError extends DomainError {
+    readonly threshold: number;
+    readonly reason: string;
+    constructor(opts: {
+        threshold: number;
+        reason: string;
+    });
+}
