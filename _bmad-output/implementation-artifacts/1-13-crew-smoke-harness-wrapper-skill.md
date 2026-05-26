@@ -45,7 +45,7 @@ The skill stops before `/crew:start`. The whole point of the smoke is for the op
 **AC1 (createSmokeScratchRepo MCP tool, vitest:).** A new MCP tool `createSmokeScratchRepo({ label, parentDir? })` lives at `plugins/crew/mcp-server/src/tools/create-smoke-scratch-repo.ts` and is registered in `register.ts` (bringing the tool count from 31 → 32). The tool:
 
 - mkdtemps a directory under `<parentDir>` whose name starts with `crew-smoke-<label>-` followed by the random suffix Node's `fs.mkdtemp` appends (no ULID — Node's suffix is already collision-free); default `parentDir = os.tmpdir()`. `label` is validated as kebab-case (lowercase letters, digits, hyphens; min length 1).
-- Runs git-init + an initial empty commit via `gitInitWithEmptyCommit(scratchRoot)` from `lib/git.ts` so the AC6f canonical-fs-guard static check stays satisfied — no `git` spawns outside `lib/git.ts`.
+- Runs git-init + an initial empty commit via `gitInitWithEmptyCommit(scratchRoot)` from `lib/git.ts` so the canonical-fs-guard static check (`plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts`, from Story 1.5) stays satisfied — no `git` spawns outside `lib/git.ts`.
 - Writes a minimal native-adapter `.crew/config.yaml` via `writeManagedFile` (`adapter: native`, `standards: {}`).
 - Copies `plugins/crew/docs/standards-example.md` to `<scratchRoot>/.crew/standards.md` via `writeManagedFile`.
 - Returns `{ scratchRoot: string, cleanup: () => Promise<void> }` where `cleanup` is an idempotent `fs.rm(scratchRoot, { recursive: true, force: true })` closure.
