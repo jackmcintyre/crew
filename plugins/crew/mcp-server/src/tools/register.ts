@@ -32,6 +32,7 @@ import { recordPrCloseAction } from "./record-pr-close-action.js";
 import { processReviewerYield } from "./process-reviewer-yield.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
 import { computeAgreement, AgreementMetricResultSchema } from "./compute-agreement.js";
+import { runAutoMergeGate, AutoMergeGateResultSchema } from "./run-auto-merge-gate.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -1283,6 +1284,66 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         if (result !== null) {
           AgreementMetricResultSchema.parse(result);
         }
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 4.10b — runAutoMergeGate: auto-merge gate for done-ready-for-merge PRs.
+  // Reads done/<ref>.yaml for risk_tier, computeAgreement for the rolling ratio,
+  // workspace config for the threshold, then either calls `gh pr merge --squash
+  // --delete-branch` (auto-merge) or applies the `needs-human` label (pause).
+  // Manual-merge override is preserved by structural omission in SKILL.md — gate
+  // is ONLY invoked under the done-ready-for-merge branch. (FR40, FR41, FR42)
+  server.registerTool({
+    name: "runAutoMergeGate",
+    description:
+      "Auto-merge gate for a PR that has reached done-ready-for-merge (FR40/FR41/FR42). " +
+      "Reads done/<ref>.yaml for risk_tier, computeAgreement for the rolling agreement ratio, " +
+      "and workspace config plugin.agreement_threshold (default 0.8). " +
+      "Decision: low + met-threshold → gh pr merge --squash --delete-branch; " +
+      "all other branches → gh api POST /labels with needs-human. " +
+      "dryRun:true skips the gh shell-out. " +
+      "Throws AutoMergeGateThresholdInvalidError on invalid thresholdOverride. " +
+      "Story 4.10b.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        prNumber: { type: "number" },
+        ref: { type: "string" },
+        sessionUlid: { type: "string" },
+        thresholdOverride: { type: "number" },
+        lastNVerdictsOverride: { type: "number" },
+        dryRun: { type: "boolean" },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "prNumber", "ref", "sessionUlid"],
+    },
+    handler: async (args) => {
+      const parsed = {
+        targetRepoRoot: args.targetRepoRoot as string,
+        prNumber: args.prNumber as number,
+        ref: args.ref as string,
+        sessionUlid: args.sessionUlid as string,
+        thresholdOverride: args.thresholdOverride as number | undefined,
+        lastNVerdictsOverride: args.lastNVerdictsOverride as number | undefined,
+        dryRun: args.dryRun as boolean | undefined,
+        role: args.role as string | undefined,
+      };
+      try {
+        const result = await runAutoMergeGate(parsed);
+        AutoMergeGateResultSchema.parse(result);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

@@ -15,4 +15,5 @@ gh_allow:
   - pr-create
   - pr-view
   - pr-comment
+  - pr-merge
 gh_allow_args: {}

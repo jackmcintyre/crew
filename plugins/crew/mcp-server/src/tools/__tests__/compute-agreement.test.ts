@@ -600,7 +600,8 @@ describe("AC4o — MCP tool registration smoke", () => {
     };
     registerAllTools(fakeServer as unknown as Parameters<typeof registerAllTools>[0]);
     expect(registeredTools).toContain("computeAgreement");
-    expect(registeredTools.length).toBe(30);
+    expect(registeredTools).toContain("runAutoMergeGate");
+    expect(registeredTools.length).toBe(31);
   });
 });
 

@@ -1,7 +1,7 @@
 ---
 name: crew:start
 description: "Claim the next ready story from the backlog, spawn a clean-context generalist-dev subagent, and drain the queue until empty."
-allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, runReviewerSession, postReviewerComments, applyReviewerLabels, Task, Write]
+allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, runReviewerSession, postReviewerComments, applyReviewerLabels, runAutoMergeGate, Task, Write]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/4-2-start-skill-and-per-story-dev-subagent-spawn.md § Behavioural contract -->
@@ -130,6 +130,11 @@ The persistence write in step 4.5 happens between `Task` return (step 4) and `pr
     - `done-ready-for-merge` →
       1. Confirm `completed: true` is present on the returned object. This flag signals that `processReviewerTranscript` has already called `completeStory` internally and moved the manifest from `in-progress/<ref>.yaml` to `done/<ref>.yaml` before returning.
       2. emit the verbatim chat-surface line `story <ref> moved to done — claiming next` (with `<ref>` substituted at runtime).
+      12.1. invoke runAutoMergeGate({ targetRepoRoot, prNumber, ref, sessionUlid }). Switch on the `decision` field:
+         - `auto-merge` → log every entry of the returned `chatLog` to the operator, then return to outer loop step 4.
+         - `pause-needs-human` → log every entry of the returned `chatLog` to the operator. The PR now carries the `needs-human` label; do NOT loop into rework — the story is already in `done/`. Return to outer loop step 4.
+         - If `runAutoMergeGate` throws `GhRecoverableError`: log the error verbatim AND a follow-up line `auto-merge gate deferred — operator should re-run /crew:start or merge manually`. The manifest is already in `done/`; the story is closed from the plugin's POV. Return to outer loop step 4.
+         - If `runAutoMergeGate` throws `AutoMergeGateThresholdInvalidError` or any other typed error: log the error verbatim and halt the inner cycle. The manifest is in `done/`; the operator needs to fix `.crew/config.yaml` before continuing.
       3. return to outer loop step 4 (`claimNextStory`).
     - `done-blocked-reviewer-needs-changes` → emit the verbatim chat line `reviewer verdict: NEEDS CHANGES — story <ref> needs dev rework` (with `<ref>` substituted). The manifest stays in `in-progress/` with `blocked_by: reviewer-verdict-needs-changes` (stamped by `processReviewerTranscript`). Loop back to step 3 (dev spawn) for rework — use the original `devPrompt` from `buildPersonaSpawnPrompt` and include `rework_iteration: <n>` in the `initial_context`.
     - `done-blocked-reviewer-blocked` → emit the verbatim chat line `reviewer verdict: BLOCKED — story <ref> awaiting human`. The manifest stays in `in-progress/` with `blocked_by: reviewer-verdict-blocked`. Do NOT loop — operator must intervene. Return to outer loop step 4.
@@ -170,6 +175,10 @@ The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as th
 - **`completeStory` raising `WrongClaimantError` or `InProgressHandEditError`**: On the `READY FOR MERGE` branch, `processReviewerTranscript` calls `completeStory` internally. If the in-progress manifest has been hand-edited since claim (FR14a) OR the session ULID does not match `claimed_by` (FR19), `completeStory` raises `InProgressHandEditError` or `WrongClaimantError` respectively. These errors propagate verbatim THROUGH `processReviewerTranscript` to the prose layer, which surfaces them and exits — the outer loop does NOT advance to the next `claimNextStory` call. Recovery is operator inspection of the in-progress manifest plus a fresh `/crew:start` invocation.
 
 - **`Write` failure persisting dev transcript** (step 4.5): The built-in `Write` tool threw a filesystem error (disk full, permission denied, EROFS). The inner cycle halts; `processDevTranscript` is NOT called; the in-progress manifest is untouched. Operator recovery: inspect filesystem permissions and free space under `<targetRepoRoot>/.crew/state/sessions/`, then re-run `/crew:start`. Once Story 5.11 ships, the next `/crew:start` will surface this manifest as `[orphan]` and route it through the orphan-recovery branch.
+
+- **`AutoMergeGateThresholdInvalidError`** (from `runAutoMergeGate` at step 12.1): The `plugin.agreement_threshold` value in `.crew/config.yaml` (or a caller-supplied `thresholdOverride`) is outside the valid range `[0, 1]`, is `NaN`, or is non-finite. The manifest is already in `done/` (the story completed successfully). Fix the `plugin.agreement_threshold` value in `.crew/config.yaml` and re-run `/crew:start`, or merge the PR manually.
+
+- **`auto-merge-gate-deferred`** (`GhRecoverableError` from `runAutoMergeGate` at step 12.1): The `gh pr merge` or `gh api` call failed with a recoverable class (rate-limit, auth, network). The manifest is already in `done/`; the story is closed from the plugin's POV. The PR was NOT merged and the `needs-human` label was NOT applied (the gh call failed before the label). Operator action: re-run `/crew:start` to retry the gate, or merge the PR manually.
 
 Note: `runDevSession` is no longer used. The SKILL.md prose now drives the inner cycle directly via `Task` tool invocations, with `processDevTranscript` and `processReviewerTranscript` handling the parsing and manifest mutations.
 
