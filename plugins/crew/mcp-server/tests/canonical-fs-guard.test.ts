@@ -17,6 +17,11 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // file, not production code — the write originates outside mcp-server/src/ in
   // the prose layer. Whitelisted so the static guard does not flag it.
   path.join(SRC_DIR, "__tests__", "dev-transcript-persistence.test.ts"),
+  // Story 4.10: compute-agreement tests write JSONL fixtures directly to tmpdir
+  // via raw fs.writeFile (per the spec's AC4 testing standards: "tests write JSONL
+  // directly via fs.writeFile — no logTelemetryEvent"). This is a test file only;
+  // the production tool is a read-only consumer.
+  path.join(SRC_DIR, "tools", "__tests__", "compute-agreement.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

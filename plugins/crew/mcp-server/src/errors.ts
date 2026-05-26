@@ -1297,6 +1297,27 @@ export class RuntimeBoundsInvalidError extends DomainError {
 }
 
 /**
+ * `computeAgreement` was called with an invalid `lastNVerdicts` value — zero,
+ * negative, non-integer, `NaN`, or `Infinity`. Raised BEFORE any filesystem
+ * read so the caller receives a rich, actionable message rather than a generic
+ * Zod error.
+ *
+ * Story 4.10 (FR67).
+ */
+export class AgreementWindowInvalidError extends DomainError {
+  readonly lastNVerdicts: number;
+  readonly reason: string;
+
+  constructor(opts: { lastNVerdicts: number; reason: string }) {
+    super(
+      `computeAgreement: invalid lastNVerdicts=${opts.lastNVerdicts} — ${opts.reason}. (FR67)`,
+    );
+    this.lastNVerdicts = opts.lastNVerdicts;
+    this.reason = opts.reason;
+  }
+}
+
+/**
  * `postReviewerComments` found `reviewer-result.json` but its
  * `standardsVersion` field is absent or empty. Raised instead of emitting
  * a malformed `reviewer.verdict` event — structurally impossible post-4.7
