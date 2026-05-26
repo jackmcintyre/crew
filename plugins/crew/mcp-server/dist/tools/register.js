@@ -26,6 +26,8 @@ import { runDevTerminalAction } from "./run-dev-terminal-action.js";
 import { runReviewerSession } from "./run-reviewer-session.js";
 import { postReviewerComments } from "./post-reviewer-comments.js";
 import { applyReviewerLabels } from "./apply-reviewer-labels.js";
+import { recordAgentInvoke } from "./record-agent-invoke.js";
+import { recordPrCloseAction } from "./record-pr-close-action.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -931,6 +933,110 @@ export function registerAllTools(server) {
                 if (err instanceof DomainError) {
                     return {
                         content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 4.12 — recordAgentInvoke: record a completed agent-subagent invocation,
+    // enforce the 8-min reviewer hard cap (NFR2), and emit dev.budget_exceeded when
+    // cumulative dev runtime crosses 30 min (NFR3). (FR65, NFR2, NFR3)
+    server.registerTool({
+        name: "recordAgentInvoke",
+        description: "Record a completed agent-subagent invocation (FR65). Emits an `agent.invoke` telemetry event. " +
+            "For `generalist-reviewer` invocations exceeding 8 min (NFR2): substitutes the verdict comment " +
+            "with a failure body, applies `needs-human`, and returns `{ kind: 'reviewer-timed-out' }` — " +
+            "the story is NOT marked failed. " +
+            "For `generalist-dev` invocations when cumulative story runtime crosses 30 min (NFR3): emits " +
+            "`dev.budget_exceeded` and returns `{ kind: 'dev-budget-exceeded' }`. " +
+            "Returns `{ kind: 'ok' }` on the common path. Story 4.12.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                sessionUlid: { type: "string" },
+                agent: { type: "string" },
+                storyId: { type: "string" },
+                startedAt: { type: "string" },
+                completedAt: { type: "string" },
+                tokensIn: { type: "number" },
+                tokensOut: { type: "number" },
+                targetRepoRoot: { type: "string" },
+            },
+            required: ["sessionUlid", "agent", "startedAt", "completedAt", "targetRepoRoot"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                sessionUlid: z.string().min(1),
+                agent: z.string().min(1),
+                storyId: z.string().optional(),
+                startedAt: z.string().min(1),
+                completedAt: z.string().min(1),
+                tokensIn: z.number().int().nonnegative().optional(),
+                tokensOut: z.number().int().nonnegative().optional(),
+                targetRepoRoot: z.string().min(1),
+            })
+                .parse(args);
+            try {
+                const result = await recordAgentInvoke(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: JSON.stringify({ error: err.name, message: err.message }) }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 4.12 — recordPrCloseAction: write a retroactive `reviewer.verdict.merge_action`
+    // event when a PR is closed. Join key for compute-agreement (Story 4.10): (pr_number, session_id).
+    server.registerTool({
+        name: "recordPrCloseAction",
+        description: "Write a `reviewer.verdict.merge_action` event when a PR is closed (FR66). " +
+            "Join key for Story 4.10 compute-agreement: (prNumber, sessionUlid). " +
+            "No deduplication — caller (Story 5.3's polling loop) is responsible for dedup. " +
+            "Returns `{ kind: 'ok' }`. Story 4.12.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                sessionUlid: { type: "string" },
+                storyId: { type: "string" },
+                prNumber: { type: "number" },
+                mergeAction: { type: "string", enum: ["merged", "closed-unmerged", "still-open"] },
+                resolvedAt: { type: "string" },
+                targetRepoRoot: { type: "string" },
+            },
+            required: ["sessionUlid", "prNumber", "mergeAction", "targetRepoRoot"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                sessionUlid: z.string().min(1),
+                storyId: z.string().optional(),
+                prNumber: z.number().int().positive(),
+                mergeAction: z.enum(["merged", "closed-unmerged", "still-open"]),
+                resolvedAt: z.string().optional(),
+                targetRepoRoot: z.string().min(1),
+            })
+                .parse(args);
+            try {
+                const result = await recordPrCloseAction(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: JSON.stringify({ error: err.name, message: err.message }) }],
                         isError: true,
                     };
                 }

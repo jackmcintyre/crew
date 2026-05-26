@@ -61,6 +61,69 @@ export declare const TelemetryInvalidEventSchema: z.ZodObject<{
         zod_message: z.ZodString;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/**
+ * `reviewer.verdict` — per-reviewer-verdict telemetry (FR66). Emitted inside
+ * `postReviewerComments` on POST success. No body/diff/contents strings (NFR14).
+ * The `timed_out` flag is `true` only on the AC3 substitution path (8-min cap).
+ */
+export declare const ReviewerVerdictEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"reviewer.verdict">;
+    data: z.ZodObject<{
+        pr_number: z.ZodNumber;
+        verdict: z.ZodEnum<{
+            "READY FOR MERGE": "READY FOR MERGE";
+            "NEEDS CHANGES": "NEEDS CHANGES";
+            BLOCKED: "BLOCKED";
+            "reviewer-failure": "reviewer-failure";
+        }>;
+        standards_version: z.ZodString;
+        plugin_version: z.ZodString;
+        timed_out: z.ZodBoolean;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+/**
+ * `reviewer.verdict.merge_action` — retroactive merge-action event (FR66).
+ * Emitted by `recordPrCloseAction` (typically Story 5.3's polling loop).
+ * Join key for `compute-agreement` (Story 4.10): `(pr_number, session_id)`.
+ */
+export declare const ReviewerVerdictMergeActionEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"reviewer.verdict.merge_action">;
+    data: z.ZodObject<{
+        pr_number: z.ZodNumber;
+        merge_action: z.ZodEnum<{
+            merged: "merged";
+            "closed-unmerged": "closed-unmerged";
+            "still-open": "still-open";
+        }>;
+        resolved_at: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+/**
+ * `dev.budget_exceeded` — emitted by `recordAgentInvoke` when cumulative dev
+ * subagent runtime for a story crosses the 30-min budget (NFR3). One-shot per
+ * `(story_id, current_month)` pair. Story 5.3's polling loop reads this to
+ * surface stuck stories to the operator.
+ */
+export declare const DevBudgetExceededEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"dev.budget_exceeded">;
+    data: z.ZodObject<{
+        cumulative_runtime_ms: z.ZodNumber;
+        budget_ms: z.ZodNumber;
+        triggering_invocation_runtime_ms: z.ZodNumber;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     ts: z.ZodString;
     session_id: z.ZodString;
@@ -83,5 +146,52 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
         zod_path: z.ZodString;
         zod_message: z.ZodString;
     }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"reviewer.verdict">;
+    data: z.ZodObject<{
+        pr_number: z.ZodNumber;
+        verdict: z.ZodEnum<{
+            "READY FOR MERGE": "READY FOR MERGE";
+            "NEEDS CHANGES": "NEEDS CHANGES";
+            BLOCKED: "BLOCKED";
+            "reviewer-failure": "reviewer-failure";
+        }>;
+        standards_version: z.ZodString;
+        plugin_version: z.ZodString;
+        timed_out: z.ZodBoolean;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"reviewer.verdict.merge_action">;
+    data: z.ZodObject<{
+        pr_number: z.ZodNumber;
+        merge_action: z.ZodEnum<{
+            merged: "merged";
+            "closed-unmerged": "closed-unmerged";
+            "still-open": "still-open";
+        }>;
+        resolved_at: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"dev.budget_exceeded">;
+    data: z.ZodObject<{
+        cumulative_runtime_ms: z.ZodNumber;
+        budget_ms: z.ZodNumber;
+        triggering_invocation_runtime_ms: z.ZodNumber;
+    }, z.core.$strict>;
 }, z.core.$strict>], "type">;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
+export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;
+export type ReviewerVerdictMergeActionEvent = z.infer<typeof ReviewerVerdictMergeActionEventSchema>;
+export type DevBudgetExceededEvent = z.infer<typeof DevBudgetExceededEventSchema>;

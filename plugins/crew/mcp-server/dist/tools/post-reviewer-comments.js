@@ -35,7 +35,8 @@ import { getPluginVersion } from "../lib/plugin-version.js";
 import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
 import { composeSummaryBody } from "../lib/compose-reviewer-summary.js";
 import { findHunkLineForPath } from "../lib/find-hunk-line.js";
-import { GhApiResponseShapeError } from "../errors.js";
+import { GhApiResponseShapeError, ReviewerResultMissingStandardsVersionError } from "../errors.js";
+import { logTelemetryEvent } from "../lib/logger.js";
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -165,14 +166,54 @@ export async function postReviewerComments(opts) {
             }
         }
     }
+    // Step 5.5: Validate standardsVersion before emitting telemetry (Story 4.12 Task 3.3).
+    // Guard only when we'll actually emit a verdict event (i.e. not when the file is absent).
+    // This is structurally impossible post-4.7 but pinned as a hard guard.
+    if (!resultFile.standardsVersion) {
+        throw new ReviewerResultMissingStandardsVersionError({ sessionUlid: opts.sessionUlid });
+    }
     // Step 6: Compose the summary body with version block and footer marker.
-    const summaryBody = composeSummaryBody(resultFile, {
-        standardsVersion: resultFile.standardsVersion,
-        pluginVersion,
-    });
+    // When `verdictBodyOverride` is provided (AC3 substitution path), use it verbatim.
+    const summaryBody = opts.verdictBodyOverride !== undefined
+        ? opts.verdictBodyOverride
+        : composeSummaryBody(resultFile, {
+            standardsVersion: resultFile.standardsVersion,
+            pluginVersion,
+        });
     // Extract the verdict line (find the line matching the verdict sentinel pattern).
     const bodyLines = summaryBody.split("\n");
     const verdictLine = bodyLines.find((l) => l.startsWith("**Verdict:")) ?? "";
+    // Helper: emit `reviewer.verdict` telemetry after POST/PATCH success.
+    // Wrapped in try/catch per AC2 unpacked (2a): telemetry failures MUST NOT
+    // roll back a comment that is already on GitHub.
+    const emitVerdictTelemetry = async () => {
+        try {
+            const timedOut = opts.reviewerVerdictOverride === "reviewer-failure";
+            const verdict = timedOut
+                ? "reviewer-failure"
+                : resultFile.recommendedVerdict;
+            await logTelemetryEvent({
+                targetRepoRoot: opts.targetRepoRoot,
+                event: {
+                    type: "reviewer.verdict",
+                    session_id: opts.sessionUlid,
+                    agent: "generalist-reviewer",
+                    story_id: resultFile.ref || undefined,
+                    data: {
+                        pr_number: resultFile.prNumber,
+                        verdict,
+                        standards_version: resultFile.standardsVersion,
+                        plugin_version: pluginVersion,
+                        timed_out: timedOut,
+                    },
+                },
+            });
+        }
+        catch {
+            // Telemetry-write failures must not roll back the verdict POST.
+            // The comment is already on GitHub; the next reviewer run will produce a fresh event.
+        }
+    };
     // Step 7: PATCH existing review or POST a new one.
     if (priorReviewId !== null) {
         // PATCH path — edit prior verdict in place (no inline comments on PATCH).
@@ -198,6 +239,8 @@ export async function postReviewerComments(opts) {
         catch (cause) {
             throw new GhApiResponseShapeError({ subcommand: "api", url: patchUrl, cause });
         }
+        // Emit telemetry AFTER successful PATCH (Story 4.12 Task 3.1).
+        await emitVerdictTelemetry();
         return {
             next: "posted",
             postedReviewId: patchedId,
@@ -234,6 +277,8 @@ export async function postReviewerComments(opts) {
     catch (cause) {
         throw new GhApiResponseShapeError({ subcommand: "api", url: reviewsApiUrl, cause });
     }
+    // Emit telemetry AFTER successful POST (Story 4.12 Task 3.1).
+    await emitVerdictTelemetry();
     return {
         next: "posted",
         postedReviewId,

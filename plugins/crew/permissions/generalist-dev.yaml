@@ -9,6 +9,8 @@ tools_allow:
   - heartbeat
   - classifyRiskTier
   - runDevTerminalAction
+  - recordAgentInvoke
+  - recordPrCloseAction
 gh_allow:
   - pr-create
   - pr-view

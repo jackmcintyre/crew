@@ -1257,3 +1257,61 @@ export class ShippedRiskTieringDefaultMissingError extends DomainError {
     this.expectedPath = opts.expectedPath;
   }
 }
+
+/**
+ * `recordAgentInvoke` received a `startedAt` / `completedAt` pair whose
+ * derived `runtime_ms` is invalid — either a timestamp is malformed (not
+ * parseable as ISO-8601) or `completedAt < startedAt` (negative runtime,
+ * e.g. from clock skew on the operator's machine).
+ *
+ * No telemetry event is written; no substitution or budget check runs.
+ * The dev session SKILL.md is expected to propagate this error to chat.
+ *
+ * Story 4.12 (NFR2/NFR3).
+ */
+export class RuntimeBoundsInvalidError extends DomainError {
+  readonly sessionUlid: string;
+  readonly agent: string;
+  readonly startedAt: string;
+  readonly completedAt: string;
+  readonly reason: string;
+
+  constructor(opts: {
+    sessionUlid: string;
+    agent: string;
+    startedAt: string;
+    completedAt: string;
+    reason: string;
+  }) {
+    super(
+      `recordAgentInvoke: invalid runtime bounds for session ${opts.sessionUlid} ` +
+        `agent=${opts.agent} (started=${opts.startedAt}, completed=${opts.completedAt}): ` +
+        `${opts.reason}. (NFR2/NFR3)`,
+    );
+    this.sessionUlid = opts.sessionUlid;
+    this.agent = opts.agent;
+    this.startedAt = opts.startedAt;
+    this.completedAt = opts.completedAt;
+    this.reason = opts.reason;
+  }
+}
+
+/**
+ * `postReviewerComments` found `reviewer-result.json` but its
+ * `standardsVersion` field is absent or empty. Raised instead of emitting
+ * a malformed `reviewer.verdict` event — structurally impossible post-4.7
+ * but pinned as a hard guard.
+ *
+ * Story 4.12 (FR66).
+ */
+export class ReviewerResultMissingStandardsVersionError extends DomainError {
+  readonly sessionUlid: string;
+
+  constructor(opts: { sessionUlid: string }) {
+    super(
+      `reviewer-result.json for session ${opts.sessionUlid} missing required ` +
+        `standardsVersion field; cannot emit reviewer.verdict event. (FR66)`,
+    );
+    this.sessionUlid = opts.sessionUlid;
+  }
+}
