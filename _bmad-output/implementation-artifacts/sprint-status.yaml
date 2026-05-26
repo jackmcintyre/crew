@@ -19,7 +19,7 @@ development_status:
   1-9-ship-a-pre-built-dist-with-the-plugin: done
   1-10-readme-rewrite-match-observed-claude-code-ui-reality: done
   1-11-dev-install-loop-make-plugin-changes-visible-without-daemon-restart: done
-  1-12-ship-story-base-branch-override-and-worktree-spec-fallback: backlog
+  1-12-ship-story-base-branch-override-and-worktree-spec-fallback: ready-for-dev
   epic-1-retrospective: done
   epic-2: in-progress
   2-1-catalogue-file-format-and-shipped-role-templates: done
