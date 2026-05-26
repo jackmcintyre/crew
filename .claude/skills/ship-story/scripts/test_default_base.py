@@ -14,6 +14,7 @@ import json
 import subprocess
 import sys
 import textwrap
+import uuid
 from pathlib import Path
 
 import pytest
@@ -267,120 +268,66 @@ class TestDefaultBaseSubcommand:
 class TestResolveSpecPathWorktreeFirst:
     """(5e) _resolve_spec_path finds a worktree-only spec via worktree_ready event."""
 
-    def test_finds_worktree_only_spec(self, tmp_path, monkeypatch):
-        story_key = "1-99-worktree-test"
+    def test_finds_worktree_only_spec(self, tmp_path, monkeypatch, request):
+        """(5e) Exercise the REAL _resolve_spec_path worktree-first branch end-to-end."""
+        # Unique story key per test to avoid /tmp collisions.
+        uid = uuid.uuid4().hex[:8]
+        story_key = f"1-99-wt-{uid}"
         spec_rel = f"_bmad-output/implementation-artifacts/{story_key}.md"
 
-        # Set up worktree directory with the spec inside it.
+        # Set up worktree directory with the spec inside it (only in worktree,
+        # not in the main repo — exercises the worktree-first branch).
         worktree_dir = tmp_path / "wt"
         spec_in_wt = worktree_dir / spec_rel
         spec_in_wt.parent.mkdir(parents=True, exist_ok=True)
         spec_in_wt.write_text("# Story spec\nstory_shape: substrate\n")
 
-        # Write run log with worktree_ready event.
+        # Write run log with worktree_ready event under tmp_path (steered by
+        # monkeypatching _DEFAULT_RUNS_DIR so runs_dir() reads from here).
         write_run_log(tmp_path, story_key, [
             {"event": "worktree_ready", "ts": "2026-01-01T00:00:00Z", "data": {"path": str(worktree_dir)}},
         ])
 
-        # Write resolve JSON (needed so spec_rel is known).
-        resolve_json = tmp_path / f"ship-{story_key}.resolve.json"
-        resolve_json.write_text(json.dumps({"spec_path": spec_rel}))
+        # Write resolve JSON to the real /tmp/ path that _resolve_spec_path hardcodes.
+        resolve_json_path = Path(f"/tmp/ship-{story_key}.resolve.json")
+        resolve_json_path.write_text(json.dumps({"spec_path": spec_rel}))
+        request.addfinalizer(lambda: resolve_json_path.unlink(missing_ok=True))
 
+        # Steer REPO and the run-log dir to tmp_path; do NOT stub _resolve_spec_path.
         monkeypatch.setattr(ship, "REPO", tmp_path)
         monkeypatch.setattr(ship, "_DEFAULT_RUNS_DIR", tmp_path / ".claude/skills/ship-story/.runs")
 
-        # Patch the resolve JSON path (it normally lives at /tmp/).
-        import unittest.mock as mock
-        with mock.patch("builtins.open", side_effect=open):
-            # Directly patch Path("/tmp/...").exists to point at our tmp file.
-            original_path_class = Path
-
-            class PatchedPath(type(Path())):
-                pass
-
-        # Simpler approach: monkeypatch the resolve_json path by patching
-        # the f"/tmp/ship-{story_key}.resolve.json" → tmp resolve_json.
-        original_resolve = ship._resolve_spec_path
-
-        def patched_resolve(sk, override):
-            # Delegate but swap /tmp path → our tmp.
-            if override:
-                return original_path_class(override)
-            rj = tmp_path / f"ship-{sk}.resolve.json"
-            spec_rel_inner = None
-            if rj.exists():
-                import json as _json
-                try:
-                    info = _json.loads(rj.read_text())
-                except Exception:
-                    info = {}
-                spec_rel_inner = info.get("spec_path")
-            # Worktree-first branch.
-            wt_data = ship._latest_event_data(sk, "worktree_ready")
-            if wt_data is not None:
-                wt_path_str = wt_data.get("path")
-                if wt_path_str and spec_rel_inner:
-                    candidate = original_path_class(wt_path_str) / spec_rel_inner
-                    if candidate.exists():
-                        return candidate
-            if spec_rel_inner:
-                return tmp_path / spec_rel_inner
-            return tmp_path / f"_bmad-output/implementation-artifacts/{sk}.md"
-
-        monkeypatch.setattr(ship, "_resolve_spec_path", patched_resolve)
         result = ship._resolve_spec_path(story_key, None)
         assert result == spec_in_wt
         assert result.exists()
 
-    def test_falls_through_when_worktree_gone(self, tmp_path, monkeypatch):
+    def test_falls_through_when_worktree_gone(self, tmp_path, monkeypatch, request):
         """(5h) Post-cleanup: worktree_ready event exists but path is gone → fall through."""
-        story_key = "1-99-cleanup-test"
+        uid = uuid.uuid4().hex[:8]
+        story_key = f"1-99-cl-{uid}"
         spec_rel = f"_bmad-output/implementation-artifacts/{story_key}.md"
 
-        # Run log points at a non-existent worktree.
+        # Run log points at a non-existent worktree (simulates post-cleanup state).
         write_run_log(tmp_path, story_key, [
             {"event": "worktree_ready", "ts": "2026-01-01T00:00:00Z", "data": {"path": str(tmp_path / "gone_worktree")}},
         ])
 
-        # Write resolve JSON.
-        resolve_json = tmp_path / f"ship-{story_key}.resolve.json"
-        resolve_json.write_text(json.dumps({"spec_path": spec_rel}))
+        # Write resolve JSON to the real /tmp/ path.
+        resolve_json_path = Path(f"/tmp/ship-{story_key}.resolve.json")
+        resolve_json_path.write_text(json.dumps({"spec_path": spec_rel}))
+        request.addfinalizer(lambda: resolve_json_path.unlink(missing_ok=True))
 
-        # Create spec at the main-repo fallback path.
+        # Create spec at the main-repo fallback path (worktree is gone, this should win).
         main_spec = tmp_path / spec_rel
         main_spec.parent.mkdir(parents=True, exist_ok=True)
         main_spec.write_text("# Fallback spec\n")
 
+        # Steer REPO and the run-log dir to tmp_path; do NOT stub _resolve_spec_path.
         monkeypatch.setattr(ship, "REPO", tmp_path)
         monkeypatch.setattr(ship, "_DEFAULT_RUNS_DIR", tmp_path / ".claude/skills/ship-story/.runs")
 
-        # Similar patched_resolve as above, delegating the logic inline.
-        def patched_resolve(sk, override):
-            if override:
-                return Path(override)
-            rj = tmp_path / f"ship-{sk}.resolve.json"
-            spec_rel_inner = None
-            if rj.exists():
-                import json as _json
-                try:
-                    info = _json.loads(rj.read_text())
-                except Exception:
-                    info = {}
-                spec_rel_inner = info.get("spec_path")
-            wt_data = ship._latest_event_data(sk, "worktree_ready")
-            if wt_data is not None:
-                wt_path_str = wt_data.get("path")
-                if wt_path_str and spec_rel_inner:
-                    candidate = Path(wt_path_str) / spec_rel_inner
-                    if candidate.exists():
-                        return candidate
-            if spec_rel_inner:
-                return tmp_path / spec_rel_inner
-            return tmp_path / f"_bmad-output/implementation-artifacts/{sk}.md"
-
-        monkeypatch.setattr(ship, "_resolve_spec_path", patched_resolve)
         result = ship._resolve_spec_path(story_key, None)
-        # Should have fallen through to the main-repo path.
+        # Worktree path doesn't exist → falls through to REPO / spec_rel.
         assert result == main_spec
 
 
