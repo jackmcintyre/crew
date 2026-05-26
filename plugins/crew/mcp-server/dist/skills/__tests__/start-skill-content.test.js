@@ -219,4 +219,29 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
         expect(raw).toContain("4-3c-call-completestory-after-ready-for-merge.md");
         expect(raw).toContain("Completion seam (revised)");
     });
+    // ---------------------------------------------------------------------------
+    // Story 5.11 — orphan-recovery branch structural anchors (AC1 artifact:)
+    // ---------------------------------------------------------------------------
+    it("Story-5.11 (AC1 artifact:) — body contains verbatim [orphan] chat-line template", () => {
+        // AC1 spec: "a vitest harness MUST be able to grep stdout/log for this exact substring"
+        // The SKILL.md prose owns the surface line; this test pins the verbatim template against drift.
+        expect(body).toContain("[orphan] <ref> — claimed_by <staleUlid>");
+    });
+    it("Story-5.11 (AC1 artifact:) — body contains verbatim reattach-or-skip prompt", () => {
+        expect(body).toContain("reattach or skip? (reattach replays the persisted transcript; skip leaves the manifest in place)");
+    });
+    it("Story-5.11 — body contains scanOrphanedInProgress invocation anchor", () => {
+        expect(body).toContain("scanOrphanedInProgress({");
+    });
+    it("Story-5.11 — body contains MUST NOT spawn a dev subagent invariant", () => {
+        expect(body).toContain("Orphan-recovery MUST NOT spawn a dev subagent");
+    });
+    it("Story-5.11 — body contains orphan-recovery before every claimNextStory invariant", () => {
+        expect(body).toContain("Orphan-recovery MUST run before every");
+    });
+    it("Story-5.11 — # Failure modes section contains NotAnOrphanError entry", () => {
+        const section = extractFailureModesSection(body);
+        expect(section).not.toBe("");
+        expect(section).toContain("NotAnOrphanError");
+    });
 });
