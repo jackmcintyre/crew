@@ -5,7 +5,7 @@ project_key: NOKEY
 tracking_system: file-system
 story_location: '{project-root}/_bmad-output/implementation-artifacts'
 development_status:
-  epic-1: done
+  epic-1: in-progress
   1-1-scaffold-the-plugin-skeleton: done
   1-2-workspace-resolver-and-per-target-repo-config: done
   1-2b-stale-config-detection-on-every-skill-invocation: done
@@ -19,6 +19,7 @@ development_status:
   1-9-ship-a-pre-built-dist-with-the-plugin: done
   1-10-readme-rewrite-match-observed-claude-code-ui-reality: done
   1-11-dev-install-loop-make-plugin-changes-visible-without-daemon-restart: done
+  1-12-ship-story-base-branch-override-and-worktree-spec-fallback: backlog
   epic-1-retrospective: done
   epic-2: in-progress
   2-1-catalogue-file-format-and-shipped-role-templates: done

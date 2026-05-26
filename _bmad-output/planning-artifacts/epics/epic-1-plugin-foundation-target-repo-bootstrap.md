@@ -277,3 +277,25 @@ So that every future `story_shape: user-surface` story can actually pass its smo
 **AC7 (integration):** vitest scenario that, given a temp source dir simulating a worktree and a temp cache dir simulating `~/.claude/plugins/cache/`, the dev-install script (a) populates the cache from the source, (b) running it again with no changes is a no-op (mtime preserved on key files), (c) running it after editing a `skills/<x>/SKILL.md` propagates only that file. The actual Claude Code daemon interaction is out of scope for vitest — that part is verified by the story's user-surface smoke gate.
 
 ---
+
+## Story 1.12: `ship-story` base-branch override and worktree-spec auto-discovery
+
+As an operator running `/ship-story` against a non-`main` trunk (today: `dev`, post 2026-05-25 rollback),
+I want `ship.py` to fork worktrees off the configured trunk, `gh pr create` to target it without a manual `--base` flag, and `pre-pr-gate` to find worktree-only specs without `--spec-path`,
+So that every Epic-5+ ship runs end-to-end without the three friction patches that bit every Phase B ship (TEMP `ship.py` hand-edit `d3e1c81`, manual `--base dev`, manual `--spec-path`).
+
+**Context:** Captured across Phase B sessions 2/3/4 handoffs and Epic 4 retro § Carry-forward. The TEMP `d3e1c81` commit on `dev` routes worktree fork from `origin/main` → `origin/dev`; it survives because no story owns the proper fix yet. The `gh pr create` template in `plugins/crew/.claude/skills/ship-story/SKILL.md` Step 9 omits `--base`, defaulting to `main` and forcing post-hoc `gh pr edit --base dev` recovery (PR #151 opened with 11 commits before this was caught). The `pre-pr-gate` resolves spec path via `resolve_json_path` fallback but the worktree-only case still trips it. All three are plumbing, not product. Single shipment.
+
+**Acceptance Criteria:**
+
+**Given** a `default_base` knob exposed on `ship.py` (configuration mechanism is implementer's call — env var, `.crew/ship.yaml`, or per-repo TOML — pick one and document), **When** `ship.py worktree <story_key>` runs with `default_base: dev` configured, **Then** the new worktree forks from `origin/dev` (verifiable via `git -C <worktree> rev-list --left-right --count HEAD...origin/dev` returning `0\t0`) and the TEMP hand-edit at commit `d3e1c81` on `dev` is reverted in the same story. _(Replaces the TEMP patch.)_
+
+**Given** `ship.py` exposes the resolved trunk via a `default-base` subcommand (or equivalent — implementer's call), **When** `ship-story` Step 9 invokes `gh pr create`, **Then** the SKILL.md template passes `--base <resolved trunk>` so the PR opens against the configured trunk without operator intervention. _(Closes the manual-`--base` friction.)_
+
+**Given** `ship.py pre-pr-gate <story_key>` runs without `--spec-path` AND the resolve-payload JSON at `/tmp/ship-<story_key>.resolve.json` references a spec inside a worktree the gate isn't cd'd into, **When** the gate resolves the spec path, **Then** it finds the spec via the worktree-absolute path computed from the worktree event in the run log (`<worktree>/<spec_path>`) — never falling back to the missing main-repo copy. _(Closes the `--spec-path` friction.)_
+
+**Given** a green-field repo with no `default_base` configured, **When** `ship.py worktree` runs, **Then** it falls back to `origin/main` (current behaviour) so existing users see no surprise. _(Back-compat.)_
+
+**AC5 (integration, vitest:):** vitest covers (a) worktree creation against `origin/dev` when `default_base=dev`, (b) PR-body / `gh` invocation honours the configured base via `--base <trunk>` (assert against the SKILL.md template or `ship.py` helper output), (c) `pre-pr-gate` finds a worktree-only spec without `--spec-path`, (d) green-field default-to-`main` back-compat path. Tests use the existing `ship.py` test patterns from prior plumbing stories.
+
+---
