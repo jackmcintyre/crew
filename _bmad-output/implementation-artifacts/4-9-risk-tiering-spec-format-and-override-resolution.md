@@ -168,7 +168,7 @@ vitest covers (a) shipped-default loads, (b) override wins when present, (c) mal
   ```
   Where:
   - `sourcePath` — the absolute path that was being parsed.
-  - `reason` — a one-line human-readable string naming the offending key or invariant violation. The `parseRiskTieringSpec` function builds this string from the Zod error or from an explicit check (e.g. duplicate-id detection). Example reason strings (verbatim format): `"tiers.high[0].change_types[1]: invalid enum value 'foobar'; expected one of revert | migration | schema | dep-bump"`, `"duplicate rule id 'low.docs-only' in tiers.low[0] and tiers.high[2]"`, `"min_lines_changed exceeds max_lines_changed in rule high.large-diff"`, `"missing YAML frontmatter opener (file does not start with '---')"`.
+  - `reason` — a one-line human-readable string naming the offending key or invariant violation. The `parseRiskTieringSpec` function builds this string from the Zod error or from an explicit check (e.g. duplicate-id detection). For Zod-sourced reasons, the `formatZodIssues` helper takes the first issue's dotted path + message verbatim, so the casing matches Zod's output (e.g. Zod emits `"Invalid enum value"` with capital `I`). Example reason strings (verbatim format): `"tiers.high[0].change_types[1]: Invalid enum value. Expected 'revert' | 'migration' | 'schema' | 'dep-bump', received 'foobar'"`, `"duplicate rule id 'low.docs-only' in tiers.low[0] and tiers.high[2]"`, `"min_lines_changed exceeds max_lines_changed in rule high.large-diff"`, `"missing YAML frontmatter opener (file does not start with '---')"`.
   - `copyTarget` — for the override-side malformation, the path of the shipped default (so the user-facing message can say "see canonical shape at <path>"). For the shipped-default-side malformation (which should never happen in practice but is testable), `copyTarget` is the same path as `sourcePath` and the message text degrades gracefully — see (3c).
   - The full user-facing message follows the pattern: `` `docs/risk-tiering.md at <sourcePath> is malformed: <reason>. See the canonical shape in <copyTarget>. (FR40a)` ``.
 
@@ -184,7 +184,7 @@ vitest covers (a) shipped-default loads, (b) override wins when present, (c) mal
 
 **AC4 unpacked.** Integration suite scope:
 
-- (4a) **Fixture base.** vitest tests use `os.tmpdir() + crypto.randomUUID()` per `beforeEach` to create a clean `targetRepoRoot` and (separately) a `pluginRoot`. The shipped-default file is written into `pluginRoot/docs/risk-tiering.md` in fixtures that need it; overrides are written into `targetRepoRoot/docs/risk-tiering.md`. No `pluginRoot` defaulting via `import.meta.url`; tests pass `pluginRoot` explicitly.
+- (4a) **Fixture base.** vitest tests use `fs.mkdtemp(path.join(os.tmpdir(), "risk-tier-"))` per `beforeEach` to create a clean `targetRepoRoot` and (separately) a `pluginRoot` (matches the project's existing tmpdir convention — bare string concatenation like `os.tmpdir() + crypto.randomUUID()` produces broken paths on systems where `os.tmpdir()` has no trailing separator). The shipped-default file is written into `pluginRoot/docs/risk-tiering.md` in fixtures that need it; overrides are written into `targetRepoRoot/docs/risk-tiering.md`. No `pluginRoot` defaulting via `import.meta.url`; tests pass `pluginRoot` explicitly.
 
 - (4b) **(a) Shipped-default-loads case.** Write a valid risk-tiering.md to `pluginRoot/docs/`. Do NOT write any override. Call `lookupRiskTieringSpec({ targetRepoRoot, pluginRoot })`. Assert: return value's `sourcePath === pluginRoot/docs/risk-tiering.md`; `version`, `fallback_tier`, `tiers` match the fixture content; the function did NOT raise.
 
@@ -192,7 +192,7 @@ vitest covers (a) shipped-default loads, (b) override wins when present, (c) mal
 
 - (4d) **(c) Malformed-override-errors-clearly case.** Three sub-cases, each in its own `it()`:
   - (c1) Override missing frontmatter opener (file starts with non-`---` line): assert `MalformedRiskTieringSpecError` thrown with `reason` matching `/missing YAML frontmatter opener/`. `sourcePath` points at the override path.
-  - (c2) Override has invalid change_types enum value (e.g. `change_types: [foobar]`): assert `MalformedRiskTieringSpecError` thrown with `reason` matching `/change_types.*invalid enum value/`.
+  - (c2) Override has invalid change_types enum value (e.g. `change_types: [foobar]`): assert `MalformedRiskTieringSpecError` thrown with `reason` matching `/change_types.*Invalid enum value/i` (case-insensitive — Zod emits capital `I` in `Invalid`).
   - (c3) Override declares two rules with the same id under different tiers: assert `MalformedRiskTieringSpecError` thrown with `reason` matching `/duplicate rule id/`.
 
 - (4e) **Non-AC coverage (extras the implementer should add for the same suite):**
@@ -216,7 +216,7 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
     - `ChangeTypeSchema = z.enum(["revert", "migration", "schema", "dep-bump"])`.
     - `DiffSizeThresholdsSchema = z.object({ min_lines_changed: z.number().int().nonnegative().optional(), max_lines_changed: z.number().int().nonnegative().optional() }).strict().refine(v => v.min_lines_changed !== undefined || v.max_lines_changed !== undefined, { message: "diff_size_thresholds must declare at least one of min_lines_changed or max_lines_changed" })`.
     - `RuleSchema = z.object({ id: z.string().min(1), path_patterns: z.array(z.string().min(1)).min(1).optional(), change_types: z.array(ChangeTypeSchema).min(1).optional(), diff_size_thresholds: DiffSizeThresholdsSchema.optional() }).strict().refine(rule => rule.path_patterns !== undefined || rule.change_types !== undefined || rule.diff_size_thresholds !== undefined, { message: "rule declares no signal fields" })`.
-    - `RiskTieringSpecSchema = z.object({ version: z.string().regex(/^\d+\.\d+\.\d+$/), fallback_tier: z.literal("medium"), tiers: z.object({ low: z.array(RuleSchema).optional(), medium: z.array(RuleSchema).optional(), high: z.array(RuleSchema).optional() }).strict().refine(tiers => (tiers.low?.length ?? 0) + (tiers.medium?.length ?? 0) + (tiers.high?.length ?? 0) > 0, { message: "no rules declared in any tier" }) }).strict()`.
+    - `RiskTieringSpecSchema = z.object({ version: z.string().regex(/^\d+\.\d+\.\d+$/), fallback_tier: z.literal("medium", { errorMap: () => ({ message: "fallback_tier must be 'medium' (v1 invariant — see Architecture § Risk-tier classification, Fallback)" }) }), tiers: z.object({ low: z.array(RuleSchema).optional(), medium: z.array(RuleSchema).optional(), high: z.array(RuleSchema).optional() }).strict().refine(tiers => (tiers.low?.length ?? 0) + (tiers.medium?.length ?? 0) + (tiers.high?.length ?? 0) > 0, { message: "no rules declared in any tier" }) }).strict()`. The custom `errorMap` on `fallback_tier` is required so the diagnostic reason string matches the AC4(e) test regex `/fallback_tier must be 'medium'/`; Zod's default literal-mismatch message would not.
     - `type RiskTieringSpec = z.infer<typeof RiskTieringSpecSchema> & { sourcePath: string }`.
     - `type Rule = z.infer<typeof RuleSchema>`.
     - `type ChangeType = z.infer<typeof ChangeTypeSchema>`.
@@ -255,7 +255,7 @@ Implementation order is load-bearing. Each task lists its AC dependencies.
   - [ ] 5.3 The file MUST be valid against the schema (Task 1) — verify by running the round-trip test from AC4 (4f) before committing.
 
 - [ ] **Task 6: Integration test suite** (AC: #4)
-  - [ ] 6.1 Create `plugins/crew/mcp-server/src/state/__tests__/lookup-risk-tiering-spec.test.ts`. Fixture pattern: `beforeEach` creates a tmpdir for `targetRepoRoot` and (separately) a tmpdir for `pluginRoot`; `afterEach` cleans both via `fs.rm(..., { recursive: true })`. No `pluginRoot` resolution via `import.meta.url`; tests pass it explicitly.
+  - [ ] 6.1 Create `plugins/crew/mcp-server/src/state/__tests__/lookup-risk-tiering-spec.test.ts`. Fixture pattern: `beforeEach` creates a tmpdir for `targetRepoRoot` and (separately) a tmpdir for `pluginRoot` via `fs.mkdtemp(path.join(os.tmpdir(), "risk-tier-"))` (project convention); `afterEach` cleans both via `fs.rm(..., { recursive: true })`. No `pluginRoot` resolution via `import.meta.url`; tests pass it explicitly.
   - [ ] 6.2 Implement cases (4b) through (4f) per AC4 unpacked. Use `expect(...).rejects.toThrow(...)` with `MalformedRiskTieringSpecError` / `ShippedRiskTieringDefaultMissingError` class checks; for the `reason` regex assertions, attach `.toMatchObject({ reason: expect.stringMatching(...) })` against the thrown error.
   - [ ] 6.3 Add a separate `parseRiskTieringSpec` unit-test file at `plugins/crew/mcp-server/src/validators/__tests__/risk-tiering-spec.test.ts` covering pure-validator edge cases that don't require IO: empty file, only whitespace, missing closing `---`, valid YAML but unknown top-level key, valid spec round-trip. These are cheaper to run than the IO-fixture tests and they pin the validator contract independently.
   - [ ] 6.4 Add a `schemas/__tests__/risk-tiering-spec.test.ts` covering Zod-schema-only behaviour: each rule-shape constraint individually, the `fallback_tier` literal, the `version` regex, the tier-non-empty refinement. Pattern follows `schemas/__tests__/standards-doc.test.ts` if present; otherwise mirror the validator-test style with `RiskTieringSpecSchema.safeParse({...})` calls.
@@ -369,7 +369,7 @@ These files are off-limits to this story. If a change appears necessary, STOP an
 ### Testing standards
 
 - vitest with `pnpm vitest --run` from `mcp-server/`.
-- `os.tmpdir() + crypto.randomUUID()` for tmpdir fixtures; `fs.rm(..., { recursive: true })` in `afterEach`.
+- `fs.mkdtemp(path.join(os.tmpdir(), "risk-tier-"))` for tmpdir fixtures (matches the project's existing convention); `fs.rm(..., { recursive: true })` in `afterEach`.
 - No global mocks. No `import.meta.url` mocking.
 - Class-level error assertions via `expect(fn).rejects.toThrow(MalformedRiskTieringSpecError)`; reason-string assertions via `.rejects.toMatchObject({ reason: expect.stringMatching(/pattern/) })`.
 - Round-trip assertion (loading the shipped default's exact content) is the canary against drift between the file and the schema.
