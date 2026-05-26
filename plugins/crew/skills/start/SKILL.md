@@ -1,7 +1,7 @@
 ---
 name: crew:start
 description: "Claim the next ready story from the backlog, spawn a clean-context generalist-dev subagent, and drain the queue until empty."
-allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, runReviewerSession, postReviewerComments, applyReviewerLabels, runAutoMergeGate, Task, Write]
+allowed_tools: [getStatus, mintSessionUlid, claimNextStory, processDevTranscript, processReviewerTranscript, buildPersonaSpawnPrompt, runReviewerSession, postReviewerComments, applyReviewerLabels, runAutoMergeGate, scanOrphanedInProgress, reattachOrphan, blockOrphanNoTranscript, Task, Write, Read]
 ---
 
 <!-- Behavioural contract source: _bmad-output/implementation-artifacts/4-2-start-skill-and-per-story-dev-subagent-spawn.md § Behavioural contract -->
@@ -30,6 +30,26 @@ One `/crew:start` invocation is one session. The session ULID is minted once at 
 
 3. **Mint the session ULID.** Call `mintSessionUlid()` exactly once. Store the returned `sessionUlid`. This ULID identifies "this dev session" — it is re-used for every `claimNextStory` call in this invocation. Each new `/crew:start` invocation gets a new ULID.
 
+3.5. **Orphan-recovery branch (runs before every `claimNextStory` call, including the first).**
+
+Before invoking `claimNextStory`, call `scanOrphanedInProgress({ targetRepoRoot, sessionUlid })`. The returned `orphans` array is alphabetically sorted by ref. For each orphan in order:
+
+1. Surface the verbatim chat line: `[orphan] <ref> — claimed_by <staleUlid>` (substituting the orphan's `ref` and `staleUlid`).
+2. Surface the verbatim prompt line: `reattach or skip? (reattach replays the persisted transcript; skip leaves the manifest in place)`.
+3. Await operator input. The operator types `reattach` or `skip` exactly. Any other input is rejected with the verbatim chat line `unrecognised choice — type "reattach" or "skip"` and the prompt is re-rendered.
+4. On `skip`: surface the verbatim chat line `skipped <ref> — manifest left in in-progress/ (will resurface on next /crew:start)` and advance to the next orphan in the array.
+5. On `reattach` AND `orphan.hasTranscript === true`:
+   a. Call `reattachOrphan({ targetRepoRoot, ref, currentSessionUlid: sessionUlid })`. Surface every entry of the returned `chatLog` in order.
+   b. Read the persisted transcript file bytes via the built-in `Read` tool: `Read({ file_path: <targetRepoRoot>/.crew/state/sessions/<staleUlid>/dev-transcript.txt })`. The bytes are stored as the local variable `devTranscript`.
+   c. Call `processDevTranscript({ targetRepoRoot, sessionUlid, ref, devTranscript })` — pass the bytes verbatim. The dev subagent is NOT spawned; the transcript is the dev subagent's already-captured output.
+   d. Surface every entry of the returned `chatLog` in order.
+   e. Switch on the `next` field exactly as in step 7 of the inner cycle (`spawn-reviewer` → continue to reviewer spawn at step 8; any `done-blocked-*` → advance to the next orphan or fall through to `claimNextStory`).
+6. On `reattach` AND `orphan.hasTranscript === false`:
+   a. Call `blockOrphanNoTranscript({ targetRepoRoot, ref, staleUlid })`. Surface every entry of the returned `chatLog` in order.
+   b. Advance to the next orphan in the array.
+
+After all orphans in the array have been resolved (each either reattached-and-completed, blocked, or skipped), proceed to step 4 (`claimNextStory`).
+
 4. **Outer loop: claim the next story.** Call `claimNextStory({ targetRepoRoot, sessionUlid })`. Switch on the `next` field:
    - `queue-drained` or `waiting-on-in-progress` → surface every entry of the returned `chatLog` to the operator in order; exit the loop.
    - `spawn-dev` → surface every entry of the returned `chatLog` in order; store `ref`, `title`, `manifestPath`; continue to the inner cycle (step 5).
@@ -44,6 +64,12 @@ After a story is claimed, the inner cycle manages the dev spawn → handoff pars
 
 **Invariant: The SKILL.md prose MUST pass the transcript verbatim — no summarisation, no editing.**
 `devTranscript` (passed to `processDevTranscript`) MUST be the full final-message string returned by the `Task` tool — no extraction, no trimming. The reviewer's chat transcript is NOT passed to `processReviewerTranscript`; the verdict transport is the `reviewer-result.json` file written by `runReviewerSession` (Story 4.6 revision 2). `runReviewerSession` is the reviewer's only valid verdict-path; `processReviewerTranscript` reads the file, not the chat.
+
+**Invariant: Orphan-recovery MUST NOT spawn a dev subagent.**
+On `reattach` with a persisted transcript, the dev subagent's work has already been captured. The orphan branch reads the transcript file and feeds it verbatim into `processDevTranscript` — the next `Task` invocation (if any) is the reviewer spawn at step 8, never a dev spawn.
+
+**Invariant: Orphan-recovery MUST run before every `claimNextStory` call.**
+A new orphan may appear between outer-loop iterations (e.g., a concurrent session died). The scan runs at the top of every iteration — not once per `/crew:start` invocation.
 
 **Invariant: The transcript MUST be persisted to disk before any MCP call.**
 The persistence write in step 4.5 happens between `Task` return (step 4) and `processDevTranscript` (step 5). It is the prose layer's responsibility — there is no MCP tool that can be called here without defeating the durability guarantee (MCP may have died during the Task run).
@@ -175,6 +201,12 @@ The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as th
 - **`completeStory` raising `WrongClaimantError` or `InProgressHandEditError`**: On the `READY FOR MERGE` branch, `processReviewerTranscript` calls `completeStory` internally. If the in-progress manifest has been hand-edited since claim (FR14a) OR the session ULID does not match `claimed_by` (FR19), `completeStory` raises `InProgressHandEditError` or `WrongClaimantError` respectively. These errors propagate verbatim THROUGH `processReviewerTranscript` to the prose layer, which surfaces them and exits — the outer loop does NOT advance to the next `claimNextStory` call. Recovery is operator inspection of the in-progress manifest plus a fresh `/crew:start` invocation.
 
 - **`Write` failure persisting dev transcript** (step 4.5): The built-in `Write` tool threw a filesystem error (disk full, permission denied, EROFS). The inner cycle halts; `processDevTranscript` is NOT called; the in-progress manifest is untouched. Operator recovery: inspect filesystem permissions and free space under `<targetRepoRoot>/.crew/state/sessions/`, then re-run `/crew:start`. Once Story 5.11 ships, the next `/crew:start` will surface this manifest as `[orphan]` and route it through the orphan-recovery branch.
+
+- **`NotAnOrphanError`** (from `reattachOrphan` in step 3.5.5.a): The manifest's `claimed_by` matched the current `sessionUlid` at the moment of the rewrite — a race where the orphan was claimed by another concurrent step between the scan and the rewrite. Surface verbatim and advance to the next orphan (the scan will re-run on the next outer-loop iteration).
+
+- **Operator types an unrecognised choice at the orphan prompt:** Re-render the prompt with the rejection line `unrecognised choice — type "reattach" or "skip"`. Do NOT advance until a valid choice is received. Do NOT auto-default to `skip`.
+
+- **`Read` failure for the transcript file (step 3.5.5.b)**: The file was present at scan time but vanished or became unreadable before the read. Surface the error verbatim, fall through to the no-transcript path (call `blockOrphanNoTranscript`) for the same orphan. Operator inspection captures the disappeared transcript.
 
 - **`AutoMergeGateThresholdInvalidError`** (from `runAutoMergeGate` at step 12.1): The `plugin.agreement_threshold` value in `.crew/config.yaml` (or a caller-supplied `thresholdOverride`) is outside the valid range `[0, 1]`, is `NaN`, or is non-finite. The manifest is already in `done/` (the story completed successfully). Fix the `plugin.agreement_threshold` value in `.crew/config.yaml` and re-run `/crew:start`, or merge the PR manually.
 

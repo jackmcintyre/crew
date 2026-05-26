@@ -34,6 +34,9 @@ import { classifyRiskTier } from "./classify-risk-tier.js";
 import { computeAgreement, AgreementMetricResultSchema } from "./compute-agreement.js";
 import { runAutoMergeGate, AutoMergeGateResultSchema } from "./run-auto-merge-gate.js";
 import { createSmokeScratchRepo } from "./create-smoke-scratch-repo.js";
+import { scanOrphanedInProgress } from "./scan-orphaned-in-progress.js";
+import { reattachOrphan } from "./reattach-orphan.js";
+import { blockOrphanNoTranscript } from "./block-orphan-no-transcript.js";
 
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
@@ -1374,6 +1377,137 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       try {
         const result = await runAutoMergeGate(parsed);
         AutoMergeGateResultSchema.parse(result);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 5.11 — scanOrphanedInProgress: pure read-only scan of in-progress/
+  // for manifests whose claimed_by ULID differs from the current session ULID.
+  // Returns orphans in alphabetical ref order. No write side-effects.
+  server.registerTool({
+    name: "scanOrphanedInProgress",
+    description:
+      "Scan <targetRepoRoot>/.crew/state/in-progress/ for manifests whose claimed_by ULID " +
+      "is defined and does not match sessionUlid. Returns orphans in alphabetical ref order, " +
+      "each with hasTranscript flag indicating whether the Story 5.10 transcript file exists. " +
+      "Pure read-only — no write side-effects. Story 5.11.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        sessionUlid: { type: "string" },
+      },
+      required: ["targetRepoRoot", "sessionUlid"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          sessionUlid: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await scanOrphanedInProgress(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 5.11 — reattachOrphan: atomic claimed_by rewrite for the
+  // transcript-present orphan-recovery path. Rewrites manifest.claimed_by
+  // from stale ULID to currentSessionUlid. Throws NotAnOrphanError on race.
+  server.registerTool({
+    name: "reattachOrphan",
+    description:
+      "Reattach an orphaned in-progress manifest to the current session by rewriting " +
+      "claimed_by from the stale ULID to currentSessionUlid. Used by the transcript-present " +
+      "path of the orphan-recovery branch in /crew:start. " +
+      "Throws NotAnOrphanError when claimed_by already matches currentSessionUlid (race). " +
+      "Throws ManifestNotFoundError when the ref is absent from in-progress/. Story 5.11.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        ref: { type: "string" },
+        currentSessionUlid: { type: "string" },
+      },
+      required: ["targetRepoRoot", "ref", "currentSessionUlid"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          ref: z.string().min(1),
+          currentSessionUlid: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await reattachOrphan(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 5.11 — blockOrphanNoTranscript: atomic move + blocked_by stamp for the
+  // no-transcript orphan-recovery path. Moves manifest from in-progress/ to
+  // blocked/ and stamps blocked_by: orphan-no-transcript.
+  server.registerTool({
+    name: "blockOrphanNoTranscript",
+    description:
+      "Handle an orphaned in-progress manifest with no persisted transcript by moving it " +
+      "from in-progress/ to blocked/ and stamping blocked_by: orphan-no-transcript. " +
+      "Used by the no-transcript path of the orphan-recovery branch in /crew:start. " +
+      "Throws ManifestNotFoundError when the ref is absent from in-progress/. Story 5.11.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        ref: { type: "string" },
+        staleUlid: { type: "string" },
+      },
+      required: ["targetRepoRoot", "ref", "staleUlid"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          ref: z.string().min(1),
+          staleUlid: z.string().min(1),
+        })
+        .parse(args);
+      try {
+        const result = await blockOrphanNoTranscript(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

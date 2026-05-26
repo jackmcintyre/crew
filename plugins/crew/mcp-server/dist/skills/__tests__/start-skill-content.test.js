@@ -81,7 +81,7 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
     it("name field is exactly 'crew:start'", () => {
         expect(frontmatter["name"]).toBe("crew:start");
     });
-    it("AC6(i) / AC3(vii) — allowed_tools contains the required tools (no completeStory; Story 4.6 adds runReviewerSession; Story 4.6b adds postReviewerComments; Story 4.8 adds applyReviewerLabels; Story 5.10 adds Write; Story 4.10b adds runAutoMergeGate)", () => {
+    it("AC6(i) / AC3(vii) — allowed_tools contains the required tools (no completeStory; Story 4.6 adds runReviewerSession; Story 4.6b adds postReviewerComments; Story 4.8 adds applyReviewerLabels; Story 5.10 adds Write; Story 4.10b adds runAutoMergeGate; Story 5.11 adds scanOrphanedInProgress, reattachOrphan, blockOrphanNoTranscript, Read)", () => {
         const allowedTools = new Set(frontmatter["allowed_tools"]);
         const expected = new Set([
             "getStatus",
@@ -96,6 +96,10 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
             "applyReviewerLabels", // Story 4.8: added to allowed_tools
             "Write", // Story 5.10: built-in Write tool for transcript persistence (must precede any MCP call)
             "runAutoMergeGate", // Story 4.10b: auto-merge gate for done-ready-for-merge PRs
+            "scanOrphanedInProgress", // Story 5.11: orphan scan at top of outer loop
+            "reattachOrphan", // Story 5.11: atomic claimed_by rewrite for transcript-present path
+            "blockOrphanNoTranscript", // Story 5.11: atomic move + blocked_by stamp for no-transcript path
+            "Read", // Story 5.11: built-in Read tool for transcript replay
         ]);
         // Set equality: every expected tool is present.
         for (const tool of expected) {
@@ -105,8 +109,8 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
         for (const tool of allowedTools) {
             expect(expected, `Unexpected tool '${tool}' in allowed_tools`).toContain(tool);
         }
-        // Story 4.10b adds runAutoMergeGate as the 12th tool.
-        expect(allowedTools.size).toBe(12);
+        // Story 5.11 adds 4 tools (scanOrphanedInProgress, reattachOrphan, blockOrphanNoTranscript, Read) → 16 total.
+        expect(allowedTools.size).toBe(16);
     });
     it("AC6(ii) — body contains the H1 or H2 heading 'Inner cycle: dev → reviewer → rework'", () => {
         expect(body).toMatch(/^#{1,2} Inner cycle: dev → reviewer → rework/m);

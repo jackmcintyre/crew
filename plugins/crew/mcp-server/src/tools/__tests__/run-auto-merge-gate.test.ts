@@ -692,7 +692,8 @@ describe("AC5(j) — MCP tool registration smoke", () => {
     };
     registerAllTools(fakeServer as unknown as Parameters<typeof registerAllTools>[0]);
     expect(registeredTools).toContain("runAutoMergeGate");
-    expect(registeredTools.length).toBe(32);
+    // Story 5.11 added scanOrphanedInProgress (33), reattachOrphan (34), blockOrphanNoTranscript (35).
+    expect(registeredTools.length).toBe(35);
   });
 });
 
