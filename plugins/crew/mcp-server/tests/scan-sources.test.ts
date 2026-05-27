@@ -22,7 +22,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getPluginRoot } from "../src/lib/plugin-root.js";
 import { parseExecutionManifest } from "../src/schemas/execution-manifest.js";
-import { scanSources } from "../src/tools/scan-sources.js";
+import { renderScanResult, scanSources } from "../src/tools/scan-sources.js";
 import { parse as yamlParse } from "yaml";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -442,5 +442,35 @@ describe("AC4 (Story 3.5) — scan-sources blocked manifest on discipline violat
     const manifest = yamlParse(raw) as Record<string, unknown>;
     expect(manifest["status"]).toBe("to-do");
     expect(manifest["ref"]).toBe("bmad:2.1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story 5.22 — renderScanResult cosmetic guarantees
+//
+// Forward-looking guard: no non-empty line of the rendered output starts with
+// whitespace. A future refactor that introduces continuation indent or
+// per-section padding would trip this assertion and force an explicit
+// re-shape decision instead of quietly drifting.
+// ---------------------------------------------------------------------------
+
+describe("renderScanResult cosmetic guarantees (Story 5.22)", () => {
+  it("rendered output has no leading whitespace on any non-empty line", async () => {
+    // Use the standard 2-story fixture. The resulting render covers all six
+    // counts (created/updated/unchanged/skipped/blocked) plus header + adapter
+    // lines — comfortably above the AC1 floor of 5 non-empty lines.
+    const result = await scanSources({ targetRepoRoot: scratch });
+    const rendered = renderScanResult(result);
+    const lines = rendered.split("\n");
+    const nonEmptyLines = lines.filter((line) => line !== "");
+
+    // Floor per AC1: counts + skippedRefs + blockedRefs sections, typical.
+    expect(nonEmptyLines.length).toBeGreaterThanOrEqual(5);
+
+    for (const line of nonEmptyLines) {
+      expect(/^\s/.test(line), `leading whitespace detected on line: ${JSON.stringify(line)}`).toBe(
+        false,
+      );
+    }
   });
 });
