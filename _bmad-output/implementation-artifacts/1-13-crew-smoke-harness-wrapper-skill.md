@@ -42,7 +42,9 @@ The skill stops before `/crew:start`. The whole point of the smoke is for the op
 
 ## Acceptance Criteria
 
-**AC1 (createSmokeScratchRepo MCP tool, vitest:).** A new MCP tool `createSmokeScratchRepo({ label, parentDir? })` lives at `plugins/crew/mcp-server/src/tools/create-smoke-scratch-repo.ts` and is registered in `register.ts` (bringing the tool count from 31 → 32). The tool:
+**AC1:**
+
+A new MCP tool `createSmokeScratchRepo({ label, parentDir? })` lives at `plugins/crew/mcp-server/src/tools/create-smoke-scratch-repo.ts` and is registered in `register.ts` (bringing the tool count from 31 → 32). The tool:
 
 - mkdtemps a directory under `<parentDir>` whose name starts with `crew-smoke-<label>-` followed by the random suffix Node's `fs.mkdtemp` appends (no ULID — Node's suffix is already collision-free); default `parentDir = os.tmpdir()`. `label` is validated as kebab-case (lowercase letters, digits, hyphens; min length 1).
 - Runs git-init + an initial empty commit via `gitInitWithEmptyCommit(scratchRoot)` from `lib/git.ts` so the canonical-fs-guard static check (`plugins/crew/mcp-server/tests/canonical-fs-guard.test.ts`, from Story 1.5) stays satisfied — no `git` spawns outside `lib/git.ts`.
@@ -52,7 +54,9 @@ The skill stops before `/crew:start`. The whole point of the smoke is for the op
 
 Verifiable via `plugins/crew/mcp-server/tests/create-smoke-scratch-repo.integration.test.ts` exercising real `os.tmpdir()` (no fs stubs). Tests cover: happy path (returns valid `scratchRoot` containing both `.crew/config.yaml` and `.crew/standards.md`); idempotent cleanup (calling twice succeeds); label validation (rejects empty string and non-kebab-case); `parentDir` override; git repo is initialised (HEAD ref resolvable); standards.md contents match the shipped template byte-for-byte.
 
-**AC2 (/crew:smoke SKILL.md, artifact:).** A new skill file at `plugins/crew/skills/smoke/SKILL.md` with YAML frontmatter:
+**AC2:**
+
+A new skill file at `plugins/crew/skills/smoke/SKILL.md` with YAML frontmatter:
 
 ```yaml
 ---
@@ -76,7 +80,9 @@ The body contains five numbered steps in order, each with the listed checkpoint 
 
 The body also contains a `# Failure modes` section documenting (a) scratch-repo creation failure (filesystem error propagated verbatim), (b) `hired_at` / `catalogue_version` missing from persona frontmatter (Story 4.6 regression signal — re-check `instantiatePersona`'s frontmatter writer), (c) planner exited without authoring any source story, (d) `/crew:scan` produced zero claimable manifests (most often a source-story shape defect — see memory `project_native_scan_silent_skip`), (e) operator forgot `--plugin-dir` (every MCP-tool call will fail with `tool not found`).
 
-**AC3 (structural-anchor test, vitest:).** A new test at `plugins/crew/mcp-server/src/skills/__tests__/smoke-skill-content.test.ts` mirrors the shape of `start-skill-content.test.ts` (same `splitFrontmatter` helper, same path-resolution pattern walking `..` segments from `__dirname` to the repo-root SKILL.md). It reads `plugins/crew/skills/smoke/SKILL.md` and asserts:
+**AC3:**
+
+A new test at `plugins/crew/mcp-server/src/skills/__tests__/smoke-skill-content.test.ts` mirrors the shape of `start-skill-content.test.ts` (same `splitFrontmatter` helper, same path-resolution pattern walking `..` segments from `__dirname` to the repo-root SKILL.md). It reads `plugins/crew/skills/smoke/SKILL.md` and asserts:
 
 - (i) Frontmatter `name` equals `crew:smoke`.
 - (ii) Frontmatter `allowed_tools` is exactly `[createSmokeScratchRepo, getTeamSnapshot, readBacklogInventory, listClaimableTodos]` — four tools, no extras.
@@ -96,7 +102,9 @@ The body also contains a `# Failure modes` section documenting (a) scratch-repo 
 - (v) The body contains the literal handoff line `Ready. Run /crew:start in this scratch repo.`.
 - (vi) The body does NOT contain a literal Claude-Code-style invocation of `/crew:start` (i.e. `/crew:start` appears only inside the handoff line, never on its own line as an instruction the LLM would obey). Implementation: count occurrences of `/crew:start` and assert the count equals the number of occurrences inside the handoff line (today: 1).
 
-**AC4 (tool-count rebase, vitest:).** The tool-count assertions in the following six locations are updated from 31 → 32:
+**AC4:**
+
+The tool-count assertions in the following six locations are updated from 31 → 32:
 
 - `plugins/crew/mcp-server/tests/ask-mode-enforcement.test.ts:461`
 - `plugins/crew/mcp-server/tests/ask-skill.test.ts:525`
@@ -107,9 +115,13 @@ The body also contains a `# Failure modes` section documenting (a) scratch-repo 
 
 Where the assertion sits next to an inline `// Story 4.x added …` comment trail (the `inner-cycle.integration.test.ts` one is the canonical example), extend the trail with `; Story 1.13 added createSmokeScratchRepo (32)`. Any missed assertion will fail CI — verifiable by running `pnpm test` from `plugins/crew/mcp-server/` and seeing 0 failures.
 
-**AC5 (log-prefix non-collision, artifact:).** The `[smoke] step N (<name>): ok` and `[smoke] step N (<name>): FAILED — <reason>` prefixes do not collide with the dev/reviewer parser sentinels. Verifiable by `grep -E '\[smoke\]|Handoff to reviewer|Verdict:|READY FOR MERGE|done-blocked' plugins/crew/mcp-server/src/tools/process-dev-transcript.ts plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts plugins/crew/skills/smoke/SKILL.md` returning the `[smoke]` literals only in `SKILL.md` and the sentinel literals only in the parser sources. The `[smoke]` token does not appear in either parser source.
+**AC5:**
 
-**AC6 (no /crew:start auto-invocation, artifact:).** Covered structurally by AC3(vi). Called out separately because this is the load-bearing design choice: the operator is here to observe `/crew:start` themselves. The dev agent MUST NOT add a step 5 instruction like "Now invoke `/crew:start`" — step 5's only output is the handoff line.
+The `[smoke] step N (<name>): ok` and `[smoke] step N (<name>): FAILED — <reason>` prefixes do not collide with the dev/reviewer parser sentinels. Verifiable by `grep -E '\[smoke\]|Handoff to reviewer|Verdict:|READY FOR MERGE|done-blocked' plugins/crew/mcp-server/src/tools/process-dev-transcript.ts plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts plugins/crew/skills/smoke/SKILL.md` returning the `[smoke]` literals only in `SKILL.md` and the sentinel literals only in the parser sources. The `[smoke]` token does not appear in either parser source.
+
+**AC6:**
+
+Covered structurally by AC3(vi). Called out separately because this is the load-bearing design choice: the operator is here to observe `/crew:start` themselves. The dev agent MUST NOT add a step 5 instruction like "Now invoke `/crew:start`" — step 5's only output is the handoff line.
 
 ## Tasks / Subtasks
 

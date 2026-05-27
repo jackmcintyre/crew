@@ -83,7 +83,9 @@ In the meantime, the **worst-case false positive** is one operator prompt during
 
 > AC1 is `user-surface` per `plugins/crew/docs/user-surface-acs.md` rubric (iv) — it names a Claude Code chat-line surface and a prompt the operator types into. AC2–AC4 describe internal state transitions verified by vitest. AC5 is the integration suite.
 
-**AC1 (user-surface):** <!-- rubric (iv): any Claude Code UI element the user is expected to observe (chat-surface line + operator prompt) -->
+**AC1 (user-surface):**
+
+<!-- rubric (iv): any Claude Code UI element the user is expected to observe (chat-surface line + operator prompt) -->
 **Given** an in-progress manifest at `<targetRepoRoot>/.crew/state/in-progress/<ref>.yaml` whose `claimed_by` session ULID is not the current session's ULID,
 **When** the outer loop of `/crew:start` begins a new claim cycle (i.e., before invoking `claimNextStory`),
 **Then** the loop surfaces exactly one chat line of the verbatim shape:

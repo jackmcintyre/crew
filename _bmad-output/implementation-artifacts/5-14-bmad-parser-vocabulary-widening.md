@@ -33,10 +33,14 @@ This is a mechanical enum widening at three locations (the `BmadStatus` type, tw
 
 ## Acceptance Criteria
 
-**AC1:** `BmadStatus` (in `plugins/crew/mcp-server/src/adapters/bmad/map-bmad-status.ts`) and the mirror `isKnownBmadStatus` (in `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts:165-174`) both accept `draft`, `approved`, `review` in addition to today's six values. `mapBmadStatusToExecution` maps `draft → "to-do"`, `approved → "to-do"`, `review → "in-progress"`. The lifecycle table in `plugins/crew/docs/spikes/bmad-format.md` is updated to match. Unit tests cover the new values in both directions (parser accepts; `mapBmadStatusToExecution` returns the expected execution state). `reconcileStatus` is unaffected (its default branch already routes via the mapping it just received).
+**AC1:**
+
+`BmadStatus` (in `plugins/crew/mcp-server/src/adapters/bmad/map-bmad-status.ts`) and the mirror `isKnownBmadStatus` (in `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts:165-174`) both accept `draft`, `approved`, `review` in addition to today's six values. `mapBmadStatusToExecution` maps `draft → "to-do"`, `approved → "to-do"`, `review → "in-progress"`. The lifecycle table in `plugins/crew/docs/spikes/bmad-format.md` is updated to match. Unit tests cover the new values in both directions (parser accepts; `mapBmadStatusToExecution` returns the expected execution state). `reconcileStatus` is unaffected (its default branch already routes via the mapping it just received).
 `artifact: plugins/crew/mcp-server/src/adapters/bmad/map-bmad-status.ts`
 
-**AC2 (integration):** vitest runs `parseBmadStory` over every `.md` file in `_bmad-output/implementation-artifacts/` (using the real repo path as the fixture root via a `path.resolve(__dirname, ...)` walk), asserts zero `MalformedBmadStoryError` throws, and asserts every result's `raw_frontmatter.status` round-trips the on-disk literal. **Precondition baked into the same commit:** `4-3c-call-completestory-after-ready-for-merge.md`'s `Status: revised — re-implement per new architectural direction (tool-layer seam)` is normalised to `Status: done` (the spec is marked `done` in `sprint-status.yaml`). The free-text grammar is explicitly NOT accepted — `revised — ...` remains a `MalformedBmadStoryError` by design.
+**AC2 (integration):**
+
+vitest runs `parseBmadStory` over every `.md` file in `_bmad-output/implementation-artifacts/` (using the real repo path as the fixture root via a `path.resolve(__dirname, ...)` walk), asserts zero `MalformedBmadStoryError` throws, and asserts every result's `raw_frontmatter.status` round-trips the on-disk literal. **Precondition baked into the same commit:** `4-3c-call-completestory-after-ready-for-merge.md`'s `Status: revised — re-implement per new architectural direction (tool-layer seam)` is normalised to `Status: done` (the spec is marked `done` in `sprint-status.yaml`). The free-text grammar is explicitly NOT accepted — `revised — ...` remains a `MalformedBmadStoryError` by design.
 `vitest: plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`
 
 ---
