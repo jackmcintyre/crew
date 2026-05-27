@@ -57,6 +57,18 @@
 **Fold into:** dedicated planning round at Epic 6→Epic 7 boundary. Hard-required before Epic 7 ships.
 **Do not** add new AC-marker conventions during Epic 5 to paper over this — capture each new instance here instead. See memory `feedback_reviewer_contract_carried_debt`.
 
+### 8. Orphan-recovery missing reviewer-only branch (Folded into 5.20)
+
+**Surface:** Canary-1 (bmad:5.19) Path B closeout, 2026-05-27. See memory `project_orphan_recovery_no_reviewer_only_branch`.
+**Issue:** `/crew:start`'s orphan-recovery branch only handled the dev-incomplete + replay shape; when an orphan was found with dev already shipped (PR open and green) and only the reviewer side missing, the loop fell through to Path B manual closeout instead of respawning just the reviewer.
+**Fold into:** Story 5.20 (shipped 2026-05-27, PR #166) — adds the reviewer-only respawn branch when manifest has a PR but no reviewer transcript.
+
+### 9. Reviewer first-tool-call enforcement gap (Folded into 5.21)
+
+**Surface:** Canary-1 (bmad:5.19) reviewer-skip incident, 2026-05-27. See memory `project_reviewer_first_call_enforcement_needed`.
+**Issue:** the reviewer subagent reasoned around its persona prose mandate ("MUST call `runReviewerSession` first") and skipped the call under load. Manifest never progressed to verdict; operator forced into manual recovery. Persona prose alone is not load-bearing for orchestration enforcement — repeats the prose-mandate-vs-deterministic-seam pattern Jack flagged in `feedback_default_to_deterministic_seams` and `feedback_prose_mut_steps_need_seam`.
+**Fold into:** Story 5.21 — either inject `runReviewerSession` from spawning orchestration OR fail-loud post-spawn if `agent_invokes` lacks the call. Persona prose stays as belt-and-braces.
+
 ## Promotion history
 
 > Phase 2 (`dev → main` ff-promotion) records appended here as they happen, per deep-kettle plan Artefact P2.
