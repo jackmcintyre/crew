@@ -6,7 +6,8 @@
  *
  * Returns orphans in stable alphabetical ref order (sort by filename = ref + .yaml).
  * For each orphan, computes the transcript path and stats it to determine
- * `hasTranscript`.
+ * `hasTranscript`, and queries `gh pr list --head <branch>` to determine
+ * `hasOpenPR` (Story 5.20 AC1).
  *
  * Manifests whose `claimed_by` is absent (malformed) are silently skipped — they
  * are a different defect class (out of scope for this story, per Behavioural contract).
@@ -14,13 +15,15 @@
  * No write side-effects. Propagates `MalformedExecutionManifestError` verbatim.
  *
  * Architecture §MCP Tool Naming — camelCase verb-noun: `scanOrphanedInProgress`.
- * Story 5.11 Task 1.1–1.5.
+ * Story 5.11 Task 1.1–1.5. Story 5.20 AC1 adds `hasOpenPR`.
  */
 
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
+import { execa as defaultExeca } from "execa";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
+import { buildBranchSlug } from "../lib/pr-body.js";
 
 export interface OrphanedManifest {
   /** Story ref, e.g. `"native:01HZ..."` or `"bmad:1.1"`. */
@@ -33,6 +36,13 @@ export interface OrphanedManifest {
   transcriptPath: string;
   /** Whether the transcript file exists and is readable. */
   hasTranscript: boolean;
+  /**
+   * Whether at least one open PR exists whose head branch matches the
+   * branch name derived from this manifest's ref + title via `buildBranchSlug`.
+   * Defaults to `false` on any `gh` error (network, auth, etc.) — safe
+   * fallback to the existing `blockOrphanNoTranscript` behaviour. (Story 5.20 AC1)
+   */
+  hasOpenPR: boolean;
 }
 
 export interface ScanOrphanedInProgressResult {
@@ -42,6 +52,8 @@ export interface ScanOrphanedInProgressResult {
 export interface ScanOrphanedInProgressOptions {
   targetRepoRoot: string;
   sessionUlid: string;
+  /** Test seam — production callers omit this. */
+  execaImpl?: typeof defaultExeca;
 }
 
 /**
@@ -50,12 +62,17 @@ export interface ScanOrphanedInProgressOptions {
  * An orphan is a manifest whose `claimed_by` field is defined and does not match
  * the current `sessionUlid`. Results are sorted alphabetically by ref.
  *
+ * Each orphan carries `hasOpenPR: boolean` — derived by running
+ * `gh pr list --head <branch> --state open --json number` where `<branch>` is
+ * `buildBranchSlug({ ref, title })`. On any `gh` error, defaults to `false`.
+ *
  * @throws {MalformedExecutionManifestError} When any manifest fails schema validation.
  */
 export async function scanOrphanedInProgress(
   opts: ScanOrphanedInProgressOptions,
 ): Promise<ScanOrphanedInProgressResult> {
   const { targetRepoRoot, sessionUlid } = opts;
+  const execaImpl = opts.execaImpl ?? defaultExeca;
   const inProgressDir = path.join(targetRepoRoot, ".crew", "state", "in-progress");
   const sessionsDir = path.join(targetRepoRoot, ".crew", "state", "sessions");
 
@@ -121,12 +138,37 @@ export async function scanOrphanedInProgress(
       // File absent — hasTranscript stays false.
     }
 
+    // Derive branch name using the canonical convention from buildBranchSlug
+    // (same function /ship-story and /crew:start use for dev branches via pr-body.ts).
+    // manifest.title is always present on valid in-progress manifests.
+    let hasOpenPR = false;
+    try {
+      const branch = buildBranchSlug({ ref: manifest.ref, title: manifest.title });
+      const result = await execaImpl("gh", [
+        "pr",
+        "list",
+        "--head",
+        branch,
+        "--state",
+        "open",
+        "--json",
+        "number",
+      ]);
+      const parsed = JSON.parse(result.stdout || "[]") as unknown[];
+      hasOpenPR = parsed.length > 0;
+    } catch {
+      // Network, auth, or parse error — default to false (safe fallback to
+      // blockOrphanNoTranscript behaviour). Do NOT throw.
+      hasOpenPR = false;
+    }
+
     orphans.push({
       ref: manifest.ref,
       staleUlid,
       manifestPath: absPath,
       transcriptPath,
       hasTranscript,
+      hasOpenPR,
     });
   }
 
