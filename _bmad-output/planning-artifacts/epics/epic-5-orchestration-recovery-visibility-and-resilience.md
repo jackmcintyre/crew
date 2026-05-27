@@ -359,3 +359,23 @@ So that one bad spec doesn't block scanning the other 59.
 **AC2 (integration):** vitest seeds a fixture with 3 valid manifests + 1 deliberately-malformed-yaml manifest under `to-do/`, runs `scanSources`, asserts (a) the 3 valid manifests scan clean, (b) the bad one appears in `result.skippedRefs` with reason `"unreadable-manifest"` and a non-empty `detail` field, (c) `scanSources` returns without throwing at the boundary (the per-file error is contained). `vitest: plugins/crew/mcp-server/src/tools/__tests__/scan-sources-readfile-resilience.test.ts`
 
 ---
+
+## Story 5.17: BMad-parser AC-heading regex widening (descriptive `**AC<n> — <title>:**` shape)
+
+> Added 2026-05-27 as Phase 2 substrate-fix-loop iteration #1 — `/crew:scan` halted on `1-1-scaffold-the-plugin-skeleton.md` AC heading shape, the second parser brittleness to surface in 4 hours (after 5.14 Status vocab).
+> Source: `parse-bmad-story.ts:217`'s `headingRe` regex rejects `**AC1 — Install & build pass cleanly:**` (descriptive title between digit and colon). 17 of 60 specs in `_bmad-output/implementation-artifacts/` use the descriptive shape, including the just-shipped 5.14 spec — this is a live BMad authoring pattern, not legacy debt.
+> Substrate; 2 ACs.
+
+As a plugin operator,
+I want `/crew:scan` to recognise BMad AC headings in the descriptive shape (`**AC1 — <description>:**`) in addition to today's strict shape (`**AC1:**` or `**AC1 (tag):**`),
+So that the existing 60-spec corpus in `_bmad-output/implementation-artifacts/` scans clean and the Phase 2 canary can resume.
+
+**Background:** `parse-bmad-story.ts:217`'s `headingRe` is `/^\*\*AC(\d+)(?:\s*\(([^)]+)\))?:\*\*\s*$/` — strict end-of-line after the colon, with an optional parenthetical tag before the colon. The descriptive shape `**AC1 — Install & build pass cleanly:**` (em-dash + title between digit and colon) fails this regex; the parser then throws `MalformedBmadStoryError` from `parse-bmad-story.ts:232-236` ("no recognisable **AC<n>:** headings"). The 17 affected files (Epic 1 cluster, 2-4, 2-5, 4-2, 5-10, 5-12, 5-14) cover ~28% of the corpus. The deeper "structural markdown AST parser" direction is still Story 5.18's territory; this story is a regex widening per the established 5.14 playbook.
+
+**Acceptance Criteria:**
+
+**AC1:** The `headingRe` regex in `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts:217` is widened to also accept an optional em-dash-separated description between the digit and the colon: `/^\*\*AC(\d+)(?:\s+—\s+[^()]*?)?(?:\s*\(([^)]+)\))?:\*\*\s*$/` (or equivalent — the dev may refine the exact pattern as long as the corpus walk in AC2 passes). The description token is discarded; it's documentation. The parenthetical tag (when present) continues to behave as today (`(integration)` and `(user-surface)` map to `kind: "integration"`, anything else to `kind: "unit"`). Unit tests cover: (a) strict shape `**AC1:**` (regression — must still parse); (b) tagged shape `**AC2 (integration):**` (regression); (c) descriptive shape `**AC3 — Some title:**`; (d) descriptive + tagged shape `**AC4 — Some title (integration):**`. `artifact: plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts`
+
+**AC2 (integration):** Extend (or supersede) the corpus-walk test at `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (introduced by Story 5.14) so it asserts the full `parseBmadStory` pipeline — not just `Status:` round-trip — completes for every `.md` file in `_bmad-output/implementation-artifacts/`. After widening, the 17 currently-malformed files (`1-1, 1-2, 1-2b, 1-3, 1-4, 1-5, 1-6, 1-7, 1-7a, 1-10, 1-13, 2-4, 2-5, 4-2, 5-10, 5-12, 5-14`) MUST parse without throwing AND yield `acceptance_criteria` arrays with at least one AC each. Note: this AC also closes a likely gap in the 5.14 test — if the 5.14 test had asserted full pipeline parsing, the 17 files would have failed it pre-merge. Verify and extend. `vitest: plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`
+
+---
