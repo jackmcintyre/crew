@@ -14,10 +14,10 @@ import { z } from "zod";
  * mismatches at classifier time.
  */
 export declare const ChangeTypeSchema: z.ZodEnum<{
-    revert: "revert";
-    migration: "migration";
-    schema: "schema";
     "dep-bump": "dep-bump";
+    migration: "migration";
+    revert: "revert";
+    schema: "schema";
 }>;
 export declare const DiffSizeThresholdsSchema: z.ZodObject<{
     min_lines_changed: z.ZodOptional<z.ZodNumber>;
@@ -27,10 +27,10 @@ export declare const RuleSchema: z.ZodObject<{
     id: z.ZodString;
     path_patterns: z.ZodOptional<z.ZodArray<z.ZodString>>;
     change_types: z.ZodOptional<z.ZodArray<z.ZodEnum<{
-        revert: "revert";
-        migration: "migration";
-        schema: "schema";
         "dep-bump": "dep-bump";
+        migration: "migration";
+        revert: "revert";
+        schema: "schema";
     }>>>;
     diff_size_thresholds: z.ZodOptional<z.ZodObject<{
         min_lines_changed: z.ZodOptional<z.ZodNumber>;
@@ -45,10 +45,10 @@ export declare const RiskTieringSpecSchema: z.ZodObject<{
             id: z.ZodString;
             path_patterns: z.ZodOptional<z.ZodArray<z.ZodString>>;
             change_types: z.ZodOptional<z.ZodArray<z.ZodEnum<{
-                revert: "revert";
-                migration: "migration";
-                schema: "schema";
                 "dep-bump": "dep-bump";
+                migration: "migration";
+                revert: "revert";
+                schema: "schema";
             }>>>;
             diff_size_thresholds: z.ZodOptional<z.ZodObject<{
                 min_lines_changed: z.ZodOptional<z.ZodNumber>;
@@ -59,10 +59,10 @@ export declare const RiskTieringSpecSchema: z.ZodObject<{
             id: z.ZodString;
             path_patterns: z.ZodOptional<z.ZodArray<z.ZodString>>;
             change_types: z.ZodOptional<z.ZodArray<z.ZodEnum<{
-                revert: "revert";
-                migration: "migration";
-                schema: "schema";
                 "dep-bump": "dep-bump";
+                migration: "migration";
+                revert: "revert";
+                schema: "schema";
             }>>>;
             diff_size_thresholds: z.ZodOptional<z.ZodObject<{
                 min_lines_changed: z.ZodOptional<z.ZodNumber>;
@@ -73,10 +73,10 @@ export declare const RiskTieringSpecSchema: z.ZodObject<{
             id: z.ZodString;
             path_patterns: z.ZodOptional<z.ZodArray<z.ZodString>>;
             change_types: z.ZodOptional<z.ZodArray<z.ZodEnum<{
-                revert: "revert";
-                migration: "migration";
-                schema: "schema";
                 "dep-bump": "dep-bump";
+                migration: "migration";
+                revert: "revert";
+                schema: "schema";
             }>>>;
             diff_size_thresholds: z.ZodOptional<z.ZodObject<{
                 min_lines_changed: z.ZodOptional<z.ZodNumber>;
