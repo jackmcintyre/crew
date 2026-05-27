@@ -52,6 +52,7 @@ import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processDevTranscript } from "../process-dev-transcript.js";
 import { processReviewerTranscript } from "../process-reviewer-transcript.js";
+import { ReviewerFirstCallSkippedError } from "../../errors.js";
 import { claimNextStory } from "../claim-next-story.js";
 import { scanSources } from "../scan-sources.js";
 import { registerAllTools } from "../register.js";
@@ -506,15 +507,18 @@ describe("AC4(d): two-iteration NEEDS CHANGES × 2 → READY FOR MERGE (revision
 // AC4(e): Reviewer grammar drift
 // ---------------------------------------------------------------------------
 
-describe("AC4(e): reviewer skips runReviewerSession → done-blocked-no-session-result (revision 2)", () => {
-  it("stamps blocked_by: 'reviewer-no-session-result' when reviewer-result.json is absent", async () => {
+describe("AC4(e): reviewer skips runReviewerSession → ReviewerFirstCallSkippedError (Story 5.21 seam)", () => {
+  it("throws ReviewerFirstCallSkippedError, stamps blocked_by: 'reviewer-no-session-result' when reviewer-result.json is absent", async () => {
     const devResult = await processDevTranscript(makeDevOpts(HANDOFF_PHRASE));
     expect(devResult.next).toBe("spawn-reviewer");
     if (devResult.next !== "spawn-reviewer") return;
 
-    // Revision 2: Do NOT seed reviewer-result.json — simulates reviewer skipping runReviewerSession.
-    const reviewerResult = await processReviewerTranscript(makeReviewerOpts());
-    expect(reviewerResult.next).toBe("done-blocked-no-session-result");
+    // Story 5.21: Do NOT seed reviewer-result.json — simulates reviewer skipping runReviewerSession.
+    // processReviewerTranscript now throws ReviewerFirstCallSkippedError (typed error)
+    // instead of returning the old soft done-blocked-no-session-result variant.
+    await expect(processReviewerTranscript(makeReviewerOpts())).rejects.toThrow(
+      ReviewerFirstCallSkippedError,
+    );
 
     const onDisk = await readOnDiskManifest();
     expect(onDisk.blocked_by).toBe("reviewer-no-session-result");
@@ -921,10 +925,12 @@ describe("AC4 (4.3c): blocked branches do NOT invoke completeStory", () => {
   });
 
   /**
-   * AC4(h): Reviewer skips runReviewerSession (revision 2) — manifest stays
+   * AC4(h): Reviewer skips runReviewerSession (Story 5.21 seam) — manifest stays
    * in-progress/ with blocked_by: "reviewer-no-session-result", done/ is empty.
+   * processReviewerTranscript now throws ReviewerFirstCallSkippedError (typed error)
+   * instead of returning the old soft done-blocked-no-session-result variant.
    */
-  it("AC4(h): reviewer-result.json absent → blocked_by: 'reviewer-no-session-result', no completed field, done/ empty", async () => {
+  it("AC4(h): reviewer-result.json absent → ReviewerFirstCallSkippedError thrown, blocked_by: 'reviewer-no-session-result', done/ empty (Story 5.21)", async () => {
     const sessionUlid = "01HZSESSION4_3CGRAMMAR_001";
     const { root, refA } = await buildTwoStoryWorkspace(blockedRoot);
 
@@ -944,17 +950,16 @@ describe("AC4 (4.3c): blocked branches do NOT invoke completeStory", () => {
     });
     expect(devResult.next).toBe("spawn-reviewer");
 
-    // Revision 2: Do NOT seed reviewer-result.json — simulates reviewer skipping runReviewerSession.
-    const reviewerResult = await processReviewerTranscript({
-      targetRepoRoot: root,
-      sessionUlid,
-      ref: refA,
-      manifestPath: path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
-    });
-    expect(reviewerResult.next).toBe("done-blocked-no-session-result");
-
-    // AC4(h): no-session-result branch must NOT have a completed field
-    expect("completed" in reviewerResult).toBe(false);
+    // Story 5.21: Do NOT seed reviewer-result.json — simulates reviewer skipping runReviewerSession.
+    // processReviewerTranscript throws ReviewerFirstCallSkippedError (typed DomainError).
+    await expect(
+      processReviewerTranscript({
+        targetRepoRoot: root,
+        sessionUlid,
+        ref: refA,
+        manifestPath: path.join(root, ".crew", "state", "in-progress", `${refA}.yaml`),
+      }),
+    ).rejects.toThrow(ReviewerFirstCallSkippedError);
 
     // Manifest stays in in-progress/ with blocked_by: "reviewer-no-session-result"
     const inProgressRaw = await fs.readFile(

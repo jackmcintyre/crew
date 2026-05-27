@@ -787,9 +787,10 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       "Read the persisted reviewer-result.json (written by runReviewerSession) and route on its recommendedVerdict. " +
       "Returns { next: 'done-ready-for-merge', completed: true, chatLog } on READY FOR MERGE (calls completeStory internally), " +
       "{ next: 'done-blocked-reviewer-needs-changes', chatLog } on NEEDS CHANGES (stamps blocked_by), " +
-      "{ next: 'done-blocked-reviewer-blocked', chatLog } on BLOCKED (stamps blocked_by), " +
-      "{ next: 'done-blocked-no-session-result', chatLog } when reviewer-result.json is absent. " +
-      "Story 4.3b / Story 4.6 revision 2.",
+      "{ next: 'done-blocked-reviewer-blocked', chatLog } on BLOCKED (stamps blocked_by). " +
+      "Throws ReviewerFirstCallSkippedError (stamps blocked_by: reviewer-no-session-result) when reviewer-result.json is absent — " +
+      "the reviewer subagent skipped the mandatory runReviewerSession first call (Story 5.21 seam). " +
+      "Story 4.3b / Story 4.6 revision 2 / Story 5.21.",
     inputSchema: {
       type: "object",
       properties: {

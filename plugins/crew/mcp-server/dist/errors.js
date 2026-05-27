@@ -1080,6 +1080,40 @@ export class AutoMergeGateThresholdInvalidError extends DomainError {
     }
 }
 /**
+ * `processReviewerTranscript` found `reviewer-result.json` absent for the
+ * session — the reviewer subagent completed without ever calling
+ * `runReviewerSession`. This is a structural enforcement error (Story 5.21):
+ * the reviewer cycle MUST NOT progress to a verdict when `runReviewerSession`
+ * was never invoked.
+ *
+ * The in-progress manifest is stamped with `blocked_by: "reviewer-no-session-result"`
+ * before this error is thrown. The inner cycle must surface the error to the
+ * operator and halt — it must NOT loop into the outer claim cycle.
+ *
+ * Deterministic seam (Story 5.21): this typed error replaces the previous
+ * soft `done-blocked-no-session-result` return variant. The error class name
+ * makes the missing-call mandatory failure undeniable and searchable in
+ * call-sites and logs.
+ *
+ * Story 5.21 — reviewer first-tool-call deterministic seam.
+ * Seam implementation: `processReviewerTranscript` in
+ * `plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts`.
+ */
+export class ReviewerFirstCallSkippedError extends DomainError {
+    sessionUlid;
+    ref;
+    constructor(opts) {
+        super(`reviewer-result.json absent for session ${opts.sessionUlid} (story ${opts.ref}). ` +
+            `The reviewer subagent completed without invoking runReviewerSession — ` +
+            `the mandatory first-call seam was skipped. ` +
+            `The in-progress manifest has been stamped blocked_by: reviewer-no-session-result. ` +
+            `Operator must inspect the reviewer transcript before re-running /crew:start. ` +
+            `(Story 5.21 — reviewer-first-call-seam)`);
+        this.sessionUlid = opts.sessionUlid;
+        this.ref = opts.ref;
+    }
+}
+/**
  * `reattachOrphan` was called on a manifest whose `claimed_by` already matches
  * the current session ULID. This is a race condition where the orphan was
  * claimed by another concurrent step between the scan and the rewrite attempt.

@@ -26,6 +26,13 @@ locked_phrases:
 
 Reviews PRs against the source story's AC and `docs/standards.md`, records a verdict (READY FOR MERGE / NEEDS CHANGES / BLOCKED), and never mutates the PR itself.
 
+<!-- Story 5.21 (reviewer-first-call-seam): The "FIRST action" mandate below is
+     now belt-and-braces documentation only. The structural enforcement lives in
+     `processReviewerTranscript` (plugins/crew/mcp-server/src/tools/process-reviewer-transcript.ts)
+     which throws `ReviewerFirstCallSkippedError` when `reviewer-result.json` is
+     absent after the reviewer spawn — making a skipped first-call an undeniable
+     typed error rather than a prose mandate the LLM can reason around. -->
+
 ## Mandate
 
 - Invoke `runReviewerSession` as your FIRST action (see Prompt for details).
