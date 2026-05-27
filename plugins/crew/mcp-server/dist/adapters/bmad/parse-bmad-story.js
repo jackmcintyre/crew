@@ -196,9 +196,11 @@ function extractNarrativeFromStorySection(section) {
     return out.join("\n").trim();
 }
 function parseAcceptanceCriteria(section, absPath) {
-    // AC headings look like `**AC1:**` or `**AC2 (user-surface):**`.
+    // AC headings look like `**AC1:**`, `**AC2 (user-surface):**`, or
+    // `**AC3 — descriptive title:**` (the descriptive token between em-dashes is
+    // documentation only and is discarded by this parser).
     // We split on lines that match the heading shape.
-    const headingRe = /^\*\*AC(\d+)(?:\s*\(([^)]+)\))?:\*\*\s*$/;
+    const headingRe = /^\*\*AC(\d+)(?:\s+—\s+[^()]*?)?(?:\s*\(([^)]+)\))?:\*\*\s*$/;
     const acs = [];
     let current = null;
     for (const raw of section.bodyLines) {

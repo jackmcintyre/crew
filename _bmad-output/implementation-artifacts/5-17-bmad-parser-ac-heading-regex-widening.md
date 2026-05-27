@@ -2,7 +2,7 @@
 
 story_shape: substrate
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -199,3 +199,38 @@ Sequenced after Story 5.14 (which introduced the corpus-walk test this story ext
 - Any change to the `bmad-create-story` skill output template (the upstream skill already emits this shape).
 - Any change to `/crew:scan` skill prose or surface (substrate-only).
 - Any change to `sprint-status.yaml` (state file — the orchestrator owns transitions).
+
+---
+
+## Dev Agent Record
+
+### Completion Notes
+
+AC1 — Widened `headingRe` in `parseAcceptanceCriteria` from `/^\*\*AC(\d+)(?:\s*\(([^)]+)\))?:\*\*\s*$/` to `/^\*\*AC(\d+)(?:\s+—\s+[^()]*?)?(?:\s*\(([^)]+)\))?:\*\*\s*$/`. New non-capturing group `(?:\s+—\s+[^()]*?)?` allows an optional em-dash (U+2014) separated descriptive title between the AC number and the colon. The title is discarded; group 1 (AC number) and group 2 (parenthetical tag) are unchanged. Updated the adjacent comment to document the descriptive shape.
+
+AC1 unit tests — Created `parse-bmad-story-ac-headings.test.ts` with 8 cases: (a) strict `**AC1:**` → kind:unit, (b) tagged `**AC2 (integration):**` → kind:integration, (c) `(user-surface)` → kind:integration, (d) descriptive `**AC1 — Some title:**` → kind:unit, (e) descriptive+tagged `**AC1 — Some title (integration):**` → kind:integration, (f) real-world `**AC1 — Install & build pass cleanly:**` with `&` punctuation → kind:unit, (g) negative: double-hyphen `**AC1 -- title:**` throws MalformedBmadStoryError, (h) multi-AC all four shapes in one section.
+
+AC2 corpus gate — Extended `parse-bmad-story-corpus.integration.test.ts` with a fourth `describe` block. The new gate walks all 49 parseable corpus files, asserts em-dash-shape files parse without throwing and yield non-empty `acceptance_criteria`. Three files (`1-13`, `5-14`, `5-17`) use non-em-dash AC heading shapes (inline-prose and period-terminated label formats) outside this story's scope — these are documented in `KNOWN_NON_EM_DASH_EXCEPTIONS` and logged as `console.warn` for Story 5.18 to address. The exception set includes a stale-entry guard. Removed the old `otherErrors` warn-only branch from the Status-vocabulary gate (it became dead code now that the full-pipeline gate is explicit).
+
+All 1467 tests pass. Build clean. `dist/` committed.
+
+### Debug Log
+
+- Discovered 3 files (`1-13`, `5-14`, `5-17`) in the corpus use non-em-dash formats: `1-13` uses `**AC1 (label).**` (period-terminated, label contains comma+colon); `5-14` and `5-17` use `**AC1:** prose-on-same-line` (heading inline with content). These are outside this story's scope and require Story 5.18 (structural AST parser) to fix. Added `KNOWN_NON_EM_DASH_EXCEPTIONS` set with stale-entry guard to make the gate honest.
+
+---
+
+## File List
+
+- `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts` (modified — regex widening + comment update)
+- `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-ac-headings.test.ts` (new — AC1 unit tests)
+- `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (modified — AC2 full-pipeline gate)
+- `plugins/crew/docs/spikes/bmad-format.md` (modified — AC-heading shape docs update)
+- `plugins/crew/mcp-server/dist/` (rebuilt — all changed src files compiled)
+- `_bmad-output/implementation-artifacts/5-17-bmad-parser-ac-heading-regex-widening.md` (this file — Status updated)
+
+---
+
+## Change Log
+
+- 2026-05-27: feat(5.17): widen BMad AC-heading regex for descriptive em-dash shape; add unit tests and corpus integration gate
