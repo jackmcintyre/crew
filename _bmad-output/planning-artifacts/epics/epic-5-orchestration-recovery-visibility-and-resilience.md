@@ -322,3 +322,22 @@ So that planner-author drift introduced after the first scan is caught with the 
 **AC2 (integration):** vitest covers the new branch end-to-end: seed a `to-do/` manifest whose `depends_on` matches the original spec; edit the spec on disk to introduce a prose dep the manifest omits (changing `source_hash`); run `scanSources`; assert (a) the to-do manifest is NOT overwritten — original hash and depends_on preserved, (b) a `blocked/` manifest is written with `blocked_by: deps-drift` and the typed `depsDriftRefs` entry surfaces, (c) a complementary case where the spec is edited without introducing drift still updates the to-do manifest's hash normally (idempotency control). `vitest: plugins/crew/mcp-server/src/tools/__tests__/scan-sources-drift-on-refresh.test.ts`
 
 ---
+
+## Story 5.14: BMad-parser vocabulary widening (`draft`, `approved`, `review`)
+
+> Added 2026-05-27 after Phase 0 of the `cosmic-forging-spark` plan surfaced the actual root cause: scan-failure on `Status: review` (20 of 60 specs). Diagnosis in `_bmad-output/postmortems/2026-05-27-parser-brittleness-diagnosis.md` (local-only). Supersedes the `planner-template-clamp` scope proposed in the reframe doc — the planner template is the wrong file.
+> Substrate; 2 ACs.
+
+As a plugin operator,
+I want `/crew:scan` to recognise the BMad lifecycle states `draft`, `approved`, and `review` instead of throwing `MalformedBmadStoryError`,
+So that the existing 60-spec corpus in `_bmad-output/implementation-artifacts/` scans clean and Phase 2 of the dogfood plan can start.
+
+**Background:** `parse-bmad-story.ts`'s `isKnownBmadStatus` (lines 165-174) and `map-bmad-status.ts`'s `BmadStatus` type accept six values (`backlog | ready-for-dev | in-progress | done | optional | contexted`). The BMad-side lifecycle that the installed `bmad-create-story` + ship-story flow advances through emits additional states — most notably `review`, which appears on 20 of 60 spec files in this repo. The first alphabetical scan target hits one of those and the whole scan dies. The fix is mechanical: widen the enum + add execution-state mappings + tests. The deeper "`sprint-status.yaml` is canonically authoritative for execution state" question is structural-parser-shaped and stays in Story 5.18.
+
+**Acceptance Criteria:**
+
+**AC1:** `BmadStatus` (in `plugins/crew/mcp-server/src/adapters/bmad/map-bmad-status.ts`) and the mirror `isKnownBmadStatus` (in `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts:165-174`) both accept `draft`, `approved`, `review` in addition to today's six values. `mapBmadStatusToExecution` maps `draft → "to-do"`, `approved → "to-do"`, `review → "in-progress"`. The lifecycle table in `plugins/crew/docs/spikes/bmad-format.md` is updated to match. Unit tests cover the new values in both directions (parser accepts; `mapBmadStatusToExecution` returns the expected execution state). `reconcileStatus` is unaffected (its default branch already routes via the mapping it just received). `artifact: plugins/crew/mcp-server/src/adapters/bmad/map-bmad-status.ts`
+
+**AC2 (integration):** vitest runs `parseBmadStory` over every `.md` file in `_bmad-output/implementation-artifacts/` (using the real repo path as the fixture root via a `path.resolve(__dirname, ...)` walk), asserts zero `MalformedBmadStoryError` throws, and asserts every result's `raw_frontmatter.status` round-trips the on-disk literal. **Precondition baked into the same commit:** `4-3c-call-completestory-after-ready-for-merge.md`'s `Status: revised — re-implement per new architectural direction (tool-layer seam)` is normalised to `Status: done` (the spec is marked `done` in `sprint-status.yaml`). The free-text grammar is explicitly NOT accepted — `revised — ...` remains a `MalformedBmadStoryError` by design. `vitest: plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`
+
+---
