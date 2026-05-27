@@ -1,8 +1,8 @@
 /**
- * Schema tests for `ExecutionManifestSchema` — Story 4.3 Task 7.3.
+ * Schema tests for `ExecutionManifestSchema` — Story 4.3 Task 7.3 + Story 5.13.
  *
- * Tests the `rework_count` field added in Story 4.3 and the extension of
- * `blocked_by` to include `"handoff-grammar"` and `"reviewer-grammar"`.
+ * Tests the `rework_count` field added in Story 4.3 and the closed `blocked_by`
+ * enum introduced in Story 5.13 (thirteen members; no free-string fallback).
  */
 
 import { describe, expect, it } from "vitest";
@@ -84,49 +84,61 @@ describe("rework_count field (Story 4.3)", () => {
 // blocked_by extension tests (Story 4.3)
 // ---------------------------------------------------------------------------
 
-describe("blocked_by field — handoff-grammar and reviewer-grammar (Story 4.3)", () => {
-  it("parses successfully with blocked_by: 'handoff-grammar'", () => {
-    const manifest = parseExecutionManifest(
-      { ...BASE_MANIFEST, blocked_by: "handoff-grammar" },
-      { absPath: "/fake/path.yaml" },
-    );
-    expect(manifest.blocked_by).toBe("handoff-grammar");
-  });
+// ---------------------------------------------------------------------------
+// blocked_by closed enum tests (Story 5.13 — thirteen members, no fallback)
+// ---------------------------------------------------------------------------
 
-  it("parses successfully with blocked_by: 'reviewer-grammar'", () => {
-    const manifest = parseExecutionManifest(
-      { ...BASE_MANIFEST, blocked_by: "reviewer-grammar" },
-      { absPath: "/fake/path.yaml" },
-    );
-    expect(manifest.blocked_by).toBe("reviewer-grammar");
-  });
+const ALL_BLOCKED_BY_MEMBERS = [
+  "handoff-grammar",
+  "gh-defer",
+  "gh-retry",
+  "gh-needs-human",
+  "reviewer-no-session-result",
+  "reviewer-verdict-needs-changes",
+  "reviewer-verdict-blocked",
+  "routing-failure",
+  "routing-self-yield",
+  "planning-discipline",
+  "orphan-no-transcript",
+  "reviewer-grammar",
+  "deps-drift",
+] as const;
 
-  it("parses successfully with blocked_by: 'planning-discipline' (existing value)", () => {
-    const manifest = parseExecutionManifest(
-      { ...BASE_MANIFEST, status: "blocked", blocked_by: "planning-discipline" },
-      { absPath: "/fake/path.yaml" },
-    );
-    expect(manifest.blocked_by).toBe("planning-discipline");
-  });
-
-  it("parses successfully with blocked_by: 'source-drift' (existing value)", () => {
-    const manifest = parseExecutionManifest(
-      { ...BASE_MANIFEST, status: "blocked", blocked_by: "source-drift" },
-      { absPath: "/fake/path.yaml" },
-    );
-    expect(manifest.blocked_by).toBe("source-drift");
-  });
-
-  it("parses successfully with blocked_by: 'some-future-value' (string fallback)", () => {
-    const manifest = parseExecutionManifest(
-      { ...BASE_MANIFEST, blocked_by: "some-future-value" },
-      { absPath: "/fake/path.yaml" },
-    );
-    expect(manifest.blocked_by).toBe("some-future-value");
-  });
+describe("blocked_by field — closed enum (Story 5.13)", () => {
+  for (const member of ALL_BLOCKED_BY_MEMBERS) {
+    it(`parses successfully with blocked_by: '${member}'`, () => {
+      const manifest = parseExecutionManifest(
+        { ...BASE_MANIFEST, blocked_by: member },
+        { absPath: "/fake/path.yaml" },
+      );
+      expect(manifest.blocked_by).toBe(member);
+    });
+  }
 
   it("parses successfully when blocked_by is omitted", () => {
     const manifest = parseExecutionManifest(BASE_MANIFEST, { absPath: "/fake/path.yaml" });
     expect(manifest.blocked_by).toBeUndefined();
+  });
+
+  it("throws MalformedExecutionManifestError for out-of-enum value 'some-future-value' (closed enum — AC5 flip)", () => {
+    // Story 5.13 AC5: the string fallback is REMOVED. Out-of-enum values must now
+    // fail at the Zod boundary. This test was previously asserting acceptance;
+    // it is flipped to assert Zod throw.
+    expect(() =>
+      parseExecutionManifest(
+        { ...BASE_MANIFEST, blocked_by: "some-future-value" },
+        { absPath: "/fake/path.yaml" },
+      ),
+    ).toThrow(MalformedExecutionManifestError);
+  });
+
+  it("throws MalformedExecutionManifestError for removed 'source-drift' value (no live writer)", () => {
+    // 'source-drift' was in the previous union but has no live writer; removed in v1 enum.
+    expect(() =>
+      parseExecutionManifest(
+        { ...BASE_MANIFEST, blocked_by: "source-drift" },
+        { absPath: "/fake/path.yaml" },
+      ),
+    ).toThrow(MalformedExecutionManifestError);
   });
 });

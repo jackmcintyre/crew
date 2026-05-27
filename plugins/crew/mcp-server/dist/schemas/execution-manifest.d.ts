@@ -53,7 +53,21 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     narrative: z.ZodString;
     implementation_notes: z.ZodOptional<z.ZodString>;
     withdrawn: z.ZodDefault<z.ZodBoolean>;
-    blocked_by: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"planning-discipline">, z.ZodLiteral<"source-drift">, z.ZodLiteral<"handoff-grammar">, z.ZodLiteral<"reviewer-grammar">, z.ZodString]>>;
+    blocked_by: z.ZodOptional<z.ZodEnum<{
+        "handoff-grammar": "handoff-grammar";
+        "gh-defer": "gh-defer";
+        "gh-retry": "gh-retry";
+        "gh-needs-human": "gh-needs-human";
+        "reviewer-no-session-result": "reviewer-no-session-result";
+        "reviewer-verdict-needs-changes": "reviewer-verdict-needs-changes";
+        "reviewer-verdict-blocked": "reviewer-verdict-blocked";
+        "routing-failure": "routing-failure";
+        "routing-self-yield": "routing-self-yield";
+        "planning-discipline": "planning-discipline";
+        "orphan-no-transcript": "orphan-no-transcript";
+        "reviewer-grammar": "reviewer-grammar";
+        "deps-drift": "deps-drift";
+    }>>;
     discipline_violations: z.ZodOptional<z.ZodArray<z.ZodObject<{
         code: z.ZodString;
         field: z.ZodString;
@@ -79,6 +93,11 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
+/**
+ * The closed `blocked_by` enum type — Story 5.13 AC2.
+ * Thirteen members; see JSDoc on the `blocked_by` field above.
+ */
+export type BlockedBy = NonNullable<ExecutionManifest["blocked_by"]>;
 /**
  * Canonical reader for execution manifests.
  *

@@ -253,4 +253,26 @@ So that long subagent runs (>10 min) do not trigger an MCP reap mid-cycle.
 
 **Note:** path (a) is preferred for durability. Paths (b)/(c) are acceptable fallbacks if Anthropic's host architecture makes (a) impossible. The diagnostic instrumentation that produced today's evidence is captured in the postmortem § L7 follow-up #5.
 
+## Story 5.13: Planner-validator — prose vs manifest deps at scan time (+ typed `blocked_by`)
+
+> Added 2026-05-27 from the pre-Epic-5 enhancement plan.
+> Source: postmortem § L4 + Epic 4 retro § Carry-forward remediation (typed `blocked_by`).
+> Independent of 5.10 / 5.11 / 5.12. Closes the last functional pre-dogfood gap.
+
+As a plugin operator,
+I want `/crew:scan` to refuse to write a `to-do/` manifest whose `depends_on` set drifts from the dependencies declared in the spec's prose, AND I want `blocked_by` reasons to be a typed enum rather than a free-string sink,
+So that planner-author mistakes are caught before claim time and `blocked/` manifests can be programmatically routed instead of inscrutably re-surfaced to the operator.
+
+**Acceptance Criteria:**
+
+**AC1:** `scanSources` extracts dep references from the spec body (well-defined patterns: explicit `Depends on:` lines, `[[story-key]]` cross-references, etc. — exact patterns TBD by spec author). When the extracted set drifts from the manifest's `depends_on`, the scan refuses to write and surfaces `[deps-drift] <ref> — prose: {...}, manifest: {...}` on stderr.
+
+**AC2:** `blocked_by` is a typed enum, not a free string. Initial members: `handoff-grammar | deps-drift | quota-exhausted | worktree-leak | reviewer-verdict-needs-changes | reviewer-verdict-blocked | reviewer-no-session-result | gh-defer | gh-needs-human | orphan-no-transcript` (the last entry rides on 5.11's existing `blockOrphanNoTranscript` path). Zod-enforced at the boundary; existing writes migrate to typed values.
+
+**AC3:** `/crew:start`'s blocked-recovery surface (per memory `project_blocked_recovery_prose_lies`) uses the typed reason to render a per-case operator hint, not the current generic "clear blocked_by and re-run" prose.
+
+**AC4 (integration):** vitest covers (a) a synthetic spec whose prose declares a dep the manifest omits → scan refuses with `[deps-drift]`; (b) a `blocked_by` write with an unknown enum value → Zod rejects at the boundary; (c) `/crew:start` surfaces the typed-reason hint for each enum member.
+
+**AC5 (integration):** existing `blocked/` fixtures in tests are migrated to typed values; no test references a free-string `blocked_by`.
+
 ---

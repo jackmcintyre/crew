@@ -68,8 +68,12 @@ export function renderNativeStoryBody(input: WriteNativeStoryInput): string {
   }
 
   // ## Dependencies
+  // Story 5.13: also emit a `Depends on: <refs>` prose line above the section
+  // so that the deps-drift gate in scanSources finds prose and manifest in agreement.
   lines.push("## Dependencies", "");
   if (input.depends_on.length > 0) {
+    // Prose line mirrors the ## Dependencies section — keeps scan-sources drift gate happy.
+    lines.push(`Depends on: ${input.depends_on.join(", ")}`, "");
     for (const dep of input.depends_on) {
       lines.push(`- ${dep}`);
     }

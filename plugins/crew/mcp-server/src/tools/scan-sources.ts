@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import type { SourceStory } from "../adapters/adapter.js";
 import { MalformedExecutionManifestError } from "../errors.js";
+import { extractDepRefsFromSpecBody } from "../lib/extract-dep-refs.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import {
   ExecutionManifestSchema,
@@ -45,6 +46,12 @@ export interface ScanResult {
   }>;
   /** Story 3.5: refs that failed planning-discipline and were written to blocked/. */
   blockedRefs: string[];
+  /**
+   * Story 5.13: refs blocked because prose dep declarations and the manifest's
+   * `depends_on` set are not equal (symmetric difference is non-empty).
+   * Each entry carries the symmetric-difference detail for the rendered output.
+   */
+  depsDriftRefs: Array<{ ref: string; proseRefs: string[]; manifestRefs: string[] }>;
 }
 
 /**
@@ -78,6 +85,15 @@ export function renderScanResult(result: ScanResult): string {
     );
   } else {
     lines.push(`skipped:   0 ref(s)`);
+  }
+
+  // Story 5.13: deps-drift lines — emitted BEFORE the blocked summary line so the
+  // operator sees the more-actionable signal first (per Implementation Strategy § 3).
+  const depsDriftRefs = result.depsDriftRefs ?? [];
+  for (const entry of depsDriftRefs) {
+    const proseSet = `{${entry.proseRefs.sort().join(", ")}}`;
+    const manifestSet = `{${entry.manifestRefs.sort().join(", ")}}`;
+    lines.push(`[deps-drift] ${entry.ref} — prose: ${proseSet}, manifest: ${manifestSet}`);
   }
 
   // Story 3.5 Task 6.3: blocked refs line (operator-facing surface).
@@ -130,6 +146,94 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
   return Object.fromEntries(
     Object.entries(obj).filter(([, v]) => v !== undefined),
   ) as Partial<T>;
+}
+
+/**
+ * Compute the symmetric difference between two sets.
+ * Returns `{ onlyInA, onlyInB }` — both empty means no drift.
+ */
+function symmetricDiff(
+  a: Set<string>,
+  b: Set<string>,
+): { onlyInA: string[]; onlyInB: string[] } {
+  const onlyInA = [...a].filter((x) => !b.has(x));
+  const onlyInB = [...b].filter((x) => !a.has(x));
+  return { onlyInA, onlyInB };
+}
+
+/**
+ * Check whether prose deps in the spec body drift from `story.depends_on`.
+ * Re-reads the raw spec file from `story.raw_path`.
+ *
+ * Returns `null` when there is no drift (prose and manifest agree).
+ * Returns `{ proseRefs, manifestRefs }` when the symmetric difference is non-empty.
+ */
+async function checkDepsDrift(
+  story: SourceStory,
+): Promise<{ proseRefs: string[]; manifestRefs: string[] } | null> {
+  let body: string;
+  try {
+    body = await fs.readFile(story.raw_path, "utf8");
+  } catch {
+    // If the file is unreadable, skip the drift check — don't false-positive block.
+    return null;
+  }
+
+  const proseSet = extractDepRefsFromSpecBody(body);
+  const manifestSet = new Set<string>(story.depends_on);
+
+  const { onlyInA: onlyInProse, onlyInB: onlyInManifest } = symmetricDiff(proseSet, manifestSet);
+
+  if (onlyInProse.length === 0 && onlyInManifest.length === 0) {
+    return null;
+  }
+
+  // Symmetric difference: proseRefs is everything prose sees; manifestRefs is everything manifest sees.
+  return {
+    proseRefs: [...proseSet].sort(),
+    manifestRefs: [...manifestSet].sort(),
+  };
+}
+
+/**
+ * Write a `blocked/` manifest with `blocked_by: "deps-drift"`.
+ */
+async function writeDepsDriftBlockedManifest(
+  story: SourceStory,
+  driftDetail: { proseRefs: string[]; manifestRefs: string[] },
+  absBlockedPath: string,
+  activeAdapterName: string,
+  targetRepoRoot: string,
+): Promise<void> {
+  const blockedManifestRaw = stripUndefined({
+    ref: story.ref,
+    status: "blocked" as const,
+    adapter: activeAdapterName,
+    source_path: repoRelativePath(story.raw_path, targetRepoRoot),
+    source_hash: story.source_hash,
+    depends_on: story.depends_on,
+    acceptance_criteria: story.acceptance_criteria,
+    title: story.title,
+    narrative: story.narrative,
+    implementation_notes: story.implementation_notes,
+    withdrawn: false,
+    blocked_by: "deps-drift" as const,
+    discipline_violations: [
+      {
+        code: "deps-drift-prose-vs-manifest",
+        field: "depends_on",
+        detail: `Prose deps: [${driftDetail.proseRefs.join(", ")}]; Manifest deps: [${driftDetail.manifestRefs.join(", ")}]`,
+      },
+    ],
+  });
+  const blockedManifest = ExecutionManifestSchema.parse(blockedManifestRaw);
+  const yamlText = yamlStringify(blockedManifest, { lineWidth: 0 });
+  await writeManagedFile({
+    absPath: absBlockedPath,
+    contents: yamlText,
+    targetRepoRoot,
+    mcpToolContext: { toolName: "scanSources", role: "operator" },
+  });
 }
 
 /**
@@ -205,6 +309,7 @@ export async function scanSources(opts: { targetRepoRoot: string }): Promise<Sca
     unchangedRefs: [],
     skippedRefs: [],
     blockedRefs: [],
+    depsDriftRefs: [],
   };
 
   const stateRoot = path.join(targetRepoRoot, ".crew", "state");
@@ -294,10 +399,36 @@ export async function scanSources(opts: { targetRepoRoot: string }): Promise<Sca
         continue;
       }
 
-      // Source hash changed (operator edited the story) — re-run discipline.
+      // Source hash changed (operator edited the story).
+      // Story 5.13: check deps-drift FIRST (more-actionable signal before discipline).
+      const driftDetail = await checkDepsDrift(story);
+      if (driftDetail !== null) {
+        // Still drifting (or now drifting for the first time) — rewrite blocked manifest.
+        await writeDepsDriftBlockedManifest(
+          story,
+          driftDetail,
+          absBlockedPath,
+          activeAdapterName,
+          targetRepoRoot,
+        );
+        result.skippedRefs.push({
+          ref: story.ref,
+          reason: "discipline-violation",
+          detail: `deps-drift-prose-vs-manifest: prose: [${driftDetail.proseRefs.join(", ")}], manifest: [${driftDetail.manifestRefs.join(", ")}]`,
+        });
+        result.blockedRefs.push(story.ref);
+        result.depsDriftRefs.push({
+          ref: story.ref,
+          proseRefs: driftDetail.proseRefs,
+          manifestRefs: driftDetail.manifestRefs,
+        });
+        continue;
+      }
+
+      // No deps-drift — re-run discipline.
       const disciplineResult = activeAdapter.validateAgainstDiscipline(story);
       if (!("kind" in disciplineResult) || disciplineResult.kind !== "discipline-violation") {
-        // Story now passes discipline — promote from blocked/ to to-do/.
+        // Story now passes both deps-drift and discipline — promote from blocked/ to to-do/.
         // NOTE: This sequence is non-atomic: the to-do/ manifest is written
         // first, then the blocked/ manifest is deleted. If the unlink fails
         // (e.g. a mid-flight crash or permission error), both manifests will
@@ -315,7 +446,7 @@ export async function scanSources(opts: { targetRepoRoot: string }): Promise<Sca
         await fs.unlink(absBlockedPath);
         result.createdRefs.push(story.ref);
       } else {
-        // Still failing — rewrite the blocked manifest with updated hash and violations.
+        // Still failing discipline — rewrite the blocked manifest with updated hash and violations.
         const blockedManifestRaw = stripUndefined({
           ref: story.ref,
           status: "blocked" as const,
@@ -354,12 +485,38 @@ export async function scanSources(opts: { targetRepoRoot: string }): Promise<Sca
       continue;
     }
 
-    // Step 5: validateAgainstDiscipline (Story 3.5 — real enforcement).
+    // Step 5: deps-drift gate (Story 5.13 — new, runs BEFORE discipline for more-actionable signal).
+    // Then validateAgainstDiscipline (Story 3.5 — real enforcement).
     // Only runs when no manifest exists anywhere (currentState === null) or
     // when the manifest is already in to-do/ (currentState === "to-do").
-    // For the to-do case, discipline is a no-op (the story already passed
-    // discipline at first scan). For the null case, this is the gate.
+    // For the to-do case, both gates are no-ops (the story already passed at first scan).
     if (currentState === null) {
+      // Story 5.13: deps-drift gate — runs before discipline so operator sees the
+      // more-actionable signal first (a drift is a planner-author mistake).
+      const driftDetail = await checkDepsDrift(story);
+      if (driftDetail !== null) {
+        const absBlockedPath = path.join(stateRoot, "blocked", `${story.ref}.yaml`);
+        await writeDepsDriftBlockedManifest(
+          story,
+          driftDetail,
+          absBlockedPath,
+          activeAdapterName,
+          targetRepoRoot,
+        );
+        result.skippedRefs.push({
+          ref: story.ref,
+          reason: "discipline-violation",
+          detail: `deps-drift-prose-vs-manifest: prose: [${driftDetail.proseRefs.join(", ")}], manifest: [${driftDetail.manifestRefs.join(", ")}]`,
+        });
+        result.blockedRefs.push(story.ref);
+        result.depsDriftRefs.push({
+          ref: story.ref,
+          proseRefs: driftDetail.proseRefs,
+          manifestRefs: driftDetail.manifestRefs,
+        });
+        continue;
+      }
+
       const disciplineResult = activeAdapter.validateAgainstDiscipline(story);
       if ("kind" in disciplineResult && disciplineResult.kind === "discipline-violation") {
         const firstViolation = disciplineResult.violations[0];

@@ -78,7 +78,7 @@ export async function blockOrphanNoTranscript(
   // Step 3: Stamp blocked_by.
   const updatedManifest = {
     ...manifest,
-    blocked_by: "orphan-no-transcript",
+    blocked_by: "orphan-no-transcript" as const,
   };
   await writeManifest(absBlockedPath, updatedManifest);
 

@@ -62,26 +62,35 @@ const SESSION_ULID = "01HZSESSION000000000000001";
 function makeStoryContent(title: string, depRefs: string[]): string {
   const depsSection =
     depRefs.length > 0 ? depRefs.map((d) => `- ${d}`).join("\n") : "";
-  return [
-    `# ${title}`,
-    "",
-    "## Narrative",
-    "",
-    `As a user, I want ${title.toLowerCase()} so that I can verify the loop.`,
-    "",
-    "## Acceptance Criteria",
-    "",
-    "**AC1 (integration):**",
-    `**Given** ${title} is live, **When** a user accesses it, **Then** it works correctly.`,
-    "",
-    "## Implementation Notes",
-    "",
-    `Implement ${title}.`,
-    "",
-    "## Dependencies",
-    "",
-    depsSection,
-  ].join("\n");
+  // Story 5.13: include a `Depends on: <refs>` prose line so the deps-drift gate
+  // finds prose and manifest in agreement (no false-positive blocking).
+  const proseDepsLine =
+    depRefs.length > 0 ? `\nDepends on: ${depRefs.join(", ")}\n` : "";
+  return (
+    [
+      `# ${title}`,
+      "",
+      "## Narrative",
+      "",
+      `As a user, I want ${title.toLowerCase()} so that I can verify the loop.`,
+    ].join("\n") +
+    proseDepsLine +
+    [
+      "",
+      "## Acceptance Criteria",
+      "",
+      "**AC1 (integration):**",
+      `**Given** ${title} is live, **When** a user accesses it, **Then** it works correctly.`,
+      "",
+      "## Implementation Notes",
+      "",
+      `Implement ${title}.`,
+      "",
+      "## Dependencies",
+      "",
+      depsSection,
+    ].join("\n")
+  );
 }
 
 function hashContent(content: string): string {
