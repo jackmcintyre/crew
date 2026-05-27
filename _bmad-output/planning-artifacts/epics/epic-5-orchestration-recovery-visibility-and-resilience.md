@@ -411,3 +411,43 @@ So that a reviewer subagent that reasons around its prose mandate cannot waste a
 **AC2:** Persona prose mandate stays but is annotated with a change-log comment naming Story 5.21 and pointing to the deterministic seam location.
 **AC3 (integration):** vitest with empty `agent_invokes` asserts orchestration either injects the call or fails-loud; manifest does NOT progress to verdict without `runReviewerSession` invoked.
 **AC4 (regression):** vitest happy path — subagent calls `runReviewerSession` first; no double-call, no fail-loud, no behavioural drift.
+
+## Story 5.22: `renderScanResult` leading-whitespace test assertion
+
+> Added 2026-05-27 as canary-2 target — small substrate story to validate the loop end-to-end after 5.20 + 5.21 substrate fixes shipped.
+> Source: carry-forward entry 2 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md` (Story 5.13 review-feedback Info).
+
+As a plugin operator,
+I want a regression assertion that `renderScanResult`'s output has no leading whitespace on any non-empty line,
+So that terminal-rendered scan results stay cosmetically clean and future refactors can't quietly introduce indentation drift.
+
+**Acceptance Criteria:**
+
+**AC1 (vitest):** Add a test in scan-sources coverage that splits `renderScanResult` output by `\n` and asserts each non-empty line passes `!/^\s/.test(line)`. Fixture should render ≥5 non-empty lines.
+**AC2 (regression-direction):** Test passes on current `dev` HEAD without modifying `renderScanResult` first; if it fails, fix the render (single-line entries, no indent), don't weaken the assertion.
+
+## Story 5.23: `markStoryShipped` MCP tool — manual-merge closeout stop-gap (stub-only, protected backlog)
+
+> Stub-only — protected backlog. Added 2026-05-27 from canary-1 + canary-2 manual-closeout friction.
+> Source: carry-forward entry 10 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`.
+
+**Trigger condition (verbatim — do NOT author the spec until this fires):**
+
+This story MUST NOT be authored or shipped unless one of the following triggers:
+
+1. The manual-merge closeout pattern (eyeball PR + hand-edit manifest from `in-progress/` or `blocked/` to `done/` + strip `blocked_by`/`claimed_by` + flip `status` to `done`) repeats 3 or more additional times after 2026-05-27 (canary-1 and canary-2 already count as instances 1 and 2 — trigger fires on instance 5 cumulative), OR
+2. The AC-marker classifier work (carried debt, carry-forward entry 7 / `feedback_reviewer_contract_carried_debt`) slips past Epic 7 entry without resolution.
+
+When either trigger fires, author the full spec via `/bmad-create-story 5.23` and ship via `/ship-story 5-23`. Until then, leave this block in place as a protected backlog marker.
+
+**Scope sketch (NOT authoritative — spec authoring required when triggered):**
+
+New MCP tool `markStoryShipped(ref: string)` that:
+
+- Moves the manifest from `in-progress/` or `blocked/` to `done/`.
+- Strips `blocked_by` and `claimed_by` fields.
+- Sets `status: done`.
+- Atomic write semantics (no half-state).
+- Surfaced via an operator-facing slash command (`/crew:mark-shipped <ref>`) or one-shot CLI helper.
+
+**Why not now:** if the classifier carried debt resolves first (Epic 6→7), this tool's surface disappears — the BLOCKED-with-merged-PR case stops happening because the classifier stops false-positiving. Authoring now risks wasted spec work. Same shape of protection as Story 5.18 (structural parser) — trigger-condition gating, no premature authoring.

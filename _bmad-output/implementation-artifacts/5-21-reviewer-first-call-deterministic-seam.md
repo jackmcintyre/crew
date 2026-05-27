@@ -1,7 +1,7 @@
 # Story 5.21: Reviewer first-tool-call deterministic seam
 
 story_shape: substrate
-Status: review
+Status: done
 
 ## Story
 
@@ -13,16 +13,24 @@ This story is independent — no spec or code dependencies on other in-flight Ep
 
 ## Acceptance Criteria
 
-**AC1:** The reviewer-spawning orchestration calls `runReviewerSession` **before** the reviewer subagent begins its turn — either (a) the spawning skill/tool invokes `runReviewerSession` directly as part of constructing the persona spawn prompt, OR (b) a pre-handoff guard in the post-spawn flow fails-loud if `agent_invokes` for the spawned session doesn't contain `runReviewerSession`. Implementation choice (a vs b) is the dev's to make based on which is cleaner — both satisfy the AC. The "first tool call MUST be `runReviewerSession`" prose mandate in `team/generalist-reviewer/PERSONA.md` (or equivalent) becomes belt-and-braces, not load-bearing.
+**AC1:**
+
+The reviewer-spawning orchestration calls `runReviewerSession` **before** the reviewer subagent begins its turn — either (a) the spawning skill/tool invokes `runReviewerSession` directly as part of constructing the persona spawn prompt, OR (b) a pre-handoff guard in the post-spawn flow fails-loud if `agent_invokes` for the spawned session doesn't contain `runReviewerSession`. Implementation choice (a vs b) is the dev's to make based on which is cleaner — both satisfy the AC. The "first tool call MUST be `runReviewerSession`" prose mandate in `team/generalist-reviewer/PERSONA.md` (or equivalent) becomes belt-and-braces, not load-bearing.
 `artifact: plugins/crew/mcp-server/src/tools/build-persona-spawn-prompt.ts OR the reviewer spawn-handler in plugins/crew/mcp-server/src/tools/register.ts (dev picks the seam)`
 
-**AC2:** The persona prose mandate stays in place as documentation but is no longer the structural enforcement mechanism. A change-log comment near the prose-mandate line names this story and links to the deterministic seam location (file + function name). Future readers learn the prose is non-load-bearing without having to trace runtime behaviour.
+**AC2:**
+
+The persona prose mandate stays in place as documentation but is no longer the structural enforcement mechanism. A change-log comment near the prose-mandate line names this story and links to the deterministic seam location (file + function name). Future readers learn the prose is non-load-bearing without having to trace runtime behaviour.
 `artifact: plugins/crew/team/generalist-reviewer/PERSONA.md (or the reviewer persona file the spawning code consumes — confirm path in dev)`
 
-**AC3 (vitest, integration):** Seed a reviewer-spawn fixture where the simulated subagent's `agent_invokes` record is empty (i.e. the persona skipped the mandated call). Assert the orchestration either (a) injects the `runReviewerSession` call regardless, OR (b) fails-loud with a typed error that names the missing call. Assert the manifest does NOT progress to a verdict without `runReviewerSession` having been invoked at least once for the session.
+**AC3 (integration):**
+
+Seed a reviewer-spawn fixture where the simulated subagent's `agent_invokes` record is empty (i.e. the persona skipped the mandated call). Assert the orchestration either (a) injects the `runReviewerSession` call regardless, OR (b) fails-loud with a typed error that names the missing call. Assert the manifest does NOT progress to a verdict without `runReviewerSession` having been invoked at least once for the session.
 `vitest: plugins/crew/mcp-server/src/tools/__tests__/reviewer-first-call-seam.test.ts`
 
-**AC4 (vitest, regression):** Seed a reviewer-spawn fixture where the simulated subagent calls `runReviewerSession` as its first action (the happy path). Assert no double-call, no fail-loud, no behavioural drift from the current passing reviewer cycle.
+**AC4 (integration):**
+
+Seed a reviewer-spawn fixture where the simulated subagent calls `runReviewerSession` as its first action (the happy path). Assert no double-call, no fail-loud, no behavioural drift from the current passing reviewer cycle.
 `vitest: plugins/crew/mcp-server/src/tools/__tests__/reviewer-first-call-seam.test.ts`
 
 ## Implementation Notes

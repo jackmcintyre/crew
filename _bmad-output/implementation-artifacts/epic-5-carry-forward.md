@@ -69,6 +69,13 @@
 **Issue:** the reviewer subagent reasoned around its persona prose mandate ("MUST call `runReviewerSession` first") and skipped the call under load. Manifest never progressed to verdict; operator forced into manual recovery. Persona prose alone is not load-bearing for orchestration enforcement — repeats the prose-mandate-vs-deterministic-seam pattern Jack flagged in `feedback_default_to_deterministic_seams` and `feedback_prose_mut_steps_need_seam`.
 **Fold into:** Story 5.21 — either inject `runReviewerSession` from spawning orchestration OR fail-loud post-spawn if `agent_invokes` lacks the call. Persona prose stays as belt-and-braces.
 
+### 10. `markStoryShipped` MCP tool for manual-merge closeout (stop-gap)
+
+**Surface:** 2026-05-27 canary-1 (bmad:5.19) AND canary-2 (bmad:5.22) — both ended with Jack manually merging a BLOCKED PR (classifier carried debt, entry 7 / `feedback_reviewer_contract_carried_debt`) and hand-editing the manifest from `in-progress/` (or `blocked/`) to `done/`. Cleanup per closeout: write manifest to `done/`, delete from origin, strip `blocked_by` + `claimed_by`, flip `status` to `done`. Five+ commands each time.
+**Touch site:** new MCP tool `markStoryShipped(ref: string)` in `plugins/crew/mcp-server/src/tools/`. Atomic write semantics; consumed by an operator-facing slash command (e.g. `/crew:mark-shipped <ref>`) or surfaced as a one-shot CLI helper.
+**Why deferred to protected backlog:** if the classifier work (entry 7) lands first, this tool's surface disappears — the BLOCKED-on-merged-PR case stops happening because the classifier stops false-positiving. Authoring now risks wasted spec work.
+**Fold into:** Story 5.23 (stub-only, protected backlog — see epic-5). Trigger condition: 3 more manual closeouts after 2026-05-27 (instances 1 and 2 already counted), OR classifier work slips past Epic 7 entry without resolution.
+
 ## Promotion history
 
 > Phase 2 (`dev → main` ff-promotion) records appended here as they happen, per deep-kettle plan Artefact P2.

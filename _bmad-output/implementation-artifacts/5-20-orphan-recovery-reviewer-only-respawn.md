@@ -1,7 +1,7 @@
 # Story 5.20: Orphan-recovery — reviewer-only re-spawn when PR exists and transcript is consumed
 
 story_shape: substrate
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -13,16 +13,24 @@ This story is independent — no spec or code dependencies on other in-flight Ep
 
 ## Acceptance Criteria
 
-**AC1:** `scanOrphanedInProgress` returns `hasOpenPR: boolean` per orphan, computed by querying `gh pr list --head <branch>` (or equivalent) where the branch name derives from the manifest's story ref using the same convention `/ship-story` and `/crew:start` use for dev branches.
+**AC1:**
+
+`scanOrphanedInProgress` returns `hasOpenPR: boolean` per orphan, computed by querying `gh pr list --head <branch>` (or equivalent) where the branch name derives from the manifest's story ref using the same convention `/ship-story` and `/crew:start` use for dev branches.
 `artifact: plugins/crew/mcp-server/src/tools/scan-orphaned-in-progress.ts`
 
-**AC2:** The `/crew:start` orchestration adds a new branch: when an orphan has `hasTranscript: false` AND `hasOpenPR: true`, route to **spawn-reviewer-only** (call `reattachOrphan` to rewrite `claimed_by`, then spawn the reviewer subagent without dev replay). When `hasTranscript: false` AND `hasOpenPR: false`, preserve the current behaviour (call `blockOrphanNoTranscript` → stamp `blocked_by: orphan-no-transcript`).
+**AC2:**
+
+The `/crew:start` orchestration adds a new branch: when an orphan has `hasTranscript: false` AND `hasOpenPR: true`, route to **spawn-reviewer-only** (call `reattachOrphan` to rewrite `claimed_by`, then spawn the reviewer subagent without dev replay). When `hasTranscript: false` AND `hasOpenPR: false`, preserve the current behaviour (call `blockOrphanNoTranscript` → stamp `blocked_by: orphan-no-transcript`).
 `artifact: plugins/crew/skills/crew-start/SKILL.md (or the orchestration tool that consumes scanOrphanedInProgress output)`
 
-**AC3 (vitest, integration):** Seed a fixture with (a) an in-progress manifest, (b) a stale `claimed_by` ULID, (c) no transcript on disk, (d) an open PR for the story's ref (mock the `gh` call). Assert `scanOrphanedInProgress` returns `hasOpenPR: true` AND the recovery routing produces a "spawn-reviewer" outcome with no `blocked_by` stamp on the manifest.
+**AC3 (integration):**
+
+Seed a fixture with (a) an in-progress manifest, (b) a stale `claimed_by` ULID, (c) no transcript on disk, (d) an open PR for the story's ref (mock the `gh` call). Assert `scanOrphanedInProgress` returns `hasOpenPR: true` AND the recovery routing produces a "spawn-reviewer" outcome with no `blocked_by` stamp on the manifest.
 `vitest: plugins/crew/mcp-server/src/tools/__tests__/orphan-recovery-reviewer-only.test.ts`
 
-**AC4 (vitest, regression):** Same orphan shape but mock `gh pr list` returning empty. Assert `hasOpenPR: false` AND the current behaviour is preserved: `blockOrphanNoTranscript` is called, manifest stamped `blocked_by: orphan-no-transcript`.
+**AC4 (integration):**
+
+Same orphan shape but mock `gh pr list` returning empty. Assert `hasOpenPR: false` AND the current behaviour is preserved: `blockOrphanNoTranscript` is called, manifest stamped `blocked_by: orphan-no-transcript`.
 `vitest: plugins/crew/mcp-server/src/tools/__tests__/orphan-recovery-reviewer-only.test.ts`
 
 ## Implementation Notes
