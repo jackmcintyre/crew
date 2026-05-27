@@ -71,22 +71,36 @@ git checkout dev
 
 ## Branch protection re-enable
 
-After the push lands:
+`main` is protected by **repository ruleset 16642015**, not classic branch protection. The classic-protection endpoint (`gh api repos/{owner}/{repo}/branches/main/protection`) returns 404 on this repo; querying the wrong API is a recurring confusion point per memory `project_main_protection_via_ruleset`. Always use the ruleset endpoint.
+
+The promotion procedure above (Phase E) requires a one-shot relax of the ruleset's `pull_request` rule for the direct push, then re-enable. Pattern:
 
 ```bash
-gh api -X PUT repos/{owner}/{repo}/branches/main/protection \
-  -f required_status_checks.strict=true \
-  -f required_status_checks.contexts[]=build \
-  -f enforce_admins=true \
-  -f restrictions=null \
-  -F required_pull_request_reviews.required_approving_review_count=0 \
-  -F allow_force_pushes=false \
-  -F allow_deletions=false
+# 1. Snapshot the current ruleset (always do this first — gives you the body to PUT back).
+gh api repos/{owner}/{repo}/rulesets/16642015 > /tmp/ruleset-16642015.json
+
+# 2. To relax for the promotion push: edit the snapshot, remove or temporarily
+#    weaken the `pull_request` rule entry, then PUT it back:
+gh api -X PUT repos/{owner}/{repo}/rulesets/16642015 \
+  --input /tmp/ruleset-16642015-relaxed.json
+
+# 3. Do the ff-only `dev → main` promotion (Phase E steps).
+
+# 4. Re-enable by PUTting the original snapshot back:
+gh api -X PUT repos/{owner}/{repo}/rulesets/16642015 \
+  --input /tmp/ruleset-16642015.json
 ```
 
-Or toggle via the GitHub web UI: **Settings → Branches → main → Block force pushes ON**.
+Or toggle via the GitHub web UI: **Settings → Rules → Rulesets → ruleset 16642015 → edit `pull_request` rule → save, push, restore, save**.
 
-The block-force-pushes setting is the load-bearing line per memory `project_branch_protection_load_bearing` — it's what stopped the 2026-05-25 rollback from going further wrong. Never leave it off across a promotion.
+### Load-bearing rules
+
+Two ruleset entries must persist across every promotion:
+
+- **`non_fast_forward`** — blocks force pushes. This is what stopped the 2026-05-25 rollback from going further wrong (memory `project_branch_protection_load_bearing`). Never disable without immediate re-enable.
+- **`pull_request`** — enforces PR-mediated merges as the normal path. Relax for the documented `dev → main` ff-promotion only; re-enable immediately after.
+
+Other ruleset entries (status-check requirements, etc.) are conventional and can be toggled per project policy without the same blast radius.
 
 ## When this checklist should run
 
