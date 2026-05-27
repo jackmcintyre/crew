@@ -2,7 +2,7 @@
  * BMad lifecycle vocabulary and its mapping to the plugin's execution
  * state. See `plugins/crew/docs/spikes/bmad-format.md`.
  */
-export type BmadStatus = "backlog" | "ready-for-dev" | "in-progress" | "done" | "optional" | "contexted";
+export type BmadStatus = "backlog" | "ready-for-dev" | "in-progress" | "done" | "optional" | "contexted" | "draft" | "approved" | "review";
 export type ExecutionState = "to-do" | "in-progress" | "blocked" | "done";
 /**
  * Map a BMad status string to the plugin's execution-state vocabulary.

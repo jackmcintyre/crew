@@ -16,6 +16,12 @@ export function mapBmadStatusToExecution(status) {
             return null;
         case "contexted":
             return "to-do";
+        case "draft":
+            return "to-do";
+        case "approved":
+            return "to-do";
+        case "review":
+            return "in-progress";
     }
 }
 /**
@@ -65,5 +71,8 @@ function isKnownBmadStatus(s) {
         s === "in-progress" ||
         s === "done" ||
         s === "optional" ||
-        s === "contexted");
+        s === "contexted" ||
+        s === "draft" ||
+        s === "approved" ||
+        s === "review");
 }

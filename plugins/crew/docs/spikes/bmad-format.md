@@ -56,9 +56,12 @@ plugin's execution-state vocabulary
 
 | BMad status      | Execution state | Notes                                                   |
 |------------------|-----------------|---------------------------------------------------------|
+| `draft`          | `to-do`         | spec exists but PM hasn't approved for dev pickup; not claimable yet — semantically equivalent to `backlog` |
+| `approved`       | `to-do`         | PM has approved spec for dev pickup; semantically equivalent to `ready-for-dev` |
 | `backlog`        | `to-do`         |                                                         |
 | `ready-for-dev`  | `to-do`         | manifest moves to `in-progress` on claim                |
 | `in-progress`    | `in-progress`   |                                                         |
+| `review`         | `in-progress`   | dev work complete, awaiting human review — mid-flight from the orchestrator's POV |
 | `done`           | `done`          |                                                         |
 | `optional`       | _(skipped)_     | `listSourceStories` filters these out                   |
 | `contexted`      | `to-do`         | legacy, backward-compat                                 |
