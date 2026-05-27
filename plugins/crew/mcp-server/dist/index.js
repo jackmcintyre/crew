@@ -20,13 +20,16 @@ import { registerAllTools } from "./tools/register.js";
 // ref remains — Node exits with code 0 (natural drain, NOT an explicit
 // process.exit() call; confirmed by the diag log "beforeExit" → "exit").
 //
-// Fix: two cooperating mechanisms —
-//   1. A module-level setInterval handle (period ≈ 12 days) keeps an
-//      independent ref on the event loop that the SDK cannot collect or
-//      unref. This prevents the natural drain that leads to beforeExit.
-//   2. Swallowing handlers on process.stdin 'end'/'close' registered
-//      BEFORE server.connect(transport) so they run first, preventing
-//      any higher-level propagation of stdin-end semantics.
+// Fix: the load-bearing mechanism is the module-level setInterval handle
+// (period ≈ 12 days) holding an independent event-loop ref the SDK cannot
+// collect or unref — preventing the natural drain that fires
+// 'beforeExit' → 'exit' when the SDK's transport removes its ref on
+// stdin close. The stdin 'end'/'close' handlers below are NOT part of
+// the survival mechanism — they only emit a diagnostic line when
+// CREW_MCP_DIAG is set, so the postmortem trail is non-mysterious if
+// idle-reap behaviour ever changes again. They do not "swallow" or
+// suppress propagation; removing them would not affect survival, only
+// observability. Cite: memory project_mcp_server_silent_disconnect.
 //
 // SIGTERM / SIGINT are intentionally NOT handled here — Node's default
 // termination on those signals continues to apply (AC3 / story spec § What
