@@ -83,6 +83,14 @@
 **Why deferred to protected backlog:** current parser + 5.14 + 5.17 widening patches accommodate authored stories acceptably. Structural refactor is substantial (~1-2 weeks) and only pays off when a non-BMad adapter or external planner integration lands. Trigger condition in the story body gates authoring to that moment.
 **Fold into:** Story 5.18 (stub-only, protected backlog — see epic-5).
 
+### 12. Skip-and-flag parser resilience (refines entry 1)
+
+**Surface:** 2026-05-28, `/crew:scan` blocked when authoring Epic 6 stories. The 5.18 protected-backlog stub has no `## Acceptance Criteria` section by design; the BMad adapter's `parseBmadStory` returns `acceptance_criteria: []`, which fails the SourceStory Zod's `.min(1)` at the boundary. **The first malformed story aborts the entire scan pass** — every other ready-for-dev story is starved of an execution manifest until the offender is fixed or hidden.
+**Workaround applied:** flipped 5.18 `Status: backlog` → `Status: optional` so the adapter skips it (per `bmad/index.ts:235`). Smallest fix; protected-stub semantic preserved.
+**Underlying signal:** the right behaviour is **skip-and-flag**: catch the per-file parse failure, surface it on the result (skippedRefs with reason `"malformed-source"` and detail), continue processing the rest of the queue. One bad spec shouldn't block 60+ valid ones. This is **scope-relevant to Story 5.18** when authored — the structural parser's resilience contract should be skip-per-file by default, abort-the-scan as an explicit opt-in (and even then, only on truly catastrophic states like an unreadable storiesRoot directory).
+**Adjacency to entry 1:** entry 1 covers the `readFile` resilience path (file unreadable → skip-and-flag); this entry covers the `parseSourceStory` resilience path (file readable but malformed → skip-and-flag). Same shape, different failure mode. When 5.18 is eventually authored, fold both into its AC set.
+**Fold into:** Story 5.18 (when triggered). Until then: noted here so the next `Status: backlog` stub doesn't repeat the surprise.
+
 ## Promotion history
 
 > Phase 2 (`dev → main` ff-promotion) records appended here as they happen, per deep-kettle plan Artefact P2.

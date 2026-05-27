@@ -212,6 +212,13 @@ describe("parseBmadStory corpus integration — full pipeline parse (Story 5.17 
         }
 
         if (result.acceptance_criteria.length === 0) {
+          // Story 5.18 protected-backlog stub pattern: `Status: optional`
+          // files are expected to lack ACs (stubs awaiting trigger conditions).
+          // listSourceStories filters them at runtime; this corpus gate
+          // should mirror that behaviour rather than fail on stubs.
+          if (result.raw_frontmatter["status"] === "optional") {
+            continue;
+          }
           emptyAcFiles.push({ file: basename });
           continue;
         }

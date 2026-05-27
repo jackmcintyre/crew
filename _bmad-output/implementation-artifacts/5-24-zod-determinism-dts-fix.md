@@ -16,17 +16,21 @@ This story is independent — no spec or code dependencies on other in-flight Ep
 **AC1:**
 
 Build determinism: run `pnpm --dir plugins/crew/mcp-server build` twice on a clean tree (first run produces `dist/`; second run after `rm -rf plugins/crew/mcp-server/dist && pnpm --dir plugins/crew/mcp-server build`). After both runs, `git diff plugins/crew/mcp-server/dist/` shows zero output. Repeat 5 times consecutively — zero drift on any pair.
-`artifact: plugins/crew/mcp-server/package.json AND/OR plugins/crew/mcp-server/src/schemas/*.ts AND/OR plugins/crew/mcp-server/scripts/normalise-dist.ts (dev picks the seam based on AC2 diagnosis)`
+artifact: plugins/crew/mcp-server/scripts/normalise-dist.mjs
+
+(Dev picks the seam based on AC2 diagnosis — strategies A/B/C in Implementation Notes. Other possible artifacts: `plugins/crew/mcp-server/package.json` or schemas under `plugins/crew/mcp-server/src/schemas/`.)
 
 **AC2:**
 
 Root cause documented in this story's Dev Notes section. The note names the specific Zod construct(s) causing the drift (e.g. `z.union`, `z.enum`, `z.discriminatedUnion`, or a particular schema in `src/schemas/`), the version/build behaviour responsible (Zod runtime version, pnpm-lock state, tsc emit phase), and why the chosen fix strategy resolves it. One paragraph minimum; technical specifics required (a "I pinned the version" sentence is not enough — must explain *why* pinning fixes the drift).
-`artifact: _bmad-output/implementation-artifacts/5-24-zod-determinism-dts-fix.md (Dev Notes section)`
+artifact: _bmad-output/implementation-artifacts/5-24-zod-determinism-dts-fix.md
+
+(Specifically the Dev Notes section at the bottom of this file.)
 
 **AC3 (integration):**
 
 A vitest test in `plugins/crew/mcp-server/tests/` runs `pnpm build` twice (programmatically via `child_process.execSync` or equivalent, with the project's existing build script) and asserts `dist/` is byte-identical between runs. Test is part of the standard `pnpm test` flow so it catches future regression. Tolerable runtime overhead: this test may add 30-60 seconds to the test suite; if that's too much, mark it as a separate `pnpm test:determinism` script invoked only in CI.
-`vitest: plugins/crew/mcp-server/tests/build-determinism.test.ts`
+vitest: plugins/crew/mcp-server/tests/build-determinism.test.ts
 
 ## Implementation Notes
 

@@ -1,7 +1,10 @@
 # Story 5.18: Structural / AST-style story parser (stub-only, protected backlog)
 
 story_shape: substrate
-Status: backlog
+Status: optional
+
+<!-- Status flipped backlog → optional on 2026-05-28 so the BMad adapter skips this stub during /crew:scan. The adapter aborts the whole scan on the first malformed story file; this stub has no `## Acceptance Criteria` by design (protected backlog), so it was blocking every other ready-for-dev story from being materialised. Skip-via-optional-status is the smallest fix; the underlying "skip-and-flag-instead-of-abort" parser resilience is logged onto epic-5-carry-forward.md as a signal for when 5.18 itself is eventually authored. -->
+
 
 ## Story
 

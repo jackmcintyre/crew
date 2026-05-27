@@ -1,5 +1,5 @@
 generated: 2026-05-19
-last_updated: '2026-05-27'
+last_updated: '2026-05-28'
 project: crew
 project_key: NOKEY
 tracking_system: file-system
@@ -89,10 +89,10 @@ development_status:
   5-23-mark-story-shipped: backlog
   5-24-zod-determinism-dts-fix: ready-for-dev
   epic-5-retrospective: optional
-  epic-6: backlog
-  6-1-story-level-retro-entries-via-record-story-retro: backlog
-  6-2-retro-skill-and-retro-analyst-subagent: backlog
-  6-3-retro-proposal-markdown-with-seven-proposal-types: backlog
+  epic-6: in-progress
+  6-1-story-level-retro-entries-via-record-story-retro: ready-for-dev
+  6-2-retro-skill-and-retro-analyst-subagent: ready-for-dev
+  6-3-retro-proposal-markdown-with-seven-proposal-types: ready-for-dev
   6-4-accept-proposal-id-skill-diff-then-confirm-gate: backlog
   6-5-rule-registry-parser-and-apply-rule-proposal: backlog
   6-5b-regenerate-standards-version-bump-and-10-cap-re-enforcement: backlog
