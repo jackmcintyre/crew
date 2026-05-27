@@ -78,6 +78,13 @@ describe("dist shipping contract (Story 1.9)", () => {
           ["exec", "tsc", "-p", "tsconfig.json", "--outDir", tmpRoot],
           { cwd: SERVER_ROOT },
         );
+        // Story 5.24: the `build` script is `tsc && normalise-dist.mjs <dist>`.
+        // Mirror that chain here so the drift check compares apples to apples.
+        await execa(
+          "node",
+          [resolve(SERVER_ROOT, "scripts/normalise-dist.mjs"), tmpRoot],
+          { cwd: SERVER_ROOT },
+        );
 
         const [committed, fresh] = await Promise.all([
           walkFiles(DIST_DIR),

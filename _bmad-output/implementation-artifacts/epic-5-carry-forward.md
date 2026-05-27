@@ -28,12 +28,10 @@
 **Fold into:** next Epic 5 story touching the `skippedRefs` push paths.
 **Unscheduled.**
 
-### 4. `.d.ts` Zod-determinism investigation
+### 4. `.d.ts` Zod-determinism investigation (Folded into 5.24)
 
 **Surface:** Tripped preflight 3× — Story 5.12 ship, Phase E pre-promotion, deep-kettle Phase 1 start. The committed `plugins/crew/mcp-server/dist/*.d.ts` files show pure key-ordering churn (`medium` / `low` swap inside Zod enum inference output) between local `tsc` rebuilds and the committed copy. Cosmetic — runtime types identical — but trips the working-tree-clean invariant.
-**Workaround:** `git restore plugins/crew/mcp-server/dist/` before any clean-tree check.
-**Fold into:** standalone Epic 5 substrate story when convenient. Not gating any Phase 3 progress. Investigation budget: small (2-3 hours likely). Likely fix: pin Zod version + lockfile cleanup, or a deterministic-emit shim in the build step.
-**Unscheduled — promote to story 5.17 candidate if it trips a fourth time.**
+**Fold into:** Story 5.24 (shipped 2026-05-28) — post-build `dist/` normaliser sorts `z.ZodEnum<{...}>` members alphabetically; regression-guarded by `tests/build-determinism.test.ts`. See Story 5.24 Dev Notes for root-cause analysis.
 
 ### 5. Reviewer `gh pr comment` PR-scope guard (originally "7a")
 

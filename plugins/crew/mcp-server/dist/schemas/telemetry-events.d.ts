@@ -75,9 +75,9 @@ export declare const ReviewerVerdictEventSchema: z.ZodObject<{
     data: z.ZodObject<{
         pr_number: z.ZodNumber;
         verdict: z.ZodEnum<{
-            "READY FOR MERGE": "READY FOR MERGE";
-            "NEEDS CHANGES": "NEEDS CHANGES";
             BLOCKED: "BLOCKED";
+            "NEEDS CHANGES": "NEEDS CHANGES";
+            "READY FOR MERGE": "READY FOR MERGE";
             "reviewer-failure": "reviewer-failure";
         }>;
         standards_version: z.ZodString;
@@ -99,8 +99,8 @@ export declare const ReviewerVerdictMergeActionEventSchema: z.ZodObject<{
     data: z.ZodObject<{
         pr_number: z.ZodNumber;
         merge_action: z.ZodEnum<{
-            merged: "merged";
             "closed-unmerged": "closed-unmerged";
+            merged: "merged";
             "still-open": "still-open";
         }>;
         resolved_at: z.ZodString;
@@ -177,9 +177,9 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
     data: z.ZodObject<{
         pr_number: z.ZodNumber;
         verdict: z.ZodEnum<{
-            "READY FOR MERGE": "READY FOR MERGE";
-            "NEEDS CHANGES": "NEEDS CHANGES";
             BLOCKED: "BLOCKED";
+            "NEEDS CHANGES": "NEEDS CHANGES";
+            "READY FOR MERGE": "READY FOR MERGE";
             "reviewer-failure": "reviewer-failure";
         }>;
         standards_version: z.ZodString;
@@ -195,8 +195,8 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
     data: z.ZodObject<{
         pr_number: z.ZodNumber;
         merge_action: z.ZodEnum<{
-            merged: "merged";
             "closed-unmerged": "closed-unmerged";
+            merged: "merged";
             "still-open": "still-open";
         }>;
         resolved_at: z.ZodString;

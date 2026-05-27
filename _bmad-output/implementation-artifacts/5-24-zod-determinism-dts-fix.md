@@ -100,4 +100,38 @@ None. Leaf story but touches the build pipeline — be careful not to break the 
 
 ## Dev Notes
 
-*(Dev fills this in during implementation per AC2 — root cause analysis + chosen strategy explanation.)*
+### Root cause (AC2)
+
+The drift is **not** in Zod's runtime, nor in the source order of `z.enum([...])` arrays, nor in the resolved Zod version (which is already pinned exactly to `4.4.3` in `pnpm-lock.yaml`). It is in **TypeScript's emit of mapped types over string-literal unions**.
+
+Zod 4 types every `z.enum([...])` call through `util.ToEnum<T[number]>`, where `ToEnum` is defined as
+
+```ts
+export type ToEnum<T extends EnumValue> = Flatten<{ [k in T]: k }>;
+```
+
+(see `node_modules/zod/v4/core/util.d.ts:82`). When `tsc` emits `.d.ts` declarations for a `ZodEnum<ToEnum<"low" | "medium" | "high">>` instance, it elaborates that mapped type into a concrete object type with one property per union member. **The order of those properties in the emit follows the union's *canonical* iteration order**, not the source array order. The canonical order is decided by an internal per-process type cache (`getUnionType` / `getNormalizedUnionType`): each literal gets a sequential type ID the first time the checker encounters it, and the union is then iterated in ascending type-ID order.
+
+The type ID a literal ends up with depends on **which file the checker visits first that references that literal** — i.e., on traversal order across the source tree. For most clean builds, that ordering happens to land identically twice in a row, so drift looks intermittent rather than constant. But any source edit that changes which file is checked first, or whose imports change which literal is canonicalised earliest, can flip the order. That matches the observed pattern: drift surfaced across `pre-dogfood-resumption-N` cycles whenever recent commits had touched the schemas in different ways, not on a fixed cadence.
+
+Confirmed in this branch by inspecting the committed `dist/`: `dist/tools/classify-risk-tier.d.ts` emits `tier: z.ZodEnum<{ medium; low; high; }>` even though the source declares `z.enum(["low", "medium", "high"])`. Source order is `low → medium → high`; emit order is `medium → low → high`. That is the smoking gun — Zod and `tsc` between them rearranged it.
+
+### Strategy chosen
+
+**Strategy C (post-build normaliser).** Strategy A is ruled out because the Zod version is already pinned exactly in `pnpm-lock.yaml`; bumping the `package.json` range to a literal pin wouldn't change the underlying TypeScript behaviour. Strategy B is ruled out because the source already uses `z.enum([...])` in canonical order — the non-determinism is downstream of source, in `tsc`'s union-canonicalisation cache.
+
+The fix is `plugins/crew/mcp-server/scripts/normalise-dist.mjs`, a ~150-line plain-JS script that walks `dist/**/*.d.ts`, finds every `ZodEnum<{ ... }>` block, and alphabetises its members in place. It runs as the second half of the `build` script:
+
+```json
+"build": "tsc -p tsconfig.json && node scripts/normalise-dist.mjs"
+```
+
+This produces a stable, total ordering of enum members regardless of how `tsc`'s type cache happens to order the union on any given run. Verified by running `pnpm build` six times in a row on a clean tree — zero drift between any pair. AC3's `tests/build-determinism.test.ts` is the regression guard going forward.
+
+The normaliser is plain JS (not TS) on purpose: a TS normaliser would create a chicken-and-egg between the `tsc` step and its post-processor, and would pull in either a runtime `tsx` dependency or a Node-version-specific type-stripping mode. JS keeps the seam thin.
+
+### Side-effects worth noting in review
+
+- `dist/` content shifted across 8 `.d.ts` files in this PR — all of them are `ZodEnum<{...}>` blocks now in alphabetical order. There are no `.js` changes (runtime is untouched; this is purely the type-emit shape).
+- `tests/dist-shipping.test.ts` was updated to invoke the normaliser inside its temp-dir `tsc` step, mirroring the new `build` chain. Without that change, the existing drift test would fail (it would compare a normalised committed `dist/` to a raw-`tsc` temp build).
+- `_bmad-output/implementation-artifacts/epic-5-carry-forward.md` entry 4 marked "Folded into 5.24"; `plugins/crew/docs/pre-dogfood-hygiene.md` "Known recurring drift" section removed.
