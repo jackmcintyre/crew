@@ -167,19 +167,21 @@ describe("AC6 — /crew:start SKILL.md content structure (Story 4.3b)", () => {
     expect(body).not.toContain("ReviewerGrammarDriftError");
     expect(body).toContain("done-blocked-reviewer-needs-changes");
     expect(body).toContain("done-blocked-reviewer-blocked");
-    expect(body).toContain("done-blocked-no-session-result");
+    // Story 5.21: done-blocked-no-session-result discriminant removed; file-absent branch now throws.
+    expect(body).toContain("ReviewerFirstCallSkippedError");
   });
 
   it("Story-4.6-rev2 — SKILL.md does NOT contain ReviewerGrammarDriftError (retired in rev-2)", () => {
     expect(body).not.toContain("ReviewerGrammarDriftError");
   });
 
-  it("Story-4.6-rev2 — inner-cycle section contains new switch branches for all three rev-2 verdict variants", () => {
+  it("Story-4.6-rev2 / Story-5.21 — inner-cycle section contains rev-2 verdict variants (done-blocked-no-session-result replaced by ReviewerFirstCallSkippedError throw)", () => {
     const section = extractInnerCycleSection(body);
     expect(section).not.toBe("");
     expect(section).toContain("done-blocked-reviewer-needs-changes");
     expect(section).toContain("done-blocked-reviewer-blocked");
-    expect(section).toContain("done-blocked-no-session-result");
+    // Story 5.21: file-absent branch now throws ReviewerFirstCallSkippedError instead of returning done-blocked-no-session-result.
+    expect(section).toContain("ReviewerFirstCallSkippedError");
   });
 
   it("Story-4.6-rev2 — SKILL.md references reviewer-result.json (the verdict transport)", () => {

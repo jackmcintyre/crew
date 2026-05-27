@@ -97,8 +97,8 @@ export interface ProcessReviewerTranscriptOptions {
  * and switches on its `recommendedVerdict` field. The reviewer's chat
  * transcript is no longer consulted.
  *
- * - Missing file → stamps `blocked_by: "reviewer-no-session-result"`, returns
- *   `done-blocked-no-session-result`. The reviewer skipped `runReviewerSession`.
+ * - Missing file → stamps `blocked_by: "reviewer-no-session-result"`, throws
+ *   `ReviewerFirstCallSkippedError`. The reviewer skipped `runReviewerSession`.
  * - `recommendedVerdict === "READY FOR MERGE"` → calls `completeStory` internally;
  *   manifest moves to `done/`; returns `done-ready-for-merge` with `completed: true`.
  * - `recommendedVerdict === "NEEDS CHANGES"` → stamps `blocked_by: "reviewer-verdict-needs-changes"`;
