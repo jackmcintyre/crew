@@ -54,7 +54,7 @@ This is a mechanical enum widening at three locations (the `BmadStatus` type, tw
 
 **NEW:**
 
-- `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` — the integration test required by AC2. Walks the live repo corpus via `path.resolve(__dirname, '../../../../../../_bmad-output/implementation-artifacts')`. See Dev Notes § "AC2 fixture layout" for the exact path-arithmetic and assertion shape.
+- `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` — the integration test required by AC2. Walks the live repo corpus via `path.resolve(__dirname, '../../../../../../../_bmad-output/implementation-artifacts')`. See Dev Notes § "AC2 fixture layout" for the exact path-arithmetic and assertion shape.
 - `plugins/crew/mcp-server/src/adapters/bmad/__tests__/map-bmad-status.test.ts` OR additions to an existing co-located unit test file — unit coverage required by AC1. There is currently no unit-test file for `map-bmad-status.ts`; the existing `__tests__/` directory contains only `parse-bmad-story.ship-gate.test.ts`. Recommended: create a new `map-bmad-status.test.ts` file co-located with the other adapter tests, since the assertions cover a distinct module. Cases:
   - `mapBmadStatusToExecution("draft")` returns `"to-do"`
   - `mapBmadStatusToExecution("approved")` returns `"to-do"`
@@ -116,18 +116,18 @@ The corpus it walks lives at:
 _bmad-output/implementation-artifacts/
 ```
 
-Both paths are relative to the repo root. From the test file's `__dirname`, the corpus root is six `..` segments up:
+Both paths are relative to the repo root. From the test file's `__dirname`, the corpus root is seven `..` segments up:
 
 ```ts
 import path from "node:path";
 
 const CORPUS_ROOT = path.resolve(
   __dirname,
-  "../../../../../../_bmad-output/implementation-artifacts",
+  "../../../../../../../_bmad-output/implementation-artifacts",
 );
 ```
 
-Count check: `__tests__/` → `bmad/` → `adapters/` → `src/` → `mcp-server/` → `crew/` → `plugins/` → repo root → `_bmad-output/implementation-artifacts/`. That's six `..` from `__dirname` (which is `__tests__/`) to the repo root, then descend into `_bmad-output/implementation-artifacts/`. Verify by `fs.existsSync(CORPUS_ROOT)` in a `beforeAll` and fail fast with a clear error message if the path arithmetic is wrong (this protects the test against future repo-layout changes).
+Count check: `__tests__/` → `bmad/` → `adapters/` → `src/` → `mcp-server/` → `crew/` → `plugins/` → repo root → `_bmad-output/implementation-artifacts/`. That's seven `..` from `__dirname` (which is `__tests__/`) to the repo root, then descend into `_bmad-output/implementation-artifacts/`. Verify by `fs.existsSync(CORPUS_ROOT)` in a `beforeAll` and fail fast with a clear error message if the path arithmetic is wrong (this protects the test against future repo-layout changes).
 
 Walk shape (`fs.readdirSync(CORPUS_ROOT)` filtered to `.md` files, then `parseBmadStory` on each). For each entry, assert:
 
