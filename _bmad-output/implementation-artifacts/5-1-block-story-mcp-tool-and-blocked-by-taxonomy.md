@@ -39,6 +39,8 @@ Story 5.13 has **already shipped** the closed `blocked_by` Zod enum, the `BLOCKE
 | `dep-not-built`          | (none)                           | **NEW member**: a manifest cannot proceed because at least one `depends_on` ref is not in `done/`. No live writer in this story — reserved for the orchestration loop (Story 5.3 / 5.4 evolution) and for operator-invoked `block-story(ref, "dep-not-built")` calls |
 | `user`                   | (none)                           | **NEW member**: operator-invoked block via `block-story(ref, "user")` — covers any human reason that does not fit a typed category. Replaces the legacy "I'll just edit the file" path with a tool call |
 
+The 9 names reconciled in this table join Story 5.13's existing 13 members; 6 of the 9 already exist in 5.13's set (deduped), netting +3 new members → 16 total.
+
 **Resulting v2 enum — sixteen members:**
 
 ```

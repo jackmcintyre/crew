@@ -341,3 +341,21 @@ So that the existing 60-spec corpus in `_bmad-output/implementation-artifacts/` 
 **AC2 (integration):** vitest runs `parseBmadStory` over every `.md` file in `_bmad-output/implementation-artifacts/` (using the real repo path as the fixture root via a `path.resolve(__dirname, ...)` walk), asserts zero `MalformedBmadStoryError` throws, and asserts every result's `raw_frontmatter.status` round-trips the on-disk literal. **Precondition baked into the same commit:** `4-3c-call-completestory-after-ready-for-merge.md`'s `Status: revised — re-implement per new architectural direction (tool-layer seam)` is normalised to `Status: done` (the spec is marked `done` in `sprint-status.yaml`). The free-text grammar is explicitly NOT accepted — `revised — ...` remains a `MalformedBmadStoryError` by design. `vitest: plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`
 
 ---
+
+## Story 5.19: `scan-sources` `readFile` resilience — warn-instead-of-throw on malformed manifest read
+
+> Added 2026-05-27 as Phase 2 canary-1 of the `cosmic-forging-spark` plan.
+> Source: `epic-5-carry-forward.md` entry 1. The to-do branch's `readFile` call currently throws on any per-file error, aborting the whole scan pass. Lower-severity recovery: warn and skip the single manifest.
+> Substrate; 2 ACs.
+
+As a plugin operator,
+I want `/crew:scan` to skip a single malformed/unreadable manifest with a warning rather than abort the whole scan,
+So that one bad spec doesn't block scanning the other 59.
+
+**Acceptance Criteria:**
+
+**AC1:** The to-do branch's `readFile` call site in `scan-sources.ts` (currently around lines 579-590, per `epic-5-carry-forward.md` entry 1) wraps the read in `try/catch`. On error, push to `result.skippedRefs` with reason `"unreadable-manifest"` and detail `"<errno>: <path>"`, then `continue`. The scan completes; the other manifests are processed normally. Refusal text matches the existing `skippedRefs` convention. `artifact: plugins/crew/mcp-server/src/tools/scan-sources.ts`
+
+**AC2 (integration):** vitest seeds a fixture with 3 valid manifests + 1 deliberately-malformed-yaml manifest under `to-do/`, runs `scanSources`, asserts (a) the 3 valid manifests scan clean, (b) the bad one appears in `result.skippedRefs` with reason `"unreadable-manifest"` and a non-empty `detail` field, (c) `scanSources` returns without throwing at the boundary (the per-file error is contained). `vitest: plugins/crew/mcp-server/src/tools/__tests__/scan-sources-readfile-resilience.test.ts`
+
+---
