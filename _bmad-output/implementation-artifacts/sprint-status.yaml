@@ -82,7 +82,7 @@ development_status:
   5-16-scan-sources-drift-on-refresh: done
   5-17-bmad-parser-ac-heading-regex-widening: done
   5-19-scan-sources-readfile-resilience: backlog
-  5-20-orphan-recovery-reviewer-only-respawn: ready-for-dev
+  5-20-orphan-recovery-reviewer-only-respawn: done
   5-21-reviewer-first-call-deterministic-seam: ready-for-dev
   epic-5-retrospective: optional
   epic-6: backlog
