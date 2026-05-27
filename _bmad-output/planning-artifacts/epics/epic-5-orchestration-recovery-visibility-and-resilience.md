@@ -276,3 +276,29 @@ So that planner-author mistakes are caught before claim time and `blocked/` mani
 **AC5 (integration):** existing `blocked/` fixtures in tests are migrated to typed values; no test references a free-string `blocked_by`.
 
 ---
+
+## Story 5.15: Fix `gh pr view --json baseRepository` non-field in 3 reviewer/auto-merge tools
+
+> Added 2026-05-27 from the first dogfood canary against `jackmcintyre/scratch` (PR #1).
+> Source: canary halt at `/crew:start` reviewer step. Diagnosis in `/tmp/handoff-2026-05-27-canary-baseRepository-fix.md`.
+> Blocks dogfood resumption. Substrate.
+
+As a plugin operator,
+I want `/crew:start`'s reviewer and auto-merge tools to query a valid `gh` field for the base repo identity,
+So that the reviewer step doesn't halt every story with `Unknown JSON field: "baseRepository"`.
+
+**Background:** Three tools call `gh pr view <n> --json baseRepository`, but `baseRepository` is not a real `gh pr view` JSON field (confirmed against gh 2.92.0; real fields include `baseRefName, baseRefOid, headRepository, headRepositoryOwner, isCrossRepository`). Tests pass because `run-auto-merge-gate.test.ts:54` mocks a synthetic `baseRepository: { name, owner: { login } }` shape that never gets validated against the real `gh` schema — classic stub-vs-real gap. Every canary `/crew:start` halts the inner cycle at `apply-reviewer-labels` and `postReviewerComments`.
+
+**Acceptance Criteria:**
+
+**AC1:** All three call sites stop referencing `baseRepository` from `gh pr view --json`. Replacement source for the base-repo `{owner, name}` is `gh repo view --json owner,name` (the base repo for a PR opened against the current repo IS the current repo). Spec author MAY pick `git config --get remote.origin.url` parsing instead if it's strictly simpler; pick one and apply uniformly. `artifact: plugins/crew/mcp-server/src/tools/post-reviewer-comments.ts, plugins/crew/mcp-server/src/tools/apply-reviewer-labels.ts, plugins/crew/mcp-server/src/tools/run-auto-merge-gate.ts`
+
+**AC2:** A real-gh integration test exercises the new code path against actual `gh repo view --json owner,name` output, skipped (not failed) when `gh` is unavailable on the host. The test asserts that the returned shape matches what the three tools consume. `vitest: plugins/crew/mcp-server/src/tools/__tests__/gh-base-repo.integration.test.ts`
+
+**AC3:** A cheap guard test fails if any file under `plugins/crew/mcp-server/src/` contains the string `baseRepository` in a `gh pr view --json` context (grep-based; assertion text names the offending file:line). Prevents regression. `vitest: plugins/crew/mcp-server/src/tools/__tests__/no-base-repository-field.test.ts`
+
+**AC4:** The existing mock in `run-auto-merge-gate.test.ts:54` is updated to match the new real shape (or removed if no longer needed). Other affected tests are migrated in the same change. `vitest: plugins/crew/mcp-server/src/tools/__tests__/run-auto-merge-gate.test.ts`
+
+**AC5 (manual canary):** After merge, re-running `/crew:start` against scratch repo `jackmcintyre/scratch` (orphan in-progress manifest preserved from today's canary) advances past the reviewer step without the `Unknown JSON field` halt. Documented in retro notes; not a CI gate.
+
+---
