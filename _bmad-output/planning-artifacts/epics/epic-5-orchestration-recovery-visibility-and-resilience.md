@@ -452,6 +452,31 @@ New MCP tool `markStoryShipped(ref: string)` that:
 
 **Why not now:** if the classifier carried debt resolves first (Epic 6→7), this tool's surface disappears — the BLOCKED-with-merged-PR case stops happening because the classifier stops false-positiving. Authoring now risks wasted spec work. Same shape of protection as Story 5.18 (structural parser) — trigger-condition gating, no premature authoring.
 
+## Story 5.18: Structural / AST-style story parser (stub-only, protected backlog)
+
+> Stub-only — protected backlog. Added 2026-05-28 (originally proposed in `sprint-change-proposal-2026-05-27-reframe.md` Phase B; promoted from carry-forward entry 11 on Phase A complete).
+> Source: memory `project_current_blocker_story_parser`; trigger-condition gated.
+
+As a plugin operator,
+I want the BMad story parser to extract semantic fields from a markdown AST rather than chain-matching brittle line-shape regexes,
+So that stories from any planner (BMad, native, future adapters) survive minor formatting drift without losing scan/validate capability.
+
+**Trigger condition (verbatim — do NOT author the spec until this fires):**
+
+This story MUST NOT be authored or shipped unless one of the following triggers:
+
+1. A **non-BMad adapter input shape** lands (e.g. JIRA, Linear, GitHub Issues, a custom user adapter whose `parseSourceStory` differs structurally from `parseBmadStory` / `parseNativeStory`) — author 5.18 BEFORE merging that adapter.
+2. An **external-planner integration** ships — same shape as (1).
+3. **Cumulative regex-widening cost** exceeds the structural-refactor cost — when total widening surface in `parse-bmad-story.ts` / `parse-native-story.ts` gets too large to safely add another widening, OR when a proposed widening would conflict with another.
+
+When any trigger fires, author the full spec via `/bmad-create-story 5.18` and ship via `/ship-story 5-18`. Until then, leave this block in place as protected backlog.
+
+**Scope sketch (NOT authoritative — spec authoring required when triggered):**
+
+Replace chain-of-whitespace-strict-regexes in `parse-bmad-story.ts` and `parse-native-story.ts` with markdown-AST extraction (`remark` / `mdast` or equivalent). Drop-in: same interface, same return shape, same error types. No upstream callers change.
+
+**Why not now:** Current parser + 5.14 + 5.17 widening patches accommodate authored stories acceptably. Cost-per-widening has been small (~quarterly). Structural refactor is substantial (~1-2 weeks). Trigger ensures authoring at the moment it pays off.
+
 ## Story 5.24: `.d.ts` Zod-determinism fix — eliminate cosmetic dist/ drift across clean rebuilds
 
 > Added 2026-05-27 post-`pre-dogfood-resumption-3` (5th occurrence of the drift).

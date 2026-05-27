@@ -76,6 +76,13 @@
 **Why deferred to protected backlog:** if the classifier work (entry 7) lands first, this tool's surface disappears — the BLOCKED-on-merged-PR case stops happening because the classifier stops false-positiving. Authoring now risks wasted spec work.
 **Fold into:** Story 5.23 (stub-only, protected backlog — see epic-5). Trigger condition: 3 more manual closeouts after 2026-05-27 (instances 1 and 2 already counted), OR classifier work slips past Epic 7 entry without resolution.
 
+### 11. Structural / AST-style story parser (Folded into 5.18 stub)
+
+**Surface:** Memory `project_current_blocker_story_parser` (parser brittleness as top blocker, pre-canary). Materialised as regex widening in 5.14 (vocabulary) and 5.17 (AC-heading shape) — both shipped. Carry-forward entry promotes the eventual structural refactor from informal tracking to story-shaped protected backlog.
+**Touch site:** `plugins/crew/mcp-server/src/adapters/bmad/parse-bmad-story.ts` and `plugins/crew/mcp-server/src/adapters/native/parse-native-story.ts` — replace chain-of-regexes with markdown-AST extraction (remark/mdast or equivalent). Drop-in: same `parseSourceStory` interface and return shape.
+**Why deferred to protected backlog:** current parser + 5.14 + 5.17 widening patches accommodate authored stories acceptably. Structural refactor is substantial (~1-2 weeks) and only pays off when a non-BMad adapter or external planner integration lands. Trigger condition in the story body gates authoring to that moment.
+**Fold into:** Story 5.18 (stub-only, protected backlog — see epic-5).
+
 ## Promotion history
 
 > Phase 2 (`dev → main` ff-promotion) records appended here as they happen, per deep-kettle plan Artefact P2.

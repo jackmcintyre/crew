@@ -81,6 +81,7 @@ development_status:
   5-15-fix-gh-pr-view-base-repository-non-field: done
   5-16-scan-sources-drift-on-refresh: done
   5-17-bmad-parser-ac-heading-regex-widening: done
+  5-18-structural-story-parser: backlog
   5-19-scan-sources-readfile-resilience: done
   5-20-orphan-recovery-reviewer-only-respawn: done
   5-21-reviewer-first-call-deterministic-seam: done
