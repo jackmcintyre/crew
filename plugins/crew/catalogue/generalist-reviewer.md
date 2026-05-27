@@ -11,6 +11,7 @@ gh_allow:
   - pr-view
   - pr-diff
   - api
+  - repo-view
 locked_phrases:
   handoff: "Handoff to generalist-dev — verdict recorded"
   yield: "This sits in <domain>'s domain — handing off."

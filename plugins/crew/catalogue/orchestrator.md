@@ -8,6 +8,7 @@ tools_allow:
   - Task
 gh_allow:
   - pr-view
+  - repo-view
 locked_phrases:
   handoff: "Handoff to <next role> — resuming work"
   yield: "This sits in <domain>'s domain — handing off."

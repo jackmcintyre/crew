@@ -11,7 +11,7 @@
  *  6. Composes the chat-log line.
  *  7. On `dryRun: true` → returns the decision without any gh shell-out.
  *  8. On `decision === "auto-merge"` → calls `gh pr merge <prNumber> --squash --delete-branch`.
- *  9. On `decision === "pause-needs-human"` → resolves owner/repo via `gh pr view`,
+ *  9. On `decision === "pause-needs-human"` → resolves owner/repo via `gh repo view`,
  *     then `gh api POST /repos/<owner>/<repo>/issues/<prNumber>/labels` with `needs-human`.
  * 10. Returns `AutoMergeGateResult`.
  *

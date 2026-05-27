@@ -7,4 +7,5 @@ tools_allow:
   - lookupRoleByDomain
 gh_allow:
   - pr-view
+  - repo-view
 gh_allow_args: {}

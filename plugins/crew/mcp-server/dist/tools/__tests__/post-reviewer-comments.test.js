@@ -151,6 +151,7 @@ beforeEach(async () => {
         "  - pr-view",
         "  - pr-diff",
         "  - api",
+        "  - repo-view",
         "gh_allow_args: {}",
     ].join("\n"));
 });
@@ -553,6 +554,7 @@ describe("(4.12 AC5 b1) reviewer.verdict telemetry — normal POST-success path"
                 "  - pr-view",
                 "  - pr-diff",
                 "  - api",
+                "  - repo-view",
                 "gh_allow_args: {}",
             ].join("\n"));
             // Write reviewer-result.json so standardsVersion and recommendedVerdict resolve.
@@ -622,6 +624,7 @@ describe("(4.12 AC5 c2) reviewer.verdict telemetry — substitution-override (re
                 "  - pr-view",
                 "  - pr-diff",
                 "  - api",
+                "  - repo-view",
                 "gh_allow_args: {}",
             ].join("\n"));
             // Seed reviewer-result.json.

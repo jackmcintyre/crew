@@ -131,27 +131,27 @@ export async function postReviewerComments(opts) {
         pluginRootOverride: pluginRoot,
     });
     const diff = diffResult.stdout;
-    // Step 3: Resolve {owner} and {repo} via `gh pr view --json baseRepository`.
-    const prViewResult = await gh({
+    // Step 3: Resolve {owner} and {repo} via `gh repo view --json owner,name`.
+    const repoViewResult = await gh({
         role,
         permissions,
-        subcommand: "pr-view",
-        args: [String(resultFile.prNumber), "--json", "baseRepository"],
+        subcommand: "repo-view",
+        args: ["--json", "owner,name"],
         execaImpl,
         pluginRootOverride: pluginRoot,
     });
     let owner;
     let repo;
     try {
-        const prViewJson = JSON.parse(prViewResult.stdout);
-        owner = prViewJson.baseRepository?.owner?.login ?? "";
-        repo = prViewJson.baseRepository?.name ?? "";
+        const repoViewJson = JSON.parse(repoViewResult.stdout);
+        owner = repoViewJson.owner?.login ?? "";
+        repo = repoViewJson.name ?? "";
         if (!owner || !repo) {
-            throw new Error("missing owner or repo in baseRepository shape");
+            throw new Error("missing owner or repo in repo-view shape");
         }
     }
     catch (cause) {
-        throw new GhApiResponseShapeError({ subcommand: "pr-view", cause });
+        throw new GhApiResponseShapeError({ subcommand: "repo-view", cause });
     }
     const reviewsApiUrl = `/repos/${owner}/${repo}/pulls/${resultFile.prNumber}/reviews`;
     // Step 4a: GET existing reviews and search for a prior verdict footer marker.
