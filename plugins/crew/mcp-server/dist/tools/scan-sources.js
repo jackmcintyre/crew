@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
-import { MalformedExecutionManifestError } from "../errors.js";
 import { extractDepRefsFromSpecBody } from "../lib/extract-dep-refs.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { ExecutionManifestSchema, parseExecutionManifest, } from "../schemas/execution-manifest.js";
@@ -470,18 +469,41 @@ export async function scanSources(opts) {
         }
         else if (currentState === "to-do") {
             // UPDATE or UNCHANGED path (AC2/AC3): manifest is in to-do/.
-            const rawText = await fs.readFile(absToDoPath, "utf8");
+            // Story 5.19: wrap readFile in try/catch — on read failure (corrupt FS,
+            // permissions, transient IO), skip this single manifest with
+            // reason: "unreadable-manifest" and detail: "<errno>: <path>" so the
+            // scan continues with the remaining manifests instead of aborting.
+            let rawText;
+            try {
+                rawText = await fs.readFile(absToDoPath, "utf8");
+            }
+            catch (err) {
+                const errno = err.code ?? "UNKNOWN";
+                result.skippedRefs.push({
+                    ref: story.ref,
+                    reason: "unreadable-manifest",
+                    detail: `${errno}: ${absToDoPath}`,
+                });
+                continue;
+            }
             let existingManifest;
             try {
                 const parsed = yamlParse(rawText);
                 existingManifest = parseExecutionManifest(parsed, { absPath: absToDoPath });
             }
             catch (err) {
-                // Propagate MalformedExecutionManifestError (AC5) — let the tool handler return isError.
-                if (err instanceof MalformedExecutionManifestError) {
-                    throw err;
-                }
-                throw err;
+                // Story 5.19: malformed YAML / schema parse failures are per-file
+                // recoverable signals — push to skippedRefs with reason: "unreadable-manifest"
+                // and detail derived from the error, then continue. (Previously this
+                // path propagated MalformedExecutionManifestError to the boundary,
+                // aborting the entire scan on the first bad file.)
+                const detailMessage = err instanceof Error ? err.message : String(err);
+                result.skippedRefs.push({
+                    ref: story.ref,
+                    reason: "unreadable-manifest",
+                    detail: `parse-error: ${detailMessage}`,
+                });
+                continue;
             }
             if (existingManifest.source_hash !== story.source_hash) {
                 // Story 5.16: deps-drift gate on to-do refresh — mirrors blocked-branch (line 404)

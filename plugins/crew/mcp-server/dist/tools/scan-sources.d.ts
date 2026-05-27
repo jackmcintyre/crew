@@ -26,7 +26,7 @@ export interface ScanResult {
     unchangedRefs: string[];
     skippedRefs: Array<{
         ref: string;
-        reason: "not-in-to-do" | "discipline-violation";
+        reason: "not-in-to-do" | "discipline-violation" | "unreadable-manifest";
         detail?: string;
     }>;
     /** Story 3.5: refs that failed planning-discipline and were written to blocked/. */

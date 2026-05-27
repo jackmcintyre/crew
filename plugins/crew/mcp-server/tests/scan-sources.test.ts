@@ -21,7 +21,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getPluginRoot } from "../src/lib/plugin-root.js";
-import { MalformedExecutionManifestError } from "../src/errors.js";
 import { parseExecutionManifest } from "../src/schemas/execution-manifest.js";
 import { scanSources } from "../src/tools/scan-sources.js";
 import { parse as yamlParse } from "yaml";
@@ -215,11 +214,18 @@ it("AC3 — manifest in in-progress/ is NOT touched by re-scan", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC5 — malformed manifest in to-do/ surfaces MalformedExecutionManifestError
+// AC5 — malformed manifest in to-do/ is contained per-file (Story 5.19 flip)
+//
+// Pre-5.19: scanSources propagated MalformedExecutionManifestError to the
+// boundary on the first malformed manifest, aborting the whole pass.
+// Post-5.19: each bad manifest is contained — the ref lands in
+// result.skippedRefs with reason "unreadable-manifest" and a non-empty detail,
+// and the scan continues with the remaining manifests. See
+// scan-sources-readfile-resilience.test.ts for the dedicated coverage.
 // ---------------------------------------------------------------------------
 
-describe("AC5 — malformed manifest refuses with typed error", () => {
-  it("structurally-valid YAML missing a required field (source_hash)", async () => {
+describe("AC5 (post 5.19 flip) — malformed manifest is contained, not thrown", () => {
+  it("structurally-valid YAML missing a required field (source_hash) is contained per-file", async () => {
     // First scan — create manifests.
     await scanSources({ targetRepoRoot: scratch });
 
@@ -231,18 +237,18 @@ describe("AC5 — malformed manifest refuses with typed error", () => {
       "ref: bmad:1.1\nstatus: to-do\nadapter: bmad\nsource_path: some/path.md\ndepends_on: []\nacceptance_criteria:\n  - text: Some AC\n    kind: unit\ntitle: Test\nnarrative: As a test.\nwithdrawn: false\n",
     );
 
-    // Re-scan: should throw MalformedExecutionManifestError because source_hash is missing.
-    await expect(scanSources({ targetRepoRoot: scratch })).rejects.toThrow(
-      MalformedExecutionManifestError,
-    );
-
-    // The error message must contain the absolute path of the manifest.
-    await expect(scanSources({ targetRepoRoot: scratch })).rejects.toSatisfy(
-      (err: unknown) => err instanceof MalformedExecutionManifestError && err.absPath === path11,
-    );
+    // Re-scan: must NOT throw; the bad ref lands in skippedRefs.
+    const result = await scanSources({ targetRepoRoot: scratch });
+    const skipped = result.skippedRefs.find((s) => s.ref === "bmad:1.1");
+    expect(skipped).toBeDefined();
+    expect(skipped!.reason).toBe("unreadable-manifest");
+    expect(skipped!.detail).toBeDefined();
+    expect(skipped!.detail!.length).toBeGreaterThan(0);
+    // Detail still references the manifest path so the operator can act.
+    expect(skipped!.detail).toContain(path11);
   });
 
-  it("YAML with extra unknown key triggers strict-mode rejection", async () => {
+  it("YAML with extra unknown key is contained per-file (strict-mode reject path)", async () => {
     // First scan.
     await scanSources({ targetRepoRoot: scratch });
 
@@ -251,9 +257,12 @@ describe("AC5 — malformed manifest refuses with typed error", () => {
     // Append an unknown key to trigger .strict() rejection.
     await fs.writeFile(path11, raw + "unknown_future_field: surprise\n");
 
-    await expect(scanSources({ targetRepoRoot: scratch })).rejects.toThrow(
-      MalformedExecutionManifestError,
-    );
+    const result = await scanSources({ targetRepoRoot: scratch });
+    const skipped = result.skippedRefs.find((s) => s.ref === "bmad:1.1");
+    expect(skipped).toBeDefined();
+    expect(skipped!.reason).toBe("unreadable-manifest");
+    expect(skipped!.detail).toBeDefined();
+    expect(skipped!.detail!.length).toBeGreaterThan(0);
   });
 });
 
