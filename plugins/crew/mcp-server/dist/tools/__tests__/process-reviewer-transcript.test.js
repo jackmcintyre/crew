@@ -28,7 +28,7 @@ import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processReviewerTranscript } from "../process-reviewer-transcript.js";
-import { ReviewerResultFileMalformedError } from "../../errors.js";
+import { ReviewerFirstCallSkippedError, ReviewerResultFileMalformedError } from "../../errors.js";
 // ---------------------------------------------------------------------------
 // Mock deriveSourceBaseline so completeStory's hand-edit guard passes.
 // ---------------------------------------------------------------------------
@@ -227,23 +227,38 @@ describe("(c) BLOCKED → done-blocked-reviewer-blocked", () => {
     });
 });
 // ---------------------------------------------------------------------------
-// (d) Missing file → done-blocked-no-session-result — spec §4m
+// (d) Missing file → ReviewerFirstCallSkippedError — Story 5.21 seam
+//
+// The previous soft `done-blocked-no-session-result` return variant has been
+// REMOVED (Story 5.21). When reviewer-result.json is absent, processReviewerTranscript
+// now throws ReviewerFirstCallSkippedError after stamping the manifest.
 // ---------------------------------------------------------------------------
-describe("(d) reviewer-result.json absent → done-blocked-no-session-result", () => {
-    it("stamps blocked_by: 'reviewer-no-session-result', manifest stays in in-progress/, chatLog explains", async () => {
+describe("(d) reviewer-result.json absent → ReviewerFirstCallSkippedError (Story 5.21 seam)", () => {
+    it("throws ReviewerFirstCallSkippedError, stamps blocked_by: 'reviewer-no-session-result', manifest stays in in-progress/", async () => {
         // Do NOT seed the result file.
-        const result = await processReviewerTranscript(makeOpts());
-        expect(result.next).toBe("done-blocked-no-session-result");
-        expect("completed" in result).toBe(false);
+        await expect(processReviewerTranscript(makeOpts())).rejects.toThrow(ReviewerFirstCallSkippedError);
+        // Manifest is stamped before the throw
         const onDisk = await readOnDiskManifest();
         expect(onDisk.blocked_by).toBe("reviewer-no-session-result");
-        // chatLog mentions the session ULID and story ref
-        const logLine = result.chatLog.join("\n");
-        expect(logLine).toContain(SESSION_ULID);
-        expect(logLine).toContain(STORY_REF);
-        // done/ is empty
+        // done/ is empty — manifest was NOT moved
         const doneFiles = await fs.readdir(path.join(tmpRoot, ".crew", "state", "done"));
         expect(doneFiles.filter((f) => f.endsWith(".yaml"))).toHaveLength(0);
+    });
+    it("error message names the missing call and carries sessionUlid + ref", async () => {
+        // Do NOT seed the result file.
+        try {
+            await processReviewerTranscript(makeOpts());
+            throw new Error("expected ReviewerFirstCallSkippedError to be thrown");
+        }
+        catch (err) {
+            expect(err).toBeInstanceOf(ReviewerFirstCallSkippedError);
+            const e = err;
+            expect(e.sessionUlid).toBe(SESSION_ULID);
+            expect(e.ref).toBe(STORY_REF);
+            expect(e.message).toContain("runReviewerSession");
+            expect(e.message).toContain(SESSION_ULID);
+            expect(e.message).toContain(STORY_REF);
+        }
     });
 });
 // ---------------------------------------------------------------------------

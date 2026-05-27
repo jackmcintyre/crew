@@ -16,6 +16,11 @@
  *    the new variants below.
  *  - New variants added: `done-blocked-reviewer-needs-changes`,
  *    `done-blocked-reviewer-blocked`, `done-blocked-no-session-result`.
+ *
+ * Story 5.21 revision (reviewer-first-call-seam):
+ *  - `done-blocked-no-session-result` return variant DELETED. The file-absent path
+ *    now throws `ReviewerFirstCallSkippedError` instead. No backward-compat path.
+ *    The inner cycle's error handler (SKILL.md step 10) catches and halts.
  *  - `import { parseVerdict }` removed (no callers after revision 2).
  *
  * **New input shape:** `{ targetRepoRoot, sessionUlid, ref, manifestPath }`
@@ -29,9 +34,10 @@
  *  - `recommendedVerdict === "BLOCKED"` → stamps `blocked_by: "reviewer-verdict-blocked"`,
  *    returns `done-blocked-reviewer-blocked`.
  *  - File absent (ENOENT) → stamps `blocked_by: "reviewer-no-session-result"`,
- *    returns `done-blocked-no-session-result`. This is the rubber-stamp protection:
- *    if the reviewer subagent skipped `runReviewerSession`, the operator sees a
- *    loud blocker rather than a silent rubber-stamp.
+ *    then **throws `ReviewerFirstCallSkippedError`** (Story 5.21 seam).
+ *    The previous soft `done-blocked-no-session-result` return variant has been
+ *    removed. Throwing makes the skipped first-call structurally undeniable —
+ *    the inner cycle MUST surface and halt rather than silently continuing.
  *  - File present but malformed/invalid → throws `ReviewerResultFileMalformedError`.
  *
  * **Behavioural contract sources:**
@@ -57,12 +63,24 @@
 import { readManifest, writeManifest } from "../lib/manifest-io.js";
 import { completeStory } from "./complete-story.js";
 import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
+import { ReviewerFirstCallSkippedError } from "../errors.js";
 import type { RecommendedVerdict } from "./run-reviewer-session.js";
 
 // ---------------------------------------------------------------------------
 // Return type
 // ---------------------------------------------------------------------------
 
+/**
+ * Story 5.21 — reviewer-first-call-seam:
+ * The `done-blocked-no-session-result` soft return variant has been REMOVED.
+ * When `reviewer-result.json` is absent, `processReviewerTranscript` now
+ * throws `ReviewerFirstCallSkippedError` (a typed DomainError), making the
+ * missing first-call a structurally undeniable failure rather than a soft
+ * discriminant the caller could silently continue past.
+ * The deterministic seam lives in the file-absent branch of
+ * `processReviewerTranscript` (see implementation below).
+ * The prose mandate in the reviewer PERSONA.md is now belt-and-braces only.
+ */
 export type ProcessReviewerTranscriptResult =
   | { next: "done-ready-for-merge"; completed: true; chatLog: string[] }
   | {
@@ -73,14 +91,6 @@ export type ProcessReviewerTranscriptResult =
   | {
       /** Reviewer's `runReviewerSession` returned BLOCKED (empty ACs or manual-check-required). */
       next: "done-blocked-reviewer-blocked";
-      chatLog: string[];
-    }
-  | {
-      /**
-       * `reviewer-result.json` was absent — the reviewer subagent skipped the
-       * mandatory `runReviewerSession` call. Rubber-stamp protection.
-       */
-      next: "done-blocked-no-session-result";
       chatLog: string[];
     };
 
@@ -107,8 +117,8 @@ export interface ProcessReviewerTranscriptOptions {
  * and switches on its `recommendedVerdict` field. The reviewer's chat
  * transcript is no longer consulted.
  *
- * - Missing file → stamps `blocked_by: "reviewer-no-session-result"`, returns
- *   `done-blocked-no-session-result`. The reviewer skipped `runReviewerSession`.
+ * - Missing file → stamps `blocked_by: "reviewer-no-session-result"`, throws
+ *   `ReviewerFirstCallSkippedError`. The reviewer skipped `runReviewerSession`.
  * - `recommendedVerdict === "READY FOR MERGE"` → calls `completeStory` internally;
  *   manifest moves to `done/`; returns `done-ready-for-merge` with `completed: true`.
  * - `recommendedVerdict === "NEEDS CHANGES"` → stamps `blocked_by: "reviewer-verdict-needs-changes"`;
@@ -135,20 +145,19 @@ export async function processReviewerTranscript(
   const resultFile = await readReviewerResultFile(targetRepoRoot, sessionUlid);
 
   if (resultFile === null) {
-    // File absent — reviewer skipped runReviewerSession (rubber-stamp protection).
+    // File absent — reviewer skipped runReviewerSession.
+    // Story 5.21 (reviewer-first-call-seam): stamp the manifest then throw a
+    // typed error. This replaces the previous soft `done-blocked-no-session-result`
+    // return variant. Throwing makes the missing first-call structurally undeniable
+    // — the inner cycle's error handler (step 10 in SKILL.md) MUST surface this and
+    // halt rather than soft-continuing to the outer loop.
     const currentManifest = await readManifest(manifestPath);
     await writeManifest(manifestPath, {
       ...currentManifest,
       blocked_by: "reviewer-no-session-result",
     });
 
-    chatLog.push(
-      `reviewer-result.json not found for session ${sessionUlid} — story ${ref} blocked. ` +
-        `The reviewer subagent did not invoke runReviewerSession. ` +
-        `Clear blocked_by on the manifest and re-run /crew:start.`,
-    );
-
-    return { next: "done-blocked-no-session-result", chatLog };
+    throw new ReviewerFirstCallSkippedError({ sessionUlid, ref });
   }
 
   const verdict: RecommendedVerdict = resultFile.recommendedVerdict;

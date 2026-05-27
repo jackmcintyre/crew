@@ -1,7 +1,7 @@
 # Story 5.21: Reviewer first-tool-call deterministic seam
 
 story_shape: substrate
-Status: ready-for-dev
+Status: review
 
 ## Story
 

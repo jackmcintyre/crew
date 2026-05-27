@@ -470,15 +470,15 @@ describe("AC5(f) — manual-merge override (structural SKILL.md check)", () => {
         const readyForMergeIdx = body.indexOf("done-ready-for-merge");
         expect(readyForMergeIdx).toBeGreaterThan(-1);
         // Find done-blocked sections in the body
+        // Story 5.21: done-blocked-no-session-result removed; use done-blocked-reviewer-blocked as the sibling anchor.
         const blockedNeedsChangesIdx = body.indexOf("done-blocked-reviewer-needs-changes");
         const blockedBlockedIdx = body.indexOf("done-blocked-reviewer-blocked");
-        const blockedNoSessionIdx = body.indexOf("done-blocked-no-session-result");
         // runAutoMergeGate invocation (prose) should appear after done-ready-for-merge
         const gateIdx = body.indexOf("runAutoMergeGate(");
         expect(gateIdx).toBeGreaterThan(-1);
         expect(gateIdx).toBeGreaterThan(readyForMergeIdx);
         // runAutoMergeGate invocation should appear BEFORE the blocked sections
-        const firstBlockedIdx = Math.min(blockedNeedsChangesIdx, blockedBlockedIdx, blockedNoSessionIdx);
+        const firstBlockedIdx = Math.min(blockedNeedsChangesIdx, blockedBlockedIdx);
         expect(gateIdx).toBeLessThan(firstBlockedIdx);
     });
 });
