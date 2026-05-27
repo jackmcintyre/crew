@@ -44,7 +44,15 @@ Before invoking `claimNextStory`, call `scanOrphanedInProgress({ targetRepoRoot,
    c. Call `processDevTranscript({ targetRepoRoot, sessionUlid, ref, devTranscript })` — pass the bytes verbatim. The dev subagent is NOT spawned; the transcript is the dev subagent's already-captured output.
    d. Surface every entry of the returned `chatLog` in order.
    e. Switch on the `next` field exactly as in step 7 of the inner cycle (`spawn-reviewer` → continue to reviewer spawn at step 8; any `done-blocked-*` → advance to the next orphan or fall through to `claimNextStory`).
-6. On `reattach` AND `orphan.hasTranscript === false`:
+6. On `reattach` AND `orphan.hasTranscript === false` AND `orphan.hasOpenPR === true` (Story 5.20 — dev already shipped, reviewer died):
+   a. Call `reattachOrphan({ targetRepoRoot, ref, currentSessionUlid: sessionUlid })`. Surface every entry of the returned `chatLog` in order.
+   b. Surface the verbatim chat line: `[orphan-reviewer-respawn] <ref> — PR is open, skipping dev replay; spawning reviewer only` (with `<ref>` substituted at runtime).
+   c. Build the reviewer prompt via `buildPersonaSpawnPrompt({ targetRepoRoot, role: "generalist-reviewer" })`.
+   d. The `prNumber` for the reviewer spawn is NOT available from the orphan manifest — surface the verbatim prompt line: `enter PR number for <ref>:` and await operator input. Store as `prNumber`.
+   e. Invoke the `Task` tool for the reviewer spawn (Step 8 of the inner cycle) using `prNumber` from the operator input. Proceed from Step 9 onward as normal.
+   f. After the reviewer inner cycle completes, advance to the next orphan in the array.
+
+7. On `reattach` AND `orphan.hasTranscript === false` AND `orphan.hasOpenPR === false`:
    a. Call `blockOrphanNoTranscript({ targetRepoRoot, ref, staleUlid })`. Surface every entry of the returned `chatLog` in order.
    b. Advance to the next orphan in the array.
 

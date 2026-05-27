@@ -33,6 +33,9 @@ const FS_WRITE_WHITELIST = new Set<string>([
   path.join(SRC_DIR, "tools", "__tests__", "reattach-orphan.test.ts"),
   path.join(SRC_DIR, "tools", "__tests__", "block-orphan-no-transcript.test.ts"),
   path.join(SRC_DIR, "__tests__", "orphan-recovery.test.ts"),
+  // Story 5.20: reviewer-only respawn tests write manifest fixtures to tmpdir.
+  // Test file only; production code routes all writes through sanctioned seams.
+  path.join(SRC_DIR, "tools", "__tests__", "orphan-recovery-reviewer-only.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

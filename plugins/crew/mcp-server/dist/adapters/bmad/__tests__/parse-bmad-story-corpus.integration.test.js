@@ -148,6 +148,10 @@ describe("parseBmadStory corpus integration — full pipeline parse (Story 5.17 
         "5-14-bmad-parser-vocabulary-widening.md",
         // Uses `**AC1:** prose-on-same-line` (inline prose, no EOL after heading) — not em-dash shape
         "5-17-bmad-parser-ac-heading-regex-widening.md",
+        // Uses `**AC1:** prose-on-same-line` (inline prose, no EOL after heading) — not em-dash shape
+        "5-20-orphan-recovery-reviewer-only-respawn.md",
+        // Uses `**AC1:** prose-on-same-line` (inline prose, no EOL after heading) — not em-dash shape
+        "5-21-reviewer-first-call-deterministic-seam.md",
     ]);
     it("every parseable em-dash-shape file completes the full parseBmadStory pipeline without throwing AND yields a non-empty acceptance_criteria array", () => {
         if (mdFiles.length === 0) {

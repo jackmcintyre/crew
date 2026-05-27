@@ -6,7 +6,8 @@
  *
  * Returns orphans in stable alphabetical ref order (sort by filename = ref + .yaml).
  * For each orphan, computes the transcript path and stats it to determine
- * `hasTranscript`.
+ * `hasTranscript`, and queries `gh pr list --head <branch>` to determine
+ * `hasOpenPR` (Story 5.20 AC1).
  *
  * Manifests whose `claimed_by` is absent (malformed) are silently skipped — they
  * are a different defect class (out of scope for this story, per Behavioural contract).
@@ -14,22 +15,29 @@
  * No write side-effects. Propagates `MalformedExecutionManifestError` verbatim.
  *
  * Architecture §MCP Tool Naming — camelCase verb-noun: `scanOrphanedInProgress`.
- * Story 5.11 Task 1.1–1.5.
+ * Story 5.11 Task 1.1–1.5. Story 5.20 AC1 adds `hasOpenPR`.
  */
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
+import { execa as defaultExeca } from "execa";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
+import { buildBranchSlug } from "../lib/pr-body.js";
 /**
  * Scan `<targetRepoRoot>/.crew/state/in-progress/` for orphaned manifests.
  *
  * An orphan is a manifest whose `claimed_by` field is defined and does not match
  * the current `sessionUlid`. Results are sorted alphabetically by ref.
  *
+ * Each orphan carries `hasOpenPR: boolean` — derived by running
+ * `gh pr list --head <branch> --state open --json number` where `<branch>` is
+ * `buildBranchSlug({ ref, title })`. On any `gh` error, defaults to `false`.
+ *
  * @throws {MalformedExecutionManifestError} When any manifest fails schema validation.
  */
 export async function scanOrphanedInProgress(opts) {
     const { targetRepoRoot, sessionUlid } = opts;
+    const execaImpl = opts.execaImpl ?? defaultExeca;
     const inProgressDir = path.join(targetRepoRoot, ".crew", "state", "in-progress");
     const sessionsDir = path.join(targetRepoRoot, ".crew", "state", "sessions");
     // Read in-progress/ directory.
@@ -84,12 +92,37 @@ export async function scanOrphanedInProgress(opts) {
             }
             // File absent — hasTranscript stays false.
         }
+        // Derive branch name using the canonical convention from buildBranchSlug
+        // (same function /ship-story and /crew:start use for dev branches via pr-body.ts).
+        // manifest.title is always present on valid in-progress manifests.
+        let hasOpenPR = false;
+        try {
+            const branch = buildBranchSlug({ ref: manifest.ref, title: manifest.title });
+            const result = await execaImpl("gh", [
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number",
+            ]);
+            const parsed = JSON.parse(result.stdout || "[]");
+            hasOpenPR = parsed.length > 0;
+        }
+        catch {
+            // Network, auth, or parse error — default to false (safe fallback to
+            // blockOrphanNoTranscript behaviour). Do NOT throw.
+            hasOpenPR = false;
+        }
         orphans.push({
             ref: manifest.ref,
             staleUlid,
             manifestPath: absPath,
             transcriptPath,
             hasTranscript,
+            hasOpenPR,
         });
     }
     return { orphans };
