@@ -1,44 +1,45 @@
 # Success Criteria
 
+> **Reframed 2026-05-27** — proof-point posture, not market-launch. v1 ship gate moved from "external stranger installs cold" to "crew builds itself." Original framing preserved as the **stretch / writeup-supporting gate** below. See `sprint-change-proposal-2026-05-27-reframe.md`.
+
 ## The single test of success (scenario, not metric)
 
-**One external reader of Jack's eventual writeup clones the repo on a clean machine, installs the plugin, primes a continuous-flow backlog with a planning conversation, walks away, and comes back to a stack of merged PRs that delivers a working piece of software they want to keep using — without Jack on the chat at any point.**
+**Crew builds itself: one clean autonomous `/crew:start` cycle completes end-to-end on the crew repo — claim → dev → review → merge — without Jack manually intervening in any step.**
 
-This is the ship-or-don't ship test. Not a metric. Not a percentage. A specific human, a specific repo, a specific outcome. If it happens once, the product works. If it doesn't happen after a reasonable trial — even if every internal metric is green — the product has failed its founding promise and the next move is to figure out why, not to declare victory on lagging indicators.
+If this happens once cleanly, the product works as a self-bootstrapping engineering team. The substrate is autonomous, the calibration mechanism works on its own work-product, and the proof-point for the eventual writeup is in hand.
 
-## User Success
+Substrate-only autonomy with manual reviewer/merge intervention (the canary-1 / canary-2 shape during Epic 5) counts as **partial** — useful as a substrate validation, but not the full gate. The full gate requires no manual hand on any step including the reviewer verdict and the merge.
 
-The user is Jack first, and a "relatively technical non-engineer" second (pressure-tested in the User Journeys section below). User success looks like:
+## User Success (v1 user: Jack-as-operator)
 
-- **"I primed the backlog, walked away, came back to merged PRs."** The continuous-flow loop ran without the user babysitting the agents or rescuing them from stuck states. The orchestration session surfaced what genuinely needed surfacing; everything else self-resolved.
-- **"I trusted what shipped without reading every line."** Reviewer agents and `docs/standards.md` did enough work that the user merged on skim, not on full diff inspection, for the majority of stories.
-- **"I caught misdirection at the backlog level, not at the diff level."** When the agents shipped the wrong thing, the user's recovery move was to re-prime the queue, not to debug the code by hand. This is the failure-mode-prevention behaviour: it forces attention onto whether the *right* thing is being built, not whether the code compiles.
-- **"The retro told me something I didn't already know."** At least once per cycle, the retro file named a pattern, miss, or lesson the user wouldn't have noticed unaided. This is the calibration loop earning its keep.
+User success looks like:
 
-## Business Success
-
-"Business" here means the project's stated vision: replace the traditional product engineering team with AI tooling, judged on a non-engineer's ability to ship.
-
-- **Soft-release coverage.** At least one external user attempts the canonical scenario above within three months of v1 ship. Even a failed attempt is a successful business signal — it produces the first real data point on what a non-Jack user trips over.
-- **Calibration loop is closing.** Across cycles, `docs/standards.md` grows from real misses, not speculation, and retros produce rule/skill proposals that get accepted at a non-zero rate. A static standard or zero accepted proposals would mean the learning loop is theatre, not function.
-- **No "shipped well, used by no one" outcome.** The product itself is the first test of its own thesis. If Jack ships v1 and finds himself not using it after week two — or finds external readers bouncing off it after install — that is the failure-mode-realised signal, and the product enters a course-correct, not a "build more features" phase.
+- **"I primed the backlog, walked away, came back to merged PRs."** Continuous-flow loop ran without babysitting or rescue.
+- **"I trusted what shipped without reading every line."** Reviewer + standards did enough work that the user merged on skim, not on full diff inspection, for the majority of stories.
+- **"I caught misdirection at the backlog level, not at the diff level."** When agents shipped the wrong thing, the user's recovery was re-priming the queue, not hand-debugging code.
+- **"The retro told me something I didn't already know."** At least once per cycle, the retro named a pattern the user wouldn't have noticed unaided.
 
 ## Technical Success
 
-- **End-to-end run on a clean machine.** From `gh repo clone` to "first PR merged via the continuous-flow loop" takes under one hour on a target user's machine, with no manual file edits beyond priming the queue and configuring agent permissions.
-- **No silent failure modes.** Every agent failure produces a visible artifact: a blocker story, a `needs-human` label, a retro entry, or an orchestration-session surface. Nothing fails into a state where the user only notices days later.
-- **State is recoverable.** If a session dies or the laptop closes mid-flow, the filesystem state (`to-do/` / `in-progress/` / `blocked/` / `done/`) is enough to resume cleanly on next launch. No daemon dependency, no lockfile recovery rituals.
-- **The reviewer is trusted enough to auto-merge low-risk.** By the end of the first dog-fooding period, the verdict-vs-action agreement metric (inherited from the Pattern A PRD) is high enough to enable low-risk auto-merge without producing a regression that ships.
+- **End-to-end run on Jack's machine** without manual intervention beyond the initial `/crew:start` command.
+- **No silent failure modes.** Every agent failure produces a visible artifact (blocker story, `needs-human` label, retro entry, orchestration surface). Nothing fails into a state the user only notices days later.
+- **State is recoverable.** Filesystem state (`to-do/` / `in-progress/` / `blocked/` / `done/`) is enough to resume after session death. No daemon dependency.
+- **Reviewer trusted enough to auto-merge low-risk.** Verdict-vs-action agreement crosses the auto-merge threshold without producing a regression that ships.
+
+## Stretch / Writeup-Supporting Gate
+
+**"External stranger installs cold and reaches first merged PR in under one hour."**
+
+Deferred past v1 ship per the 2026-05-27 reframe. Pursued only after self-bootstrap is demonstrably stable across multiple cycles. The bundled example + canary suite (Epic 7) ships in service of this stretch gate, with timing following Epic 6b.
+
+A failed external-user attempt at this stretch stage is still a valuable signal — first non-Jack data point on the install path; grist for the eventual writeup.
 
 ## Measurable Outcomes
 
 | Outcome | Target | When measured |
 |---|---|---|
-| Canonical scenario succeeds for an external user | ≥1 success | Within 3 months of v1 ship |
-| Install-to-first-merged-PR time on clean machine | ≤1 hour | Continuous; spot-checked per release |
-| % of merged PRs that user skim-merged (not full-read) | ≥70% | End of second cycle post-ship |
-| Verdict-vs-action agreement (low-risk tier eligibility) | ≥80% | End of second cycle post-ship |
-| Retros producing accepted rule/skill proposals | ≥1 accepted proposal per cycle | Continuous |
-| Standards doc evolves from observed misses | ≥1 add and ≥1 remove/relax per cycle | End of each cycle |
+| Self-bootstrap cycle succeeds (full gate) | ≥1 clean autonomous `/crew:start` cycle, no manual intervention | Within Epic 6a ship |
+| Manual-intervention count per cycle | Decreasing across Epic 5; 0 by Epic 6a complete | Per cycle |
+| Calibration loop closing | ≥1 accepted rule/skill proposal per cycle | Continuous (after 6b) |
 | Silent failures (agent fails without visible artifact) | 0 | Continuous; trip-wire |
-| "Shipped well, used by no one" outcomes (Jack's worst case) | 0 | Self-reported at each cycle retro |
+| External-user canary (stretch) | ≥1 success | After Epic 7 ships (post-self-bootstrap) |

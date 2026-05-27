@@ -1,5 +1,7 @@
 # User Personas
 
+> **v1 posture (2026-05-27 reframe):** Jack-as-operator is the **v1 user** — the canonical proof-point persona, on whom the product must work first by construction. Maya (external non-engineer who reads code) is the **eventual target** the product is built toward, not the v1 ship gate. The v1 success test is self-bootstrap on Jack's machine (see `success-criteria.md`); Maya-shape success is the Epic 7 / writeup-supporting stretch goal. The pressure-test, archetype, and Vision-state hedges below predate the reframe but cohere with it. See `_bmad-output/planning-artifacts/sprint-change-proposal-2026-05-27-reframe.md`.
+
 ## Persona 1 — Jack (canonical v1 user)
 
 Ex scrum master / agile delivery lead. Twenty-plus years across PM, BA, dev-adjacent, QA-adjacent, design-adjacent roles. Reads code well enough to follow what an agent did and judge whether it makes structural sense; cannot debug or refactor by hand. Already proved out the substrate (sprint-orchestrator) on this repo and on a separate tinytodo test repo. Building toward a public writeup. The product must work for him first, by construction.

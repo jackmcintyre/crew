@@ -58,6 +58,8 @@ Lands: `block-story` MCP tool + `blocked_by` taxonomy (source-drift, planning-di
 
 Lands: `record-story-retro`, `apply-rule-proposal`, `apply-skill-proposal`, `apply-skill-revision`, `apply-skill-retirement`, `apply-team-change`, `append-persona-knowledge`, `regenerate-standards`, `compute-outcome-stats`, `compute-skill-effectiveness`, `archive-cycle`, `record-skill-invoke` MCP tools; retro-analyst catalogue prompt; `/retro`, `/accept-proposal` skills; rule-registry parser; `discipline-rules.example.yaml`; `.proposed.md` sibling pattern for persona appends.
 
+**Phasing (2026-05-27 reframe):** Epic 6 ships in two tranches. **6a (proximate, in scope for v1):** Stories 6.1–6.3 — retro reads cycle, captures lessons, emits typed proposal markdown. **6b (deferred-but-not-dropped):** Stories 6.4–6.13 — proposals mutate `docs/standards.md`, skills, personas, and team composition via the diff-then-confirm gate. 6b is not optional — 6a's emitted proposals are inert without it; phased to defer standards-evolution complexity until self-bootstrap is demonstrably stable. See `_bmad-output/planning-artifacts/sprint-change-proposal-2026-05-27-reframe.md` and epic-6's own Phasing subsection.
+
 ---
 
 ## Epic 7: Bundled Example & Install Canary — Writeup-Ready
@@ -67,6 +69,8 @@ Lands: `record-story-retro`, `apply-rule-proposal`, `apply-skill-proposal`, `app
 **FRs covered:** FR72. **NFRs:** NFR5.
 
 Lands: `plugins/<plugin>/example/` (BMad-shaped: primed `to-do/` queue, `docs/standards.md`, `docs/risk-tiering.md`, `.crew/config.yaml`); README install-path checkpoints (install → hire → plan → start → first merged PR); e2e canary vitest; first-run polish on `/skip-hiring`, `/scan`, error messages.
+
+**Status (2026-05-27 reframe):** Epic 7 is **deferred past the self-bootstrap ship gate.** Its canonical scenario ("external stranger installs cold and reaches first merged PR in <1hr") is the **writeup-supporting / stretch gate**, not the v1 ship gate. The bundled example + canary suite still ships, but the timing follows Epic 6b (after self-bootstrap is demonstrably stable), not 6a. See memory `project_ship_gate_self_bootstrap` and epic-7's own Status subsection.
 
 ---
 

@@ -2,6 +2,14 @@
 
 A first-time user on a clean machine clones the repo, follows the README, runs the canonical scenario against the bundled example, and reaches a first merged PR in under an hour.
 
+## Status (2026-05-27 reframe)
+
+Epic 7 is **deferred past the self-bootstrap ship gate.** Its canonical scenario ("external stranger installs cold and reaches first merged PR in <1hr") is the **writeup-supporting / stretch gate**, not the v1 ship gate.
+
+The substantive work below still ships — bundled example, README install path, e2e canary — but timing follows **Epic 6b** (after self-bootstrap is demonstrably stable across multiple cycles), not 6a. A failed external-user attempt at this stretch stage remains a valuable signal: it produces the first non-Jack data point on the install path and is grist for the eventual writeup.
+
+See `_bmad-output/planning-artifacts/sprint-change-proposal-2026-05-27-reframe.md` and memory `project_ship_gate_self_bootstrap`.
+
 ## Story 7.1: Bundled BMad-shaped example target repo
 
 As a first-time plugin operator,

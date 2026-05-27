@@ -2,6 +2,17 @@
 
 Story-level retros + a cycle-level retro produce user-gated proposals that mutate rule registry, skills, personas, and team composition. The standard and the team get sharper.
 
+## Phasing (2026-05-27 reframe)
+
+Epic 6 ships in two tranches:
+
+- **6a (proximate, in scope for v1):** Stories 6.1–6.3 — retro runs, captures structured lessons, emits typed proposal markdown. **No mutation surface.** The output is inert markdown; humans (Jack) decide what, if anything, to apply by hand.
+- **6b (after self-bootstrap proven):** Stories 6.4–6.13 — proposals mutate `docs/standards.md`, skills, personas, and team composition via the `/accept-proposal <id>` diff-then-confirm gate. This is the actual calibration loop closing on itself.
+
+6b cannot be dropped; 6a's emitted proposals are inert without it. The phasing exists to defer the standards-evolution complexity until self-bootstrap is demonstrably stable. The 6a → 6b path is what makes Epic 6 a real calibration loop and not just a retro-collection feature.
+
+See `_bmad-output/planning-artifacts/sprint-change-proposal-2026-05-27-reframe.md` and memory `project_epic_6_phased`.
+
 ## Story 6.1: Story-level retro entries via `record-story-retro`
 
 As a plugin maintainer,
