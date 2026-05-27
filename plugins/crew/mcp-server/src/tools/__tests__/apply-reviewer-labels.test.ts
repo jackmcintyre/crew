@@ -103,6 +103,7 @@ beforeEach(async () => {
       "gh_allow:",
       "  - pr-view",
       "  - pr-diff",
+      "  - repo-view",
       "  - api",
       "gh_allow_args: {}",
     ].join("\n"),

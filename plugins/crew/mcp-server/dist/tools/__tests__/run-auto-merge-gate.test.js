@@ -39,9 +39,10 @@ import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 const SESSION_ULID = "01HZAUTOGATE0000000000000";
 const PR_NUMBER = 55;
 const REF = "native:01HZAUTOGATE0000000000000";
-// Default pr-view response (matches the crew repo — same as other tests)
-const DEFAULT_PR_VIEW_JSON = JSON.stringify({
-    baseRepository: { name: "crew", owner: { login: "jackmcintyre" } },
+// Default repo-view response (matches the crew repo — same as other tests)
+const DEFAULT_REPO_VIEW_JSON = JSON.stringify({
+    name: "crew",
+    owner: { login: "jackmcintyre" },
 });
 const DEFAULT_LABELS_RESPONSE = JSON.stringify([
     { id: 1, name: "needs-human", color: "e4e669" },
@@ -180,6 +181,7 @@ async function seedPluginPermissions(pluginRoot) {
         "  - pr-view",
         "  - pr-merge",
         "  - api",
+        "  - repo-view",
         "gh_allow_args: {}",
     ].join("\n") + "\n");
     await atomicWriteFile(path.join(pluginRoot, "permissions", "gh-error-map.yaml"), [
@@ -215,12 +217,12 @@ function makeFakeExeca(routes) {
     });
     return { impl, calls };
 }
-/** Fake execa that handles pr-view + api-labels (pause branch) */
+/** Fake execa that handles repo-view + api-labels (pause branch) */
 function makePauseExeca(labelsOnCall) {
     return makeFakeExeca([
         {
-            match: (cmd, args) => cmd === "gh" && args[0] === "pr" && args[1] === "view",
-            response: { stdout: DEFAULT_PR_VIEW_JSON },
+            match: (cmd, args) => cmd === "gh" && args[0] === "repo" && args[1] === "view",
+            response: { stdout: DEFAULT_REPO_VIEW_JSON },
         },
         {
             match: (cmd, args) => cmd === "gh" && args[0] === "api",
@@ -353,8 +355,8 @@ describe("AC5(b) — medium pauses", () => {
         // pr merge MUST NOT be called
         const mergeCalls = calls.filter(c => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "merge");
         expect(mergeCalls).toHaveLength(0);
-        // pr view MUST be called (owner/repo lookup)
-        const viewCalls = calls.filter(c => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "view");
+        // repo view MUST be called (owner/repo lookup)
+        const viewCalls = calls.filter(c => c.cmd === "gh" && c.args[0] === "repo" && c.args[1] === "view");
         expect(viewCalls).toHaveLength(1);
         // api POST /labels MUST be called with needs-human
         const apiCalls = calls.filter(c => c.cmd === "gh" && c.args[0] === "api");

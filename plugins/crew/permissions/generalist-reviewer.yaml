@@ -2,7 +2,8 @@ role: generalist-reviewer
 tools_allow:
   - runReviewerSession
 gh_allow:
-  - pr-view
   - pr-diff
+  - pr-view
   - api
+  - repo-view
 gh_allow_args: {}

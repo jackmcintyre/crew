@@ -5,7 +5,7 @@
  *   _bmad-output/implementation-artifacts/4-8-reviewer-labels-and-negative-capability-enforcement.md
  *
  * Reads the persisted `reviewer-result.json` written by `runReviewerSession`,
- * resolves owner/repo via `gh pr view --json baseRepository`, and applies
+ * resolves owner/repo via `gh repo view --json owner,name`, and applies
  * GitHub labels to the PR via `gh api POST /issues/{prNumber}/labels`.
  *
  * Label logic:
@@ -58,27 +58,27 @@ export async function applyReviewerLabels(opts) {
     const permissions = await loadRolePermissions({ role, pluginRoot });
     // Step 2: Resolve prNumber from the result file.
     const prNumber = resultFile.prNumber;
-    // Step 3: Resolve owner/repo via `gh pr view --json baseRepository`.
-    const prViewResult = await gh({
+    // Step 3: Resolve owner/repo via `gh repo view --json owner,name`.
+    const repoViewResult = await gh({
         role,
         permissions,
-        subcommand: "pr-view",
-        args: [String(prNumber), "--json", "baseRepository"],
+        subcommand: "repo-view",
+        args: ["--json", "owner,name"],
         execaImpl,
         pluginRootOverride: pluginRoot,
     });
     let owner;
     let repo;
     try {
-        const prViewJson = JSON.parse(prViewResult.stdout);
-        owner = prViewJson.baseRepository?.owner?.login ?? "";
-        repo = prViewJson.baseRepository?.name ?? "";
+        const repoViewJson = JSON.parse(repoViewResult.stdout);
+        owner = repoViewJson.owner?.login ?? "";
+        repo = repoViewJson.name ?? "";
         if (!owner || !repo) {
-            throw new Error("missing owner or repo in baseRepository shape");
+            throw new Error("missing owner or repo in repo-view shape");
         }
     }
     catch (cause) {
-        throw new GhApiResponseShapeError({ subcommand: "pr-view", cause });
+        throw new GhApiResponseShapeError({ subcommand: "repo-view", cause });
     }
     // Step 4: Determine verdict and labels to apply.
     const effectiveVerdict = opts.verdictOverride ?? resultFile.recommendedVerdict;

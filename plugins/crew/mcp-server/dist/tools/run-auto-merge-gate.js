@@ -11,7 +11,7 @@
  *  6. Composes the chat-log line.
  *  7. On `dryRun: true` → returns the decision without any gh shell-out.
  *  8. On `decision === "auto-merge"` → calls `gh pr merge <prNumber> --squash --delete-branch`.
- *  9. On `decision === "pause-needs-human"` → resolves owner/repo via `gh pr view`,
+ *  9. On `decision === "pause-needs-human"` → resolves owner/repo via `gh repo view`,
  *     then `gh api POST /repos/<owner>/<repo>/issues/<prNumber>/labels` with `needs-human`.
  * 10. Returns `AutoMergeGateResult`.
  *
@@ -243,27 +243,27 @@ export async function runAutoMergeGate(opts) {
     }
     else {
         // Step 9: Resolve owner/repo then apply needs-human label
-        // 9a: gh pr view <prNumber> --json baseRepository
-        const prViewResult = await gh({
+        // 9a: gh repo view --json owner,name
+        const repoViewResult = await gh({
             role,
             permissions,
-            subcommand: "pr-view",
-            args: [String(opts.prNumber), "--json", "baseRepository"],
+            subcommand: "repo-view",
+            args: ["--json", "owner,name"],
             execaImpl,
             pluginRootOverride: pluginRoot,
         });
         let owner;
         let repo;
         try {
-            const prViewJson = JSON.parse(prViewResult.stdout);
-            owner = prViewJson.baseRepository?.owner?.login ?? "";
-            repo = prViewJson.baseRepository?.name ?? "";
+            const repoViewJson = JSON.parse(repoViewResult.stdout);
+            owner = repoViewJson.owner?.login ?? "";
+            repo = repoViewJson.name ?? "";
             if (!owner || !repo) {
-                throw new Error("missing owner or repo in baseRepository shape");
+                throw new Error("missing owner or repo in repo-view shape");
             }
         }
         catch (cause) {
-            throw new GhApiResponseShapeError({ subcommand: "pr-view", cause });
+            throw new GhApiResponseShapeError({ subcommand: "repo-view", cause });
         }
         // 9b: gh api POST /repos/<owner>/<repo>/issues/<prNumber>/labels
         const labelsUrl = `/repos/${owner}/${repo}/issues/${opts.prNumber}/labels`;
