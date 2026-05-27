@@ -61,4 +61,4 @@
 
 > Phase 2 (`dev → main` ff-promotion) records appended here as they happen, per deep-kettle plan Artefact P2.
 
-_(no entries yet — first row written when `pre-dogfood-resumption-2` lands)_
+- **2026-05-27 — `pre-dogfood-resumption-2`** at HEAD `6f70f09` (ff-only from `dev`). Contents: 5.15 stub + ship (PR #160), 5.16 stub + ship (PR #161), D1/D2/A3 chore bundle, dist rebuild for D2. Ruleset 16642015 relax → ff-promote → restore cycle ran clean — no auto-mode classifier block on `git checkout main` (M1 narrowing held). `.d.ts` Zod-determinism drift reappeared on `dev` post-checkout (4th occurrence — entry 4 above is now eligible for promotion to story 5.17 per its "fourth time" trigger).
