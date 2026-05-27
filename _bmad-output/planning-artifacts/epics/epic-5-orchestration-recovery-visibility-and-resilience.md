@@ -379,3 +379,35 @@ So that the existing 60-spec corpus in `_bmad-output/implementation-artifacts/` 
 **AC2 (integration):** Extend (or supersede) the corpus-walk test at `plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts` (introduced by Story 5.14) so it asserts the full `parseBmadStory` pipeline — not just `Status:` round-trip — completes for every `.md` file in `_bmad-output/implementation-artifacts/`. After widening, the 17 currently-malformed files (`1-1, 1-2, 1-2b, 1-3, 1-4, 1-5, 1-6, 1-7, 1-7a, 1-10, 1-13, 2-4, 2-5, 4-2, 5-10, 5-12, 5-14`) MUST parse without throwing AND yield `acceptance_criteria` arrays with at least one AC each. Note: this AC also closes a likely gap in the 5.14 test — if the 5.14 test had asserted full pipeline parsing, the 17 files would have failed it pre-merge. Verify and extend. `vitest: plugins/crew/mcp-server/src/adapters/bmad/__tests__/parse-bmad-story-corpus.integration.test.ts`
 
 ---
+
+## Story 5.20: Orphan-recovery — reviewer-only re-spawn when PR exists and transcript is consumed
+
+> Added 2026-05-27 from canary-1 (bmad:5.19) Path B closeout.
+> Source: carry-forward entry 8 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`; memory `project_orphan_recovery_no_reviewer_only_branch`.
+
+As a plugin operator,
+I want `/crew:start` to retry only the reviewer when an orphan has no transcript but its PR is open and green,
+So that reviewer-side failures don't force me into Path B manual closeout when dev already shipped.
+
+**Acceptance Criteria:**
+
+**AC1:** `scanOrphanedInProgress` returns `hasOpenPR: boolean` per orphan, computed via `gh pr list --head <branch>`.
+**AC2:** `/crew:start` orchestration routes orphan with `hasTranscript: false` AND `hasOpenPR: true` → spawn-reviewer-only (skip dev replay); preserves the no-PR branch as `blocked_by: orphan-no-transcript`.
+**AC3 (integration):** vitest fixture (manifest + no transcript + open PR mocked) asserts `hasOpenPR: true` AND routing produces "spawn-reviewer" with no `blocked_by` stamp.
+**AC4 (regression):** vitest fixture (manifest + no transcript + no PR) preserves current `blocked_by: orphan-no-transcript` behaviour.
+
+## Story 5.21: Reviewer first-tool-call deterministic seam
+
+> Added 2026-05-27 from canary-1 (bmad:5.19) reviewer-skip incident.
+> Source: carry-forward entry 9 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`; memory `project_reviewer_first_call_enforcement_needed`.
+
+As a plugin operator,
+I want the reviewer cycle to be structurally incapable of completing without `runReviewerSession` having been called first,
+So that a reviewer subagent that reasons around its prose mandate cannot waste a spawn and force manual recovery.
+
+**Acceptance Criteria:**
+
+**AC1:** Reviewer-spawning orchestration calls `runReviewerSession` before the reviewer subagent begins its turn — either (a) the spawning skill/tool invokes it directly OR (b) a post-spawn guard fails-loud if `agent_invokes` lacks the call. Dev picks the cleaner seam; the persona prose mandate becomes belt-and-braces.
+**AC2:** Persona prose mandate stays but is annotated with a change-log comment naming Story 5.21 and pointing to the deterministic seam location.
+**AC3 (integration):** vitest with empty `agent_invokes` asserts orchestration either injects the call or fails-loud; manifest does NOT progress to verdict without `runReviewerSession` invoked.
+**AC4 (regression):** vitest happy path — subagent calls `runReviewerSession` first; no double-call, no fail-loud, no behavioural drift.
