@@ -80,7 +80,7 @@ development_status:
   5-14-bmad-parser-vocabulary-widening: done
   5-15-fix-gh-pr-view-base-repository-non-field: done
   5-16-scan-sources-drift-on-refresh: done
-  5-17-bmad-parser-ac-heading-regex-widening: backlog
+  5-17-bmad-parser-ac-heading-regex-widening: done
   5-19-scan-sources-readfile-resilience: backlog
   epic-5-retrospective: optional
   epic-6: backlog

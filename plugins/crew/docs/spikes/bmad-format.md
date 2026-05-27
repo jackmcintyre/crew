@@ -85,14 +85,29 @@ ACs are bolded numbered headings followed by Given/When/Then prose:
 
 **AC3 (integration):**
 ...
+
+**AC4 — Some descriptive title:**
+...
+
+**AC5 — Some title (integration):**
+...
 ```
 
 - The numeric prefix is canonical (`AC<n>`).
+- An optional **descriptive title** may appear after the AC number,
+  separated by an em-dash (`—`, U+2014) with surrounding spaces:
+  `**AC4 — Install & build pass cleanly:**`. The descriptive token is
+  **documentation only** — the parser discards it. Only em-dash
+  (U+2014) is accepted; hyphens and en-dashes are intentionally
+  rejected to keep the grammar tight and avoid ambiguity with
+  title-internal hyphens.
 - The parenthetical tag is the kind hint:
   - `(integration)` → `kind: "integration"`.
   - `(user-surface)` → `kind: "integration"` (user-surface ACs are
     end-to-end by construction; see `user-surface-acs.md`).
   - any other parenthetical, or none → `kind: "unit"`.
+- When both a descriptive title and a parenthetical tag are present,
+  the tag must follow the title: `**AC5 — Some title (integration):**`.
 - Matching is case-insensitive.
 - HTML comments inside an AC body are stripped.
 
