@@ -302,3 +302,23 @@ So that the reviewer step doesn't halt every story with `Unknown JSON field: "ba
 **AC5 (manual canary):** After merge, re-running `/crew:start` against scratch repo `jackmcintyre/scratch` (orphan in-progress manifest preserved from today's canary) advances past the reviewer step without the `Unknown JSON field` halt. Documented in retro notes; not a CI gate.
 
 ---
+
+## Story 5.16: `scan-sources` deps-drift on source-hash refresh (to-do branch)
+
+> Added 2026-05-27 from the deep-kettle re-plan (drain follow-ups before re-promoting `dev → main`).
+> Source: review of `scan-sources.ts` after Story 5.13 shipped — the to-do source-hash refresh branch (lines 577-615) rewrites the manifest on source change without calling `checkDepsDrift`, bypassing the gate that Story 5.13 added at lines 404 (blocked-branch) and 496 (currentState === null). Drift introduced by an operator edit after first scan is silently absorbed.
+> Substrate; narrowed to 2 ACs to avoid the fail-grade contradiction risk Story 5.13 hit at first pass.
+
+As a plugin operator,
+I want `/crew:scan` to refuse to overwrite a `to-do/` manifest when the refreshed source body's prose deps drift from the manifest's `depends_on`,
+So that planner-author drift introduced after the first scan is caught with the same `[deps-drift]` signal as drift introduced at first scan or in `blocked/`.
+
+**Background:** Story 5.13 added `checkDepsDrift` and wired it into two branches: line 404 (blocked-branch source-hash change) and line 496 (`currentState === null`, fresh write). The to-do refresh branch at lines 592-610 — entered when an existing `to-do/` manifest has a stale `source_hash` — calls `writeManagedFile` directly without the drift gate. This is the third branch and it leaks. Symmetry is the fix.
+
+**Acceptance Criteria:**
+
+**AC1:** The to-do source-hash refresh branch in `scan-sources.ts` (currently lines 592-610) calls `checkDepsDrift(story)` before rewriting the manifest. When `driftDetail !== null`, the branch follows the same shape as line 404's blocked-branch path: write a `blocked/` manifest via `writeDepsDriftBlockedManifest`, push to `result.skippedRefs` with reason `discipline-violation` + detail `deps-drift-prose-vs-manifest: ...`, push to `result.blockedRefs` and `result.depsDriftRefs`, then `continue` (do NOT rewrite the to-do manifest). Refusal text matches the other two branches verbatim. `artifact: plugins/crew/mcp-server/src/tools/scan-sources.ts`
+
+**AC2 (integration):** vitest covers the new branch end-to-end: seed a `to-do/` manifest whose `depends_on` matches the original spec; edit the spec on disk to introduce a prose dep the manifest omits (changing `source_hash`); run `scanSources`; assert (a) the to-do manifest is NOT overwritten — original hash and depends_on preserved, (b) a `blocked/` manifest is written with `blocked_by: deps-drift` and the typed `depsDriftRefs` entry surfaces, (c) a complementary case where the spec is edited without introducing drift still updates the to-do manifest's hash normally (idempotency control). `vitest: plugins/crew/mcp-server/src/tools/__tests__/scan-sources-drift-on-refresh.test.ts`
+
+---
