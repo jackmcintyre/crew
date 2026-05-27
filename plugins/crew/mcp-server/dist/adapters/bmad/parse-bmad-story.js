@@ -154,7 +154,10 @@ function isKnownBmadStatus(s) {
         s === "in-progress" ||
         s === "done" ||
         s === "optional" ||
-        s === "contexted");
+        s === "contexted" ||
+        s === "draft" ||
+        s === "approved" ||
+        s === "review");
 }
 // Convenience: skip rule for listSourceStories.
 export function shouldSkipBmadStatus(status) {

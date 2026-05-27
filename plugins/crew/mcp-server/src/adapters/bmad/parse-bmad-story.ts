@@ -169,7 +169,10 @@ function isKnownBmadStatus(s: string): s is BmadStatus {
     s === "in-progress" ||
     s === "done" ||
     s === "optional" ||
-    s === "contexted"
+    s === "contexted" ||
+    s === "draft" ||
+    s === "approved" ||
+    s === "review"
   );
 }
 

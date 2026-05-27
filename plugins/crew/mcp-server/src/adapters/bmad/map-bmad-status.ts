@@ -8,7 +8,10 @@ export type BmadStatus =
   | "in-progress"
   | "done"
   | "optional"
-  | "contexted";
+  | "contexted"
+  | "draft"
+  | "approved"
+  | "review";
 
 export type ExecutionState = "to-do" | "in-progress" | "blocked" | "done";
 
@@ -30,6 +33,12 @@ export function mapBmadStatusToExecution(status: BmadStatus): ExecutionState | n
       return null;
     case "contexted":
       return "to-do";
+    case "draft":
+      return "to-do";
+    case "approved":
+      return "to-do";
+    case "review":
+      return "in-progress";
   }
 }
 
@@ -98,6 +107,9 @@ function isKnownBmadStatus(s: string): s is BmadStatus {
     s === "in-progress" ||
     s === "done" ||
     s === "optional" ||
-    s === "contexted"
+    s === "contexted" ||
+    s === "draft" ||
+    s === "approved" ||
+    s === "review"
   );
 }

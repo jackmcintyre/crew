@@ -2,7 +2,7 @@
 
 story_shape: user-surface
 
-Status: revised — re-implement per new architectural direction (tool-layer seam)
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
