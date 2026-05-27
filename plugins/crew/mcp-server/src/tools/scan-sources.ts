@@ -590,6 +590,35 @@ export async function scanSources(opts: { targetRepoRoot: string }): Promise<Sca
       }
 
       if (existingManifest.source_hash !== story.source_hash) {
+        // Story 5.16: deps-drift gate on to-do refresh — mirrors blocked-branch (line 404)
+        // and currentState === null (line 496). Without this, an operator edit that
+        // introduces a new prose dep AFTER first scan would silently absorb into the
+        // refreshed to-do manifest.
+        const driftDetail = await checkDepsDrift(story);
+        if (driftDetail !== null) {
+          const absBlockedPath = path.join(stateRoot, "blocked", `${story.ref}.yaml`);
+          await writeDepsDriftBlockedManifest(
+            story,
+            driftDetail,
+            absBlockedPath,
+            activeAdapterName,
+            targetRepoRoot,
+          );
+          result.skippedRefs.push({
+            ref: story.ref,
+            reason: "discipline-violation",
+            detail: `deps-drift-prose-vs-manifest: prose: [${driftDetail.proseRefs.join(", ")}], manifest: [${driftDetail.manifestRefs.join(", ")}]`,
+          });
+          result.blockedRefs.push(story.ref);
+          result.depsDriftRefs.push({
+            ref: story.ref,
+            proseRefs: driftDetail.proseRefs,
+            manifestRefs: driftDetail.manifestRefs,
+          });
+          continue;
+        }
+
+        // No drift — existing rewrite path follows unchanged.
         // Hash changed → rewrite with new hash and source_path; preserve all other fields.
         // Operator hand-edits to narrative, acceptance_criteria, withdrawn etc. are preserved
         // per Story 3.7's hand-edit allowance.
