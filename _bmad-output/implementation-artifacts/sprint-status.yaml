@@ -78,7 +78,7 @@ development_status:
   5-12-mcp-child-resilient-to-parent-stdin-close: done
   5-13-planner-validator-prose-vs-manifest-deps-at-scan-time: done
   5-15-fix-gh-pr-view-base-repository-non-field: done
-  5-16-scan-sources-drift-on-refresh: backlog
+  5-16-scan-sources-drift-on-refresh: ready-for-dev
   epic-5-retrospective: optional
   epic-6: backlog
   6-1-story-level-retro-entries-via-record-story-retro: backlog
