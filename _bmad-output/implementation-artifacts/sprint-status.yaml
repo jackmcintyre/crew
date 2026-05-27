@@ -86,6 +86,7 @@ development_status:
   5-21-reviewer-first-call-deterministic-seam: done
   5-22-render-scan-result-leading-whitespace-assertion: done
   5-23-mark-story-shipped: backlog
+  5-24-zod-determinism-dts-fix: ready-for-dev
   epic-5-retrospective: optional
   epic-6: backlog
   6-1-story-level-retro-entries-via-record-story-retro: backlog

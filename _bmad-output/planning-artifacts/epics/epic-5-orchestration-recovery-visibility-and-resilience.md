@@ -451,3 +451,18 @@ New MCP tool `markStoryShipped(ref: string)` that:
 - Surfaced via an operator-facing slash command (`/crew:mark-shipped <ref>`) or one-shot CLI helper.
 
 **Why not now:** if the classifier carried debt resolves first (Epic 6→7), this tool's surface disappears — the BLOCKED-with-merged-PR case stops happening because the classifier stops false-positiving. Authoring now risks wasted spec work. Same shape of protection as Story 5.18 (structural parser) — trigger-condition gating, no premature authoring.
+
+## Story 5.24: `.d.ts` Zod-determinism fix — eliminate cosmetic dist/ drift across clean rebuilds
+
+> Added 2026-05-27 post-`pre-dogfood-resumption-3` (5th occurrence of the drift).
+> Source: carry-forward entry 4 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`.
+
+As a plugin operator,
+I want the `.d.ts` files under `plugins/crew/mcp-server/dist/` to be byte-identical across clean `tsc` rebuilds,
+So that the working-tree-clean invariant holds without the `git restore plugins/crew/mcp-server/dist/` workaround.
+
+**Acceptance Criteria:**
+
+**AC1:** Build determinism — two consecutive clean builds produce byte-identical `dist/`, verified 5 times consecutively.
+**AC2:** Root cause documented in story Dev Notes — names the specific Zod construct(s), version/build behaviour responsible, and why the chosen fix strategy resolves it.
+**AC3 (integration):** vitest in `plugins/crew/mcp-server/tests/build-determinism.test.ts` runs the build twice and asserts `dist/` is byte-identical between runs. Investigation-first story; dev picks strategy (pin Zod / explicit enums / post-build normaliser) after diagnosis.
