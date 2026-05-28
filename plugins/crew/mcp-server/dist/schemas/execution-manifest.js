@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MalformedExecutionManifestError } from "../errors.js";
 import { ChangeTypeSchema } from "./risk-tiering-spec.js";
+import { LessonSchema } from "./story-retro.js";
 /**
  * Zod schema for execution manifests.
  *
@@ -208,6 +209,35 @@ export const ExecutionManifestSchema = z
     })
         .strict()
         .optional(),
+    /**
+     * Structured retro entries attached to a `done/` manifest by
+     * `recordStoryRetro` (Story 6.1, FR11, FR55). `LessonSchema` is imported
+     * from `./story-retro.js` — single source of truth for the closed `kind`
+     * enum + `pitfall` superRefine.
+     *
+     * Optional on every manifest. Existing manifests (any state directory,
+     * any prior shape) parse unchanged — additive only. An empty array
+     * (`lessons: []`) is a valid value and round-trips through the
+     * `parseExecutionManifest` validator.
+     *
+     * Added in Story 6.1 AC4.
+     */
+    lessons: z.array(LessonSchema).optional(),
+    /**
+     * Story-level failure-class label, attached by `recordStoryRetro`
+     * (Story 6.1, FR11). Free-text in v1 by design — Stories 6.2/6.3 will
+     * narrow it once the retro-analyst defines the closed set.
+     *
+     * Added in Story 6.1 AC4.
+     */
+    failure_class: z.string().min(1).optional(),
+    /**
+     * Wall-clock duration of the story in seconds, attached by
+     * `recordStoryRetro` (Story 6.1, FR11). Non-negative integer.
+     *
+     * Added in Story 6.1 AC4.
+     */
+    duration_seconds: z.number().int().nonnegative().optional(),
 })
     .strict();
 /**

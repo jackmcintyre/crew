@@ -91,6 +91,19 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
         }>>>;
         diff_size: z.ZodNumber;
     }, z.core.$strict>>;
+    lessons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        kind: z.ZodEnum<{
+            discipline: "discipline";
+            pattern: "pattern";
+            pitfall: "pitfall";
+            "tool-quirk": "tool-quirk";
+        }>;
+        text: z.ZodString;
+        failure_class: z.ZodOptional<z.ZodString>;
+        routed_to: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>>;
+    failure_class: z.ZodOptional<z.ZodString>;
+    duration_seconds: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strict>;
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
 /**
