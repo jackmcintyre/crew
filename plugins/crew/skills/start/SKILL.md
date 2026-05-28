@@ -70,6 +70,9 @@ After all orphans in the array have been resolved (each either reattached-and-co
 
 After a story is claimed, the inner cycle manages the dev spawn → handoff parse → reviewer spawn → verdict parse loop. The SKILL.md prose owns the `Task` tool invocations; the MCP tools own the parsing and manifest mutations.
 
+**Invariant: Every MCP call inside the inner cycle MUST be wrapped to surface `McpDisconnectedError` on disconnect.**
+When `isMcpDisconnectError(err)` returns true for any error raised from an MCP call between step 5 (`processDevTranscript`) and step 12 (`runAutoMergeGate`), the wrapper MUST throw `McpDisconnectedError`. The catch-site surfaces the verbatim `[mcp-cascade-halted] …` line (see Failure modes) and stops — no further MCP calls, no retry. The deterministic-seam principle (memory `feedback_default_to_deterministic_seams`) applies: the typed error class is the contract, not the prose mandate. Step 4.5 (the `Write` tool persisting the dev transcript) is NOT in scope — Write is not an MCP call and survives the cascade. (Story 5.30)
+
 **Invariant: The SKILL.md prose MUST pass the transcript verbatim — no summarisation, no editing.**
 `devTranscript` (passed to `processDevTranscript`) MUST be the full final-message string returned by the `Task` tool — no extraction, no trimming. The reviewer's chat transcript is NOT passed to `processReviewerTranscript`; the verdict transport is the `reviewer-result.json` file written by `runReviewerSession` (Story 4.6 revision 2). `runReviewerSession` is the reviewer's only valid verdict-path; `processReviewerTranscript` reads the file, not the chat.
 
@@ -209,6 +212,14 @@ The rework loop is unbounded in v1 — Story 4.12's 30-min dev budget acts as th
 - **`completeStory` raising `WrongClaimantError` or `InProgressHandEditError`**: On the `READY FOR MERGE` branch, `processReviewerTranscript` calls `completeStory` internally. If the in-progress manifest has been hand-edited since claim (FR14a) OR the session ULID does not match `claimed_by` (FR19), `completeStory` raises `InProgressHandEditError` or `WrongClaimantError` respectively. These errors propagate verbatim THROUGH `processReviewerTranscript` to the prose layer, which surfaces them and exits — the outer loop does NOT advance to the next `claimNextStory` call. Recovery is operator inspection of the in-progress manifest plus a fresh `/crew:start` invocation.
 
 - **`Write` failure persisting dev transcript** (step 4.5): The built-in `Write` tool threw a filesystem error (disk full, permission denied, EROFS). The inner cycle halts; `processDevTranscript` is NOT called; the in-progress manifest is untouched. Operator recovery: inspect filesystem permissions and free space under `<targetRepoRoot>/.crew/state/sessions/`, then re-run `/crew:start`. Once Story 5.11 ships, the next `/crew:start` will surface this manifest as `[orphan]` and route it through the orphan-recovery branch.
+
+- **`McpDisconnectedError`** (any MCP call inside the inner cycle, steps 5–12): The MCP child has been killed mid-cycle by Claude Code's SIGTERM cascade on subagent `Task` return (RCA: 8/8 paired SIGTERMs across 4 incidents; see project memory `project_mcp_cascade_sigterm`). The wrapper raises `McpDisconnectedError` carrying `methodName`, `causeMessage`, and optional `ref`. The catch-site MUST emit the following verbatim halt line and stop — no further MCP calls; the manifest is left in `in-progress/` for Story 5.20's orphan-recovery branch on the next restart:
+
+  ```
+  [mcp-cascade-halted] MCP child killed by subagent Task termination — restart Claude Code and re-run /crew:start. The in-progress manifest will surface as an orphan; choose "reattach" to resume without losing work.
+  ```
+
+  Recovery (operator): restart Claude Code, re-run `/crew:start`, choose `reattach` on the orphan that surfaces. Story 5.10's transcript-persistence invariant guarantees no completed work is lost; only the in-flight reviewer cycle is replayed. The cascade fix surface lives outside the plugin — v1 accepts the limitation and halts cleanly. See project memory `project_mcp_cascade_sigterm` for the RCA and Path D2 (the v1.1 candidate fix).
 
 - **`NotAnOrphanError`** (from `reattachOrphan` in step 3.5.5.a): The manifest's `claimed_by` matched the current `sessionUlid` at the moment of the rewrite — a race where the orphan was claimed by another concurrent step between the scan and the rewrite. Surface verbatim and advance to the next orphan (the scan will re-run on the next outer-loop iteration).
 
