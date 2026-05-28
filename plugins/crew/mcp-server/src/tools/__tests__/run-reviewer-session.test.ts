@@ -149,30 +149,140 @@ function makeManifestYaml(ref: string, sessionUlid: string): string {
 // ---------------------------------------------------------------------------
 // Discriminating execaImpl stub — routes by command name.
 //
-// Issue 2 (High): the original stub returned the same value for every call,
-// including when runReviewerSession shells out to `pnpm vitest`. The stub
-// MUST discriminate by command so that gh calls and pnpm-vitest calls can
-// be independently configured.
+// Story 5.26 update: runReviewerSession now calls materialisePrBranchWorktree,
+// which invokes:
+//   - `gh pr view --json headRefName,headRefOid` (needs JSON response)
+//   - `git fetch origin <headRefName>` (needs exit 0)
+//   - `git worktree add <path> <sha>` (needs to actually create the directory
+//      so artifact checks against worktreePath work)
+//   - `git worktree remove <path> --force` (cleanup — needs exit 0)
+//
+// The stub creates the worktree directory by symlinking tmpRoot content when
+// git worktree add is intercepted. This keeps existing artifact-check
+// assertions working without requiring a real git repo.
 // ---------------------------------------------------------------------------
 
+// Fake head ref returned to materialisePrBranchWorktree for non-error test paths.
+const FAKE_HEAD_REF_NAME = "pr-head";
+const FAKE_HEAD_REF_OID = "aabbccddaabbccddaabbccddaabbccddaabbccdd";
+
+/**
+ * Intercepts `git worktree add <worktreePath> <sha>` and creates the
+ * worktreePath directory populated with the same files as `tmpRoot`.
+ * This lets artifact checks against `worktreePath` find the same fixtures.
+ */
+async function createWorktreeFromTmpRoot(
+  worktreePath: string,
+  tmpRoot: string,
+): Promise<void> {
+  const { promises: fsP } = await import("node:fs");
+  await fsP.mkdir(worktreePath, { recursive: true });
+  // Copy top-level files from tmpRoot into worktreePath (not subdirectories —
+  // the fixture only uses hello-a.txt at the top level for artifact checks).
+  const entries = await fsP.readdir(tmpRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isFile()) {
+      await fsP.copyFile(
+        path.join(tmpRoot, entry.name),
+        path.join(worktreePath, entry.name),
+      );
+    }
+  }
+}
+
 interface DiscriminatingStubOpts {
-  /** Overrides for `gh …` calls (default: returns FAKE_PR_DIFF, exitCode 0). */
+  /** Overrides for `gh …` calls (default: returns FAKE_PR_DIFF for pr-diff, JSON for headRef). */
   gh?: { stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean };
   /** Overrides for `pnpm vitest …` calls (default: exitCode 0 = pass). */
   vitest?: { stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean };
+  /**
+   * The tmpRoot directory. When provided, `git worktree add` intercept
+   * creates the worktree directory populated from tmpRoot. Required for
+   * tests that perform artifact checks.
+   */
+  tmpRoot?: string;
 }
 
 function makeDiscriminatingStub(opts: DiscriminatingStubOpts = {}) {
   const stub = vi.fn().mockImplementation(
-    async (cmd: string, _args: string[], _opts?: unknown) => {
+    async (cmd: string, args: string[], _cmdOpts?: unknown) => {
       if (cmd === "gh") {
+        const argsArr = args as string[];
+        const isPrDiff = argsArr.includes("diff");
+        const isHeadRefQuery =
+          argsArr.includes("headRefName,headRefOid") ||
+          (argsArr.includes("--json") && argsArr.some((a) => a.includes("headRefOid")));
+
+        if (opts.gh?.exitCode !== undefined && opts.gh.exitCode !== 0) {
+          // Error path — return the overridden response for all gh calls.
+          return {
+            stdout: opts.gh?.stdout ?? "",
+            stderr: opts.gh?.stderr ?? "",
+            exitCode: opts.gh.exitCode,
+            timedOut: opts.gh?.timedOut ?? false,
+          };
+        }
+
+        if (isPrDiff) {
+          return {
+            stdout: opts.gh?.stdout ?? FAKE_PR_DIFF,
+            stderr: opts.gh?.stderr ?? "",
+            exitCode: opts.gh?.exitCode ?? 0,
+            timedOut: opts.gh?.timedOut ?? false,
+          };
+        }
+
+        if (isHeadRefQuery) {
+          // Return the headRef JSON for materialisePrBranchWorktree.
+          return {
+            stdout: JSON.stringify({
+              headRefName: FAKE_HEAD_REF_NAME,
+              headRefOid: FAKE_HEAD_REF_OID,
+            }),
+            stderr: "",
+            exitCode: 0,
+            timedOut: false,
+          };
+        }
+
+        // All other gh calls (e.g. pr-view --json commits for risk-tier classification):
         return {
-          stdout: opts.gh?.stdout ?? FAKE_PR_DIFF,
+          stdout: opts.gh?.stdout ?? '["chore: stub commit"]',
           stderr: opts.gh?.stderr ?? "",
           exitCode: opts.gh?.exitCode ?? 0,
           timedOut: opts.gh?.timedOut ?? false,
         };
       }
+
+      if (cmd === "git") {
+        const argsArr = args as string[];
+        // Handle git worktree add — create the directory from tmpRoot.
+        if (argsArr[0] === "worktree" && argsArr[1] === "add") {
+          const worktreePath = argsArr[2];
+          if (worktreePath && opts.tmpRoot) {
+            await createWorktreeFromTmpRoot(worktreePath, opts.tmpRoot);
+          } else if (worktreePath) {
+            // No tmpRoot provided — just create the directory.
+            const { promises: fsP } = await import("node:fs");
+            await fsP.mkdir(worktreePath, { recursive: true });
+          }
+          return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+        }
+        // Handle git worktree remove — actually remove the directory.
+        if (argsArr[0] === "worktree" && argsArr[1] === "remove") {
+          const removePath = argsArr[2];
+          if (removePath) {
+            const { promises: fsP } = await import("node:fs");
+            await fsP.rm(removePath, { recursive: true, force: true }).catch(() => {
+              /* best-effort */
+            });
+          }
+          return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+        }
+        // git fetch and all other git commands — succeed silently.
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }
+
       if (cmd === "pnpm") {
         return {
           stdout: opts.vitest?.stdout ?? "",
@@ -195,7 +305,8 @@ function makeGhExecaStub(opts: {
   exitCode?: number;
   timedOut?: boolean;
 } = {}) {
-  return makeDiscriminatingStub({ gh: opts });
+  // Defer tmpRoot resolution — accessed via the closure over `tmpRoot` at call time.
+  return makeDiscriminatingStub({ gh: opts, get tmpRoot() { return tmpRoot; } });
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +447,7 @@ describe("AC4(d): structured acResults for the three fixture ACs", () => {
   // Asserts ac2.status === "pass" deterministically (not vacuous).
   it("AC2: applicability is runnable-vitest, pass path — stub returns pnpm exitCode 0, status === 'pass', filter used", async () => {
     // Stub: gh returns diff, pnpm vitest returns exit 0 (pass).
-    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 } });
+    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 }, get tmpRoot() { return tmpRoot; } });
     const result = await callSession({ execaImpl: passingStub });
 
     const ac2 = result.acResults[2];
@@ -415,7 +526,7 @@ describe("AC4(f): missing artifact → acResults[1].status === 'fail' with ENOEN
 describe("AC4(g): failing vitest filter → acResults[2].status === 'fail', exitCode !== 0, reason verbatim", () => {
   it("stub returns pnpm exitCode 1 → AC2 status === 'fail', reason contains 'vitest filter ... failed'", async () => {
     // Stub: gh returns diff, pnpm vitest returns exit 1 (fail path).
-    const failingStub = makeDiscriminatingStub({ vitest: { exitCode: 1, stderr: "1 failed" } });
+    const failingStub = makeDiscriminatingStub({ vitest: { exitCode: 1, stderr: "1 failed" }, get tmpRoot() { return tmpRoot; } });
 
     const result = await callSession({ execaImpl: failingStub });
 
@@ -546,7 +657,7 @@ describe("AC4(k): reviewer-result.json persistence (revision 2)", () => {
     // Wait: AC3 is manual-check-required, so rule 2 fires first → BLOCKED.
     // The fixture has AC3 as manual-check-required, so expect BLOCKED unless we strip it.
     // Use a fixture with only artifact + passing vitest (no manual ACs).
-    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 } });
+    const passingStub = makeDiscriminatingStub({ vitest: { exitCode: 0 }, get tmpRoot() { return tmpRoot; } });
     const result = await callSession({ execaImpl: passingStub });
 
     const raw = await fs.readFile(expectedFilePath(), "utf8");

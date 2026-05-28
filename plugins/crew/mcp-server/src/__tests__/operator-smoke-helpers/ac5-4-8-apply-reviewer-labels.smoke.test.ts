@@ -328,10 +328,37 @@ describe("AC5 (user-surface): applyReviewerLabels applies reviewed-by-agent + ne
       // -----------------------------------------------------------------------
       // Step 2: runReviewerSession — target-file.txt missing → NEEDS CHANGES
       // -----------------------------------------------------------------------
+      // Story 5.26: stub must handle git worktree add/remove (materialisePrBranchWorktree)
+      // and gh pr view --json headRefName,headRefOid.
+      // git worktree add creates an empty directory (no artifact) → NEEDS CHANGES expected.
       const reviewerSessionStub = vi.fn().mockImplementation(
-        async (cmd: string, _args: string[], _opts?: unknown) => {
+        async (cmd: string, args: string[], _opts?: unknown) => {
           if (cmd === "gh") {
+            const argsArr = args as string[];
+            const isHeadRefQuery =
+              argsArr.includes("headRefName,headRefOid") ||
+              (argsArr.includes("--json") && argsArr.some((a) => a.includes("headRefOid")));
+            if (isHeadRefQuery) {
+              return {
+                stdout: JSON.stringify({ headRefName: "pr-head", headRefOid: "aabbccddaabbccddaabbccddaabbccddaabbccdd" }),
+                stderr: "", exitCode: 0, timedOut: false,
+              };
+            }
             return { stdout: FAKE_PR_DIFF_WITH_ARTIFACT, stderr: "", exitCode: 0, timedOut: false };
+          }
+          if (cmd === "git") {
+            const argsArr = args as string[];
+            if (argsArr[0] === "worktree" && argsArr[1] === "add") {
+              const worktreePath = argsArr[2];
+              if (worktreePath) { await fs.mkdir(worktreePath, { recursive: true }); }
+              return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+            }
+            if (argsArr[0] === "worktree" && argsArr[1] === "remove") {
+              const removePath = argsArr[2];
+              if (removePath) { await fs.rm(removePath, { recursive: true, force: true }).catch(() => {}); }
+              return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+            }
+            return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
           }
           if (cmd === "pnpm") {
             return { stdout: "", stderr: "", exitCode: 0, timedOut: false };

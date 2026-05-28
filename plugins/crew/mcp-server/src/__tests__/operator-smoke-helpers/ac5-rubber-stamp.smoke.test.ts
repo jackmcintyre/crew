@@ -271,11 +271,71 @@ afterEach(() => {
 // Discriminating execaImpl stub for runReviewerSession
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Fake head ref for Story 5.26 materialisePrBranchWorktree seam
+// ---------------------------------------------------------------------------
+const FAKE_HEAD_REF_NAME = "pr-head";
+const FAKE_HEAD_REF_OID = "aabbccddaabbccddaabbccddaabbccddaabbccdd";
+
+/**
+ * Story 5.26: intercepts `git worktree add <path> <sha>` and creates
+ * the worktree directory, copying top-level files from `srcDir`.
+ * This lets artifact checks against the worktreePath find the same
+ * files that exist in srcDir at the time of the call.
+ */
+async function createWorktreeSnapshot(worktreePath: string, srcDir: string): Promise<void> {
+  await fs.mkdir(worktreePath, { recursive: true });
+  const entries = await fs.readdir(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isFile()) {
+      await fs.copyFile(
+        path.join(srcDir, entry.name),
+        path.join(worktreePath, entry.name),
+      ).catch(() => { /* best-effort */ });
+    }
+  }
+}
+
 function makeSmokeStubbedExeca(opts: { vitestExitCode?: number } = {}) {
   return vi.fn().mockImplementation(
-    async (cmd: string, _args: string[], _callOpts?: unknown) => {
+    async (cmd: string, args: string[], _callOpts?: unknown) => {
       if (cmd === "gh") {
+        const argsArr = args as string[];
+        // Story 5.26: respond with headRef JSON for the materialisePrBranchWorktree call.
+        const isHeadRefQuery =
+          argsArr.includes("headRefName,headRefOid") ||
+          (argsArr.includes("--json") && argsArr.some((a) => a.includes("headRefOid")));
+        if (isHeadRefQuery) {
+          return {
+            stdout: JSON.stringify({ headRefName: FAKE_HEAD_REF_NAME, headRefOid: FAKE_HEAD_REF_OID }),
+            stderr: "",
+            exitCode: 0,
+            timedOut: false,
+          };
+        }
+        // Default: all other gh calls return the fake PR diff / commits JSON.
         return { stdout: FAKE_PR_DIFF, stderr: "", exitCode: 0, timedOut: false };
+      }
+      if (cmd === "git") {
+        const argsArr = args as string[];
+        // git worktree add <path> <sha> — create directory snapshot from tmpRoot.
+        if (argsArr[0] === "worktree" && argsArr[1] === "add") {
+          const worktreePath = argsArr[2];
+          if (worktreePath) {
+            await createWorktreeSnapshot(worktreePath, tmpRoot);
+          }
+          return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+        }
+        // git worktree remove — delete the directory.
+        if (argsArr[0] === "worktree" && argsArr[1] === "remove") {
+          const removePath = argsArr[2];
+          if (removePath) {
+            await fs.rm(removePath, { recursive: true, force: true }).catch(() => { /* best-effort */ });
+          }
+          return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+        }
+        // git fetch and other git commands — succeed silently.
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
       }
       if (cmd === "pnpm") {
         const exitCode = opts.vitestExitCode ?? 0;
