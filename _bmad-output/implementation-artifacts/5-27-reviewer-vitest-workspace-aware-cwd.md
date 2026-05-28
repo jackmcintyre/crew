@@ -153,6 +153,10 @@ async function runVitestCheck(
   // ... rest unchanged
 }
 
+// NOTE: import { accessSync } from "node:fs" at the top of run-reviewer-session.ts —
+// the existing import is `import * as fs from "node:fs/promises"` which is async-only.
+// `require(...)` is NOT available here: the mcp-server package is ESM
+// (`"type": "module"` in package.json).
 function findPackageRoot(opts: {
   testFilePathAbs: string;
   checkRoot: string;
@@ -161,11 +165,15 @@ function findPackageRoot(opts: {
   let dir = path.dirname(opts.testFilePathAbs);
 
   // Bound the walk: stop when we reach checkRoot OR escape it.
-  while (dir.startsWith(checkRootAbs)) {
+  // The separator suffix on the prefix check prevents the classic
+  // `"/foobar".startsWith("/foo")` false-positive (a sibling whose name
+  // happens to begin with the checkRoot path).
+  const isWithinCheckRoot = (d: string) =>
+    d === checkRootAbs || d.startsWith(checkRootAbs + path.sep);
+
+  while (isWithinCheckRoot(dir)) {
     try {
-      // fs.accessSync is fine — we want sync semantics here and the walk
-      // is bounded by checkRoot depth.
-      require("node:fs").accessSync(path.join(dir, "package.json"));
+      accessSync(path.join(dir, "package.json"));
       return { ok: true, packageRoot: dir };
     } catch {
       // Not found here — walk up.
@@ -174,9 +182,6 @@ function findPackageRoot(opts: {
     if (parent === dir) break;  // root filesystem reached
     dir = parent;
   }
-  // Last attempt: check checkRoot itself if not already checked.
-  // (The while loop covers this if checkRootAbs has a package.json; the
-  // edge case is when checkRootAbs === path.dirname(testFilePathAbs).)
   return { ok: false };
 }
 ```
@@ -218,7 +223,7 @@ After any change in `plugins/crew/mcp-server/src/`, run `pnpm --dir plugins/crew
 
 ### Edge cases worth surfacing in dev/review
 
-- **Walk escapes `checkRoot`.** The `dir.startsWith(checkRootAbs)` guard in `findPackageRoot` ensures we never walk above `checkRoot`. This protects against a test file with a misleading path that resolves to outside the worktree (shouldn't happen if 5.26's worktree materialisation is correct, but defence in depth).
+- **Walk escapes `checkRoot`.** The `isWithinCheckRoot` guard in `findPackageRoot` (equality OR `startsWith(checkRootAbs + path.sep)`) ensures we never walk above `checkRoot` AND never falsely admit a sibling whose path string happens to begin with the `checkRoot` prefix (e.g. `checkRoot=/tmp/check`, sibling `/tmp/checker`). This protects against a test file with a misleading path that resolves to outside the worktree (shouldn't happen if 5.26's worktree materialisation is correct, but defence in depth).
 - **Symlinks in the walk.** `path.dirname` doesn't resolve symlinks. If a test file lives under a symlinked directory inside `checkRoot`, the walk may produce unexpected paths. Use `fs.realpathSync` on `testFilePathAbs` before starting the walk to canonicalise. Confirm in dev whether this matters for the crew repo's actual layout.
 - **Multiple `package.json` in the walk.** The first one found (closest to the test file) wins. That's the right semantic — the closest package owns the test. If a higher-level workspace `package.json` should override for some reason, the spec author should put the test elsewhere.
 - **`pnpm-workspace.yaml` at root with no root `package.json`.** This is the crew repo's actual shape. The walk skips `pnpm-workspace.yaml` (we're only looking for `package.json`) and continues up until either finding a `package.json` or hitting `checkRoot`. For crew, it'll find `plugins/crew/mcp-server/package.json` correctly.
