@@ -89,6 +89,30 @@
 **Adjacency to entry 1:** entry 1 covers the `readFile` resilience path (file unreadable → skip-and-flag); this entry covers the `parseSourceStory` resilience path (file readable but malformed → skip-and-flag). Same shape, different failure mode. When 5.18 is eventually authored, fold both into its AC set.
 **Fold into:** Story 5.18 (when triggered). Until then: noted here so the next `Status: backlog` stub doesn't repeat the surprise.
 
+### 13. `runReviewerSession` artifact-check against PR branch (architectural defect)
+
+**Surface:** 2026-05-28, bmad:5.24 re-roll under cleaned markers. After fixing the marker classifier (entry 7 partial-mitigation via spec authoring discipline), the reviewer's artifact-check then failed because the dev's new files (`scripts/normalise-dist.mjs`, `tests/build-determinism.test.ts`) exist only on the PR branch (`bmad-5-24-zod-determinism-dts-fix`), not on the orchestrator's local `dev` branch where `runReviewerSession` runs `fs.access(path.resolve(targetRepoRoot, artifactPath))`. Verdict returned NEEDS CHANGES on false-negative grounds.
+**Why this was hidden before:** every previously-shipped story had backticked-marker ACs that fell through the classifier to `manual-check-required` → verdict BLOCKED → Jack override. The artifact-check filesystem path was **never successfully exercised** in production. Fixing the marker classifier exposes this gap on the next story.
+**Touch site:** `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts § runArtifactCheck`. The current `fs.access(path.resolve(targetRepoRoot, artifactPath))` assumes the dev's artifacts exist at `targetRepoRoot`. They don't — they live on the PR branch in a sibling worktree at `../crew-<ref>` (the dev's worktree, torn down after handoff).
+**Right architecture:** before running artifact / vitest checks, fetch the PR head ref via `gh pr view <prNumber> --json headRefName,headRefOid`, then either (a) checkout that ref in a temporary worktree and use that path as the check root, or (b) use `git show <sha>:<path>` to verify file existence without checkout. Option (a) is more robust for vitest (which needs the source tree). Option (b) is faster for pure artifact-presence checks.
+**Workaround applied to ship bmad:5.24:** manually merged the PR branch into local `dev` before re-running the reviewer (`git merge origin/bmad-5-24-zod-determinism-dts-fix --no-ff`), then pushed dev to close the PR. Operator override; not sustainable.
+**Fold into:** new Epic 5 substrate story — author next session. Suggested title: "reviewer-session artifact-check against PR branch via gh-fetched worktree". Estimated scope: ~2-3 hours including tests + dist rebuild.
+
+### 14. `runVitestCheck` workspace-aware cwd (architectural defect)
+
+**Surface:** 2026-05-28, bmad:5.24 re-roll under cleaned markers AND post-merge to fix entry 13's filesystem gap. Reviewer's vitest check then failed because `runVitestCheck` invokes `pnpm vitest --run -t '<filter>'` with `cwd: targetRepoRoot` — but this repo is a pnpm workspace with **no root `package.json`**; the package owning vitest is `plugins/crew/mcp-server/`. Error: `ERR_PNPM_NO_PKG_MANIFEST`. Test never executes, status:fail, verdict: NEEDS CHANGES.
+**Why this was hidden before:** same reason as entry 13 — vitest path was never reached because markers were never recognised. First exposed on 2026-05-28.
+**Touch site:** `plugins/crew/mcp-server/src/tools/run-reviewer-session.ts § runVitestCheck`. Hardcoded `cwd: targetRepoRoot`.
+**Right architecture:** locate the package containing the test file by walking up from the resolved test path until the nearest `package.json`; use that directory as `cwd`. Or use `pnpm --filter <package>` shaped invocation that finds the package by name. The runVitestCheck function only knows `testNameFilter`, not the file path — so the simpler fix is to scan for `package.json` files under `targetRepoRoot`, identify the one containing the test, and use that.
+**Workaround applied:** none. 5.24 shipped via operator override of the BLOCKED-then-NEEDS-CHANGES verdict chain.
+**Fold into:** new Epic 5 substrate story — author next session. Suggested title: "reviewer-vitest workspace-aware cwd resolution". Estimated scope: ~30-60 min including tests. Can land independently of entry 13 OR be bundled.
+
+### 15. Calibration loop validation status (meta-observation)
+
+**Surface:** 2026-05-28, bmad:5.24 re-roll. Cumulative finding across entries 7, 13, 14: the reviewer toolchain's verdict path has **three structural gaps** (marker classifier, artifact-fs, vitest-cwd) that combine to make a clean tool-driven READY-FOR-MERGE verdict **structurally impossible** on any code-changing story today. Every shipped story to date has reached `done/` via operator override of a BLOCKED verdict (proximate cause: marker classifier; root cause: cumulative gaps that compound). The "calibration loop returns clean READY-FOR-MERGE without human override" proof point doesn't exist in v1 of this codebase yet.
+**Implication for proof-point story:** the eventual writeup must either (a) acknowledge that v1 ships via human override on every story, with substrate fixes promised in the next iteration, or (b) wait until entries 7+13+14 are addressed before claiming the loop closes cleanly. Option (b) is the honest framing for a portfolio artifact.
+**Fold into:** sequencing decision for next planning round. Entries 13 + 14 should land before any further Epic 6 stories ship via /crew:start. Entry 7 (marker classifier) is partially mitigated by spec authoring discipline (the 6.1/6.2/6.3 specs already use clean markers); a permanent fix is its own substrate story.
+
 ## Promotion history
 
 > Phase 2 (`dev → main` ff-promotion) records appended here as they happen, per deep-kettle plan Artefact P2.
