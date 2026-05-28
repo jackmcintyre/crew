@@ -17,13 +17,12 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 /**
- * Story 5.28 — AC3 build-watch determinism integration test.
+ * Story 5.28 — build:watch determinism test suite.
  *
- * Asserts that `scripts/watch-and-normalise.mjs` runs the normaliser after each
- * successful tsc recompile, producing a `.d.ts` tree byte-identical to what
- * `pnpm build` (one-shot) produces from the same source.
+ * Covers AC1(b) (zero-new-deps static check), AC2 (5 consecutive edit→settle
+ * cycles), AC3 (byte-identical to one-shot build), and AC4 (Dev Notes grep).
  *
- * Isolation strategy:
+ * Isolation strategy (AC3/AC2):
  * - We create a completely self-contained scratch project in tmpdir (separate from
  *   the real src/ tree) with its own tsconfig.json and a minimal source file.
  * - The wrapper is invoked with WATCH_NORMALISE_TSCONFIG pointing to the scratch
@@ -42,6 +41,17 @@ import { execFileSync } from "node:child_process";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MCP_SERVER_ROOT = resolve(HERE, "..");
+
+// Story spec path — used for AC4 Dev Notes grep assertions.
+const STORY_SPEC_PATH = resolve(
+  MCP_SERVER_ROOT,
+  "..",
+  "..",
+  "..",
+  "_bmad-output",
+  "implementation-artifacts",
+  "5-28-build-watch-normaliser-chaining.md",
+);
 const WRAPPER_SCRIPT = resolve(MCP_SERVER_ROOT, "scripts", "watch-and-normalise.mjs");
 const TSCONFIG = resolve(MCP_SERVER_ROOT, "tsconfig.json");
 const NORMALISER = resolve(MCP_SERVER_ROOT, "scripts", "normalise-dist.mjs");
@@ -221,6 +231,90 @@ function createScratchProject(projectDir: string, outDir: string): {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
+// ─── AC1(b): Zero-new-dependencies check ─────────────────────────────────────
+
+describe("Story 5.28 — AC1: zero-new-deps static check", () => {
+  /**
+   * The pre-story `dependencies` and `devDependencies` blocks (from origin/dev
+   * before the first 5.28 commit) are inlined here as the canonical reference.
+   * If anyone adds a dep this assertion catches the drift immediately.
+   */
+  const PRE_STORY_DEPENDENCIES: Record<string, string> = {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "execa": "^9.6.1",
+    "picomatch": "^4.0.4",
+    "pino": "^10.3.1",
+    "ulid": "3.0.2",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3",
+  };
+
+  const PRE_STORY_DEV_DEPENDENCIES: Record<string, string> = {
+    "@types/node": "^22.10.0",
+    "@types/picomatch": "^4.0.3",
+    "remark-parse": "11.0.0",
+    "typescript": "^5.7.0",
+    "unified": "11.0.5",
+    "vitest": "^2.1.0",
+  };
+
+  it("package.json dependencies block is byte-identical to pre-story state", () => {
+    const pkg = JSON.parse(
+      readFileSync(join(MCP_SERVER_ROOT, "package.json"), "utf8"),
+    ) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+
+    // Sort keys for a stable comparison (package.json key order may vary).
+    const sortKeys = (obj: Record<string, string>) =>
+      Object.fromEntries(Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)));
+
+    expect(sortKeys(pkg.dependencies)).toStrictEqual(sortKeys(PRE_STORY_DEPENDENCIES));
+  });
+
+  it("package.json devDependencies block is byte-identical to pre-story state", () => {
+    const pkg = JSON.parse(
+      readFileSync(join(MCP_SERVER_ROOT, "package.json"), "utf8"),
+    ) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+
+    const sortKeys = (obj: Record<string, string>) =>
+      Object.fromEntries(Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)));
+
+    expect(sortKeys(pkg.devDependencies)).toStrictEqual(sortKeys(PRE_STORY_DEV_DEPENDENCIES));
+  });
+});
+
+// ─── AC4: Dev Notes documentation checks ─────────────────────────────────────
+
+describe("Story 5.28 — AC4: Dev Notes documentation", () => {
+  it("Dev Notes explains why bare tsc --watch bypassed the 5.24 fix (subject a)", () => {
+    const spec = readFileSync(STORY_SPEC_PATH, "utf8");
+    // Subject (a): why the bare `tsc --watch` path bypassed the 5.24 fix.
+    // The note should mention that the watch path is long-running and tsc never exits,
+    // so there is no natural point to chain a follow-up command.
+    expect(spec).toMatch(/tsc.*--watch.*path/i);
+    expect(spec).toMatch(/never exits|long-running|never exit|single-shot|long running/i);
+  });
+
+  it("Dev Notes names the chosen seam and explains the choice (subject b)", () => {
+    const spec = readFileSync(STORY_SPEC_PATH, "utf8");
+    // Subject (b): why the chosen seam (wrapper script / stdout-marker) was picked.
+    expect(spec).toMatch(/stdout.*marker|stdout-marker|sentinel.*line|sentinel.*approach/i);
+    // Must explain the choice — either explicitly name "wrapper script" or the approach name.
+    expect(spec).toMatch(/wrapper|watch-and-normalise/i);
+    // Must contrast with alternatives considered/rejected.
+    expect(spec).toMatch(/alternative|rejected|considered/i);
+  });
+
+  it("Dev Notes discusses edge cases (subject c)", () => {
+    const spec = readFileSync(STORY_SPEC_PATH, "utf8");
+    // Subject (c): edge cases — orphan child processes, debouncing, normaliser concurrency.
+    expect(spec).toMatch(/orphan|SIGTERM|SIGINT/i);
+    expect(spec).toMatch(/debounce|rapid|pending.*running|running.*pending/i);
+    expect(spec).toMatch(/concurrency|race|mid-emit|mid.?emit/i);
+  });
+});
+
+// ─── AC3: end-to-end build:watch normaliser chaining ─────────────────────────
+
 describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
   it("wrapper script exists and is a regular file", () => {
     const stat = statSync(WRAPPER_SCRIPT);
@@ -340,5 +434,127 @@ describe("Story 5.28 — build:watch normaliser chaining (AC3)", () => {
     },
     // Two tsc runs against the scratch project + overhead.
     120_000,
+  );
+
+  /**
+   * AC2: 5 consecutive edit→settle cycles — zero drift on any pair.
+   *
+   * We drive the wrapper through 5 back-to-back source edits and verify that
+   * after each recompile the .d.ts output hash is identical to the previous cycle's
+   * output hash (idempotent normalisation = no drift across cycles).
+   *
+   * Implementation note: each cycle increments the sentinel counter by one; we
+   * wait for sentinel count N, capture a snapshot, then proceed to N+1.
+   * The watcher starts at sentinel 1 (initial compile), so cycles 2–6 cover the
+   * five consecutive edit→settle pairs.
+   */
+  it(
+    "AC2: 5 consecutive edit→settle cycles produce zero drift (idempotent normalisation)",
+    async () => {
+      const CYCLES = 5;
+
+      // ── Setup isolated scratch project ──
+      const scratchProjectDir = mkdtempSync(join(tmpdir(), "crew-watch-ac2-proj-"));
+      const watchOutDir = mkdtempSync(join(tmpdir(), "crew-watch-ac2-out-"));
+      activeTmpDirs = [scratchProjectDir, watchOutDir];
+
+      const { tsconfig: scratchTsconfig, srcFile, initialContent } = createScratchProject(
+        scratchProjectDir,
+        watchOutDir,
+      );
+
+      // ── Spawn wrapper ──
+      const watcher = spawn("node", [WRAPPER_SCRIPT], {
+        cwd: MCP_SERVER_ROOT,
+        stdio: ["inherit", "pipe", "inherit"],
+        detached: false,
+        env: {
+          ...process.env,
+          WATCH_NORMALISE_TSCONFIG: scratchTsconfig,
+          WATCH_NORMALISE_OUT_DIR: watchOutDir,
+          WATCH_NORMALISE_DIST_ROOT: watchOutDir,
+        },
+      }) as ChildProcessWithoutNullStreams;
+      activeWatcher = watcher;
+
+      const sentinel = createSentinelWaiter(watcher);
+
+      // Wait for initial compile to settle.
+      const initial = await sentinel.waitFor(1, 30_000);
+      expect(initial, "tsc --watch initial compile never settled within 30s").toBe(true);
+      await new Promise((r) => setTimeout(r, 400)); // let normaliser finish
+
+      const scratchDts = "scratch-enum.d.ts";
+
+      // Capture hash after initial compile.
+      const hashes: string[] = [hashDtsTree(watchOutDir)[scratchDts]];
+      expect(hashes[0], "scratch-enum.d.ts missing after initial compile").toBeDefined();
+
+      // Run CYCLES iterations of edit→settle.
+      for (let i = 0; i < CYCLES; i++) {
+        // Alternate between two content variants to guarantee a real file change each cycle.
+        const variant = i % 2 === 0
+          ? initialContent.trimEnd() + `\n// cycle-${i + 1}\n`
+          : initialContent;
+        const t = new Date();
+        writeFileSync(srcFile, variant);
+        utimesSync(srcFile, t, t);
+
+        // Wait for the next sentinel (sentinel count = i + 2 because we started at 1).
+        const settled = await sentinel.waitFor(i + 2, 20_000);
+        expect(
+          settled,
+          `cycle ${i + 1}: tsc --watch did not emit success sentinel within 20s`,
+        ).toBe(true);
+
+        // Allow the normaliser to finish (it's async post-sentinel).
+        await new Promise((r) => setTimeout(r, 600));
+
+        const h = hashDtsTree(watchOutDir)[scratchDts];
+        expect(h, `cycle ${i + 1}: scratch-enum.d.ts disappeared after recompile`).toBeDefined();
+
+        // The key invariant: after normalisation, the hash must equal the very first
+        // normalised hash (regardless of which content variant tsc compiled).
+        // We compare against the hash from the previous cycle that used the SAME content
+        // variant, or against the initial hash for the first cycle.
+        // A simpler invariant: consecutive same-content cycles must produce the same hash.
+        if (i >= 1) {
+          // Cycle i and cycle i-2 (or cycle 0 for i=2) used the same content variant.
+          // The most important property: no hash must differ from the initial hash,
+          // because after normalisation all outputs of the same source are equivalent.
+          // We allow the actual hash to differ between content variants (that's expected —
+          // we added a comment), but for same-content variants they must match.
+          const prevSameVariant = hashes[hashes.length - 2]; // two cycles back = same variant
+          if (prevSameVariant !== undefined) {
+            expect(
+              h,
+              `cycle ${i + 1}: hash drifted vs two cycles back (same-content variant) — normaliser not idempotent`,
+            ).toBe(prevSameVariant);
+          }
+        }
+        hashes.push(h);
+      }
+
+      // Final strong assertion: all hashes for even cycles (0, 2, 4) must match each other,
+      // and all hashes for odd cycles (1, 3) must match each other. This validates that
+      // the normaliser is idempotent and introduces no drift within a variant.
+      const evenHashes = hashes.filter((_, idx) => idx % 2 === 0);
+      const oddHashes  = hashes.filter((_, idx) => idx % 2 === 1);
+
+      for (let j = 1; j < evenHashes.length; j++) {
+        expect(
+          evenHashes[j],
+          `even-cycle hash[${j}] drifted from hash[0] — normaliser introduced drift`,
+        ).toBe(evenHashes[0]);
+      }
+      for (let j = 1; j < oddHashes.length; j++) {
+        expect(
+          oddHashes[j],
+          `odd-cycle hash[${j}] drifted from hash[1] — normaliser introduced drift`,
+        ).toBe(oddHashes[1]);
+      }
+    },
+    // 5 tsc recompiles × ~20s each + setup overhead.
+    300_000,
   );
 });
