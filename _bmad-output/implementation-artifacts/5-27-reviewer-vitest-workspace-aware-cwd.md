@@ -1,7 +1,7 @@
 # Story 5.27: `runVitestCheck` workspace-aware cwd resolution
 
 story_shape: substrate
-Status: ready-for-dev
+Status: review
 
 <!-- Authored 2026-05-28 after bmad:5.24 re-roll exposed the gap. Sourced from carry-forward entry 14. -->
 
@@ -242,17 +242,27 @@ After any change in `plugins/crew/mcp-server/src/`, run `pnpm --dir plugins/crew
 
 ## Definition of Done
 
-- [ ] All five ACs met (AC1–AC5).
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; new vitest at `reviewer-vitest-cwd.test.ts` exercises every AC3 fixture + AC4 paths.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
+- [x] All five ACs met (AC1–AC5).
+- [x] `pnpm --dir plugins/crew/mcp-server test` green; new vitest at `reviewer-vitest-cwd.test.ts` exercises every AC3 fixture + AC4 paths.
+- [x] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
 - [ ] PR opens against `dev`. CI green.
 - [ ] Reviewer cycle clean — this PR's own reviewer pass should now use the fixed path (recursive validation). If the reviewer hits a vitest cwd failure on its own AC checks, that's a defect in the new code that the test suite missed.
-- [ ] No changes to `docs/standards.md`, `discipline-rules.yaml`, persona files, or any state directory.
-- [ ] `classifyAc` return type updated if `testFilePath` is added as a new field; one call site updated.
+- [x] No changes to `docs/standards.md`, `discipline-rules.yaml`, persona files, or any state directory.
+- [x] `classifyAc` return type updated if `testFilePath` is added as a new field; one call site updated.
 - [ ] Carry-forward entry 14 updated to "Folded into 5.27" once shipped.
 
 ---
 
 ## Dev Notes
 
-*(Dev fills this in during implementation — any deviation from the binding tool shapes above, classifyAc transformation discoveries, walk edge cases worth recording for the next person.)*
+### Implementation discoveries (2026-05-28)
+
+**`classifyAc` inspection result:** `testNameFilter` IS the file path verbatim (outcome 1 from the spec). The `VITEST_RE` captures the full value after `vitest: `. Both `testNameFilter` and `testFilePath` are set to the same trimmed string. Both fields kept in the return type per spec guidance ("keep both for clarity").
+
+**`findPackageRoot` export:** Exported as a named export so the `reviewer-vitest-cwd.test.ts` unit tests can exercise the walk directly without going through `runReviewerSession`.
+
+**`runVitestCheck` cwd change:** `cwd: checkRoot` → `cwd: pkgRoot.packageRoot`. The failing-loud path (AC2) returns `{ status: "fail", exitCode: -1 }` without spawning pnpm at all. This is the correct behaviour — we never fall back to `checkRoot`.
+
+**Existing test fixture update:** `run-reviewer-session.test.ts`'s `buildFixture` function now writes a `package.json` at `tmpRoot` so that `findPackageRoot` can resolve cwd for the `vitest: fixture passing test` AC. The walk starts at `path.dirname(path.resolve(tmpRoot, "fixture passing test"))` = `tmpRoot`; the root-level `package.json` is found there.
+
+**canonical-fs-guard whitelist:** `reviewer-vitest-cwd.test.ts` uses sync `writeFileSync`/`mkdirSync` for fixture tree seeding (test-file only, no production writes). Added to the whitelist in `tests/canonical-fs-guard.test.ts`.

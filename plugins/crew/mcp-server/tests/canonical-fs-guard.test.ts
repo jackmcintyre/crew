@@ -52,6 +52,10 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // reliability reason. Test file only; whitelisted to match the integration
   // test's allowance.
   path.join(SRC_DIR, "lib", "__tests__", "lifecycle-log.test.ts"),
+  // Story 5.27: reviewer-vitest-cwd tests seed filesystem fixture trees
+  // (workspace-shape, no-manifest, root-manifest) using sync fs writes.
+  // Test file only; no production writes — findPackageRoot is read-only.
+  path.join(SRC_DIR, "tools", "__tests__", "reviewer-vitest-cwd.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [
