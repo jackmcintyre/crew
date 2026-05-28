@@ -47,6 +47,11 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // hung CI for 57min). Test file only; production lifecycle log writes route
   // through src/lib/lifecycle-log.ts (already whitelisted).
   path.join(SRC_DIR, "__tests__", "mcp-lifecycle-log.test.ts"),
+  // Story 5.25: the lifecycle-log unit-test's "(b) survives unwritable path"
+  // case uses the same blocker-file pattern for the same cross-platform
+  // reliability reason. Test file only; whitelisted to match the integration
+  // test's allowance.
+  path.join(SRC_DIR, "lib", "__tests__", "lifecycle-log.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

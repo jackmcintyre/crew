@@ -85,8 +85,16 @@ describe("createLifecycleLog", () => {
         expect(typeof connLine["ts"]).toBe("number");
     });
     it("(b) survives unwritable path without throwing", () => {
-        // Use a path that is guaranteed to be unwritable (root-owned directory)
-        const unwritablePath = "/proc/this-cannot-exist/mcp-lifecycle.log";
+        // Create a regular file inside tmpDir then point the log path UNDER it
+        // (as if it were a directory). On every Unix-like platform,
+        // mkdirSync(<file>/<sub>, { recursive: true }) throws ENOTDIR
+        // synchronously. This is more reliable than platform-specific paths
+        // like /proc/this-cannot-exist which behave differently across kernels
+        // (the previous version hung CI on Linux because the error fired async
+        // via createWriteStream while logger.close() ran synchronously).
+        const blocker = path.join(tmpDir, "not-a-directory");
+        fs.writeFileSync(blocker, "");
+        const unwritablePath = path.join(blocker, "mcp-lifecycle.log");
         let threw = false;
         try {
             const logger = createLifecycleLog({ path: unwritablePath });
