@@ -1522,3 +1522,50 @@ export class StoryNotInDoneStateError extends DomainError {
     this.foundIn = opts.foundIn;
   }
 }
+
+/**
+ * The MCP child has been killed mid-cycle. Thrown from the prose-layer
+ * wrapper used by `/crew:start`'s inner cycle whenever an MCP call surfaces
+ * the SDK's "tools no longer available" / "MCP server has disconnected"
+ * error class.
+ *
+ * Root cause (Story 5.30 RCA): Claude Code emits a SIGTERM cascade on
+ * subagent `Task` return that kills BOTH MCP children (the subagent's,
+ * expected — and the parent session's, the bug). 8/8 paired SIGTERMs
+ * observed across 4 distinct incidents in `~/.crew/mcp-lifecycle.log`.
+ * The fix surface lives outside the plugin; v1 accepts the limitation
+ * and halts cleanly via this typed error.
+ *
+ * Catch-site (SKILL.md prose): emit the verbatim halt line
+ *   [mcp-cascade-halted] MCP child killed by subagent Task termination — ...
+ * and stop. No further MCP calls; the in-progress manifest is left for
+ * Story 5.20's orphan-recovery branch on the next restart.
+ *
+ * Deterministic seam: the typed error class is the contract — the prose
+ * layer's catch-site keys off the class name, not the SDK's error text.
+ * Future reviewers can grep `McpDisconnectedError` to find every catch.
+ *
+ * Story 5.30 — MCP cascade halt seam + lifecycle-log diagnostic fields.
+ */
+export class McpDisconnectedError extends DomainError {
+  readonly methodName: string;
+  readonly causeMessage: string;
+  readonly ref: string | undefined;
+
+  constructor(opts: {
+    methodName: string;
+    causeMessage: string;
+    ref?: string;
+  }) {
+    const refSuffix = opts.ref ? ` ref=${opts.ref}` : "";
+    super(
+      `MCP child unavailable mid-cycle — likely SIGTERM cascade on subagent Task return. ` +
+        `methodName=${opts.methodName}, cause=${opts.causeMessage}${refSuffix}. ` +
+        `See ~/.crew/mcp-lifecycle.log for paired-SIGTERM evidence. ` +
+        `(Story 5.30 — mcp-cascade-halt-seam)`,
+    );
+    this.methodName = opts.methodName;
+    this.causeMessage = opts.causeMessage;
+    this.ref = opts.ref;
+  }
+}
