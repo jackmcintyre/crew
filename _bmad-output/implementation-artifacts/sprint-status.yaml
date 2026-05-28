@@ -89,6 +89,8 @@ development_status:
   5-23-mark-story-shipped: backlog
   5-24-zod-determinism-dts-fix: done
   5-25-always-on-mcp-lifecycle-logging: ready-for-dev
+  5-26-reviewer-session-artifact-check-against-pr-branch: ready-for-dev
+  5-27-reviewer-vitest-workspace-aware-cwd: ready-for-dev
   epic-5-retrospective: optional
   epic-6: in-progress
   6-1-story-level-retro-entries-via-record-story-retro: ready-for-dev

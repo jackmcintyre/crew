@@ -534,3 +534,41 @@ vitest spawns the dist with `CREW_MCP_KEEPALIVE_MS=2000` and `CREW_MCP_LIFECYCLE
 vitest: plugins/crew/mcp-server/src/__tests__/mcp-keepalive.test.ts
 
 **Note:** AC2's effectiveness against the real parent (does Claude Code's idle timer reset on incoming traffic?) is unverifiable in isolated tests — we can only confirm in real sessions. The lifecycle log from AC1 is the post-ship verification mechanism: if `stdin.end` events stop appearing in long idle sessions, the keepalive is working; if they still appear, the parent's timer is wall-clock and we revisit in a follow-up story (not a blocker for this one — the log gives us the signal).
+
+## Story 5.26: `runReviewerSession` artifact-check against PR branch
+
+> Added 2026-05-28 after bmad:5.24 re-roll exposed the gap.
+> Source: carry-forward entry 13 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`.
+
+As a plugin operator,
+I want the reviewer's artifact-presence check to verify against the PR branch's filesystem (not the orchestrator's local `dev`),
+So that the reviewer can return a true verdict on dev-shipped code without requiring an operator-side pre-merge.
+
+**Context:** `runReviewerSession.runArtifactCheck` currently does `fs.access(path.resolve(targetRepoRoot, artifactPath))`. `targetRepoRoot` is the orchestrator's working dir, which sits on `dev` — but the dev subagent's new files live on the PR's head branch (e.g. `bmad-5-24-zod-determinism-dts-fix`) in a sibling worktree at `../crew-<ref>` that gets torn down after handoff. Net effect: every PR's artifact check sees "file missing" → status:fail → verdict:NEEDS CHANGES. This was hidden in v1 because the marker classifier (carry-forward entry 7) returned manual-check-required for every backticked-marker AC, so the artifact-check filesystem path was never reached. Fixing markers in spec authoring discipline (6.1/6.3/6.2 now do this) exposed this gap.
+
+**Acceptance Criteria:**
+
+**AC1:** Before running per-AC artifact checks, `runReviewerSession` fetches the PR's `headRefName` and `headRefOid` via `gh pr view <prNumber> --json headRefName,headRefOid`, then materialises that ref's filesystem state for the duration of the check.
+**AC2:** The check root used by `runArtifactCheck` and `runVitestCheck` is the PR-branch filesystem, not `targetRepoRoot`. Implementation strategy is dev's choice: (a) `git worktree add <tmp> <sha>` + use `<tmp>` as check root + tear down on exit; or (b) for artifact-presence only, `git cat-file -e <sha>:<path>` to verify without checkout. Strategy (a) is required for AC3.
+**AC3 (integration):** vitest seeds a tmp git repo with two branches (orchestrator branch lacking the artifact; PR branch containing it), seeds a `to-do/<ref>.yaml` + reviewer-result.json shape that drives `runReviewerSession`, runs the reviewer against a stub PR number with `gh` mocked to return the PR-branch ref, asserts artifact check passes against the PR branch's filesystem rather than the orchestrator's. Repeats for the missing-artifact case (returns status:fail correctly).
+**AC4:** On any `gh` failure during the head-ref fetch (recoverable or otherwise), surface a typed error and halt the reviewer session — do NOT silently fall back to the local-filesystem check. Old behaviour is structurally wrong; failing-closed is correct.
+**AC5:** After check completion, the temporary worktree (if strategy a) is cleaned up unconditionally (try/finally). Stale temp worktrees from prior interrupted runs are detected and reaped on subsequent invocations.
+
+## Story 5.27: `runVitestCheck` workspace-aware cwd resolution
+
+> Added 2026-05-28 after bmad:5.24 re-roll exposed the gap.
+> Source: carry-forward entry 14 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`.
+
+As a plugin operator,
+I want the reviewer's vitest invocation to run from the package directory that owns the test file (not the workspace root),
+So that vitest checks succeed in monorepo / pnpm-workspace target repos that have no root `package.json`.
+
+**Context:** `runReviewerSession.runVitestCheck` currently invokes `pnpm vitest --run -t '<filter>'` with `cwd: targetRepoRoot`. The crew repo is a pnpm workspace with no root `package.json` (the vitest-owning package is `plugins/crew/mcp-server/`). Invocation fails with `ERR_PNPM_NO_PKG_MANIFEST`; test never executes; AC status:fail; verdict:NEEDS CHANGES. Hidden behind the same marker-classifier issue as Story 5.26 until 2026-05-28.
+
+**Acceptance Criteria:**
+
+**AC1:** `runVitestCheck` resolves the cwd from the test file's location: walks up from the resolved absolute path of the test file (derived from the `vitest:` marker) until it finds the nearest `package.json`, and uses that directory as the `cwd` for the `pnpm vitest` invocation.
+**AC2:** If no `package.json` is found between the test file and `targetRepoRoot` (inclusive), the check returns status:fail with a clear reason naming the missing-manifest condition — does NOT silently fall back to `targetRepoRoot`.
+**AC3 (integration):** vitest seeds a fixture mimicking the crew workspace shape: outer dir with no `package.json`, inner `plugins/crew/mcp-server/` with a valid `package.json` + a passing vitest test. Asserts `runVitestCheck` (a) correctly identifies `plugins/crew/mcp-server` as cwd, (b) runs vitest there, (c) returns status:pass. Repeat for a fixture with no nested `package.json` — asserts status:fail with the missing-manifest reason.
+**AC4:** Dependency on Story 5.26: this story sits on top of 5.26's PR-branch check root. If 5.26 hasn't shipped, the test-file path resolves against `targetRepoRoot` (orchestrator's local dev) and the workspace walk happens there — which still works for this repo's shape. If 5.26 has shipped, the walk happens inside the PR-branch worktree. Both paths must be exercised by AC3.
+
