@@ -20,9 +20,15 @@
  * are Epic 5 concerns.
  *
  * FR19 — atomic complete, FR14a — hand-edit guard.
+ *
+ * **Story 5.29 — sidecar baseline.** The hand-edit guard reads its baseline
+ * from the claim-time sidecar at `.crew/state/in-progress/<ref>.snapshot.yaml`,
+ * not by re-reading the source story. After successful transition to `done/`,
+ * `completeStory` removes the sidecar (best-effort).
+ *
  * See also: `moveBetweenStates` (manifest-state-machine.ts),
  *           `detectInProgressHandEdit` (manifest-state-machine.ts),
- *           `deriveSourceBaseline` (state/derive-source-baseline.ts).
+ *           `removeInProgressSnapshot` (manifest-state-machine.ts).
  */
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
@@ -30,8 +36,7 @@ import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { ManifestNotFoundError, WrongClaimantError } from "../errors.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
-import { moveBetweenStates, detectInProgressHandEdit, } from "../state/manifest-state-machine.js";
-import { deriveSourceBaseline } from "../state/derive-source-baseline.js";
+import { moveBetweenStates, detectInProgressHandEdit, removeInProgressSnapshot, } from "../state/manifest-state-machine.js";
 /**
  * Strip keys with `undefined` values before YAML stringification.
  * Mirrors the pattern used in `scan-sources.ts` and `mark-withdrawn.ts`.
@@ -66,16 +71,11 @@ export async function completeStory(opts) {
     const stateRoot = path.join(targetRepoRoot, ".crew", "state");
     const absInProgressPath = path.join(stateRoot, "in-progress", `${ref}.yaml`);
     const absDonePath = path.join(stateRoot, "done", `${ref}.yaml`);
-    // Step 1: Hand-edit guard (AC5 / FR14a).
+    // Step 1: Hand-edit guard (AC5 / FR14a; Story 5.29 — sidecar-driven baseline).
     // For completeStory the ref MUST be in in-progress/ (otherwise step 2 throws).
-    // The guard is unconditional — always call it on entry.
-    const baseline = await deriveSourceBaseline({ targetRepoRoot, ref });
-    await detectInProgressHandEdit({
-        targetRepoRoot,
-        ref,
-        sourceHash: baseline.sourceHash,
-        sourceFields: baseline.sourceFields,
-    });
+    // The guard is unconditional — always call it on entry. It loads the sidecar
+    // baseline internally; no baseline-derivation call is needed here.
+    await detectInProgressHandEdit({ targetRepoRoot, ref });
     // Step 2: Load the in-progress/ manifest.
     let rawText;
     try {
@@ -129,5 +129,9 @@ export async function completeStory(opts) {
         targetRepoRoot,
         mcpToolContext: { toolName: "completeStory", role },
     });
+    // Step 6: Remove the claim-time sidecar (Story 5.29).
+    // Best-effort — a stale sidecar with no in-progress manifest is harmless,
+    // but tidying keeps the directory clean and avoids confusing diagnostics.
+    await removeInProgressSnapshot({ targetRepoRoot, ref });
     return { ref, absPath: absDonePath };
 }

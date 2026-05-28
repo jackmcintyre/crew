@@ -1,16 +1,29 @@
 /**
  * `deriveSourceBaseline` — source-hash + source-fields derivation helper.
  *
- * Both `claimStory` and `completeStory` must supply a `{ sourceHash,
- * sourceFields }` pair to `detectInProgressHandEdit` before acting on any
- * manifest in `in-progress/`. This helper resolves the active adapter,
- * reads the current source story, and builds the canonical baseline that
- * `scan-sources` would write.
+ * **Story 5.29: NO LONGER USED BY THE IN-PROGRESS HAND-EDIT GUARD.**
  *
- * Co-located with `manifest-state-machine.ts` because it serves the
- * state-machine layer — it is the FR14a baseline builder, not a tool.
+ * Originally (Story 4.1) this helper supplied `{ sourceHash, sourceFields }` to
+ * `detectInProgressHandEdit` by reading the live source story via the active
+ * adapter. That conflated two concerns: legitimate dev-driven edits to the
+ * source story (e.g. filling `## Implementation Notes`) tripped the in-progress
+ * hand-edit check on every close-out (PR #176 was the failure mode).
  *
- * Story 4.1 — Task 5.
+ * Under Story 5.29's contract, `detectInProgressHandEdit` reads its baseline
+ * from a claim-time sidecar file (`<ref>.snapshot.yaml`) — not from the live
+ * source story. `claimStory` and `completeStory` no longer call this helper.
+ *
+ * The function is retained because no other call sites are currently broken
+ * by its presence and removing it would force wide test-mock rework across
+ * eight test files that still declare module mocks for it. If a future change
+ * needs source-story-baseline derivation for an unrelated purpose, this is
+ * still the right shape. If no future caller emerges, this file can be
+ * deleted alongside its dependent test mocks.
+ *
+ * Co-located with `manifest-state-machine.ts` for historical reasons.
+ *
+ * Story 4.1 — Task 5 (original).
+ * Story 5.29 — removed from in-progress-guard call sites.
  */
 import { resolveWorkspace } from "./workspace-resolver.js";
 /**

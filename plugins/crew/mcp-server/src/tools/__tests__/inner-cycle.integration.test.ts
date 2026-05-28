@@ -49,6 +49,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { writeInProgressSnapshot } from "../../state/manifest-state-machine.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processDevTranscript } from "../process-dev-transcript.js";
 import { processReviewerTranscript } from "../process-reviewer-transcript.js";
@@ -198,6 +199,9 @@ let manifestPath: string;
 
 async function seedManifest(manifest: ExecutionManifest): Promise<void> {
   await atomicWriteFile(manifestPath, yamlStringify(manifest, { lineWidth: 0 }));
+  // Story 5.29: seed the claim-time sidecar so completeStory's hand-edit guard
+  // has a baseline to compare against.
+  await writeInProgressSnapshot({ targetRepoRoot: tmpRoot, ref: manifest.ref, manifest });
 }
 
 beforeEach(async () => {

@@ -1,16 +1,23 @@
 /**
- * Unit tests for `detectInProgressHandEdit` — Story 3.7 Task 3.1.
+ * Unit tests for `detectInProgressHandEdit` — Story 3.7 Task 3.1, narrowed by Story 5.29.
  *
- * Covers AC4 cases (c) and (d):
+ * **Story 5.29 — manifest-only baseline.** The check now reads its baseline from a
+ * claim-time sidecar at `.crew/state/in-progress/<ref>.snapshot.yaml`. It no longer
+ * accepts `sourceHash`/`sourceFields` parameters. Tests seed both the in-progress
+ * manifest AND the sidecar to model what `claimStory` writes.
+ *
+ * Covers:
  *   (c1) hand-edit `title` only → InProgressHandEditError with changedFields:["title"]
  *   (c2) hand-edit `acceptance_criteria` (reorder) → detection via order-sensitive deep-equal
- *   (c3) hand-edit `withdrawn: false → true` → detection (guard treats this like any field)
- *   (c4) source hash drift (no manifest edit, opts.sourceHash differs) → detection with changedFields:["source_hash"]
+ *   (c3) hand-edit `withdrawn: false → true` → detection
+ *   (c4) manifest source_hash drift from sidecar → detection (operator-tampered manifest)
+ *   (c5) Story 5.29 regression — source story edit, manifest untouched → { ok: true }
+ *   (c6) sidecar missing → InProgressHandEditError with changedFields:["_snapshot_missing"]
  *   (d)  no edit, no drift → { ok: true }
  *
- * Each test seeds a tmpdir with an `in-progress/<ref>.yaml` manifest, then
- * either mutates it (to simulate an operator hand-edit) or leaves it intact,
- * then calls `detectInProgressHandEdit` directly.
+ * Each test seeds a tmpdir with an `in-progress/<ref>.yaml` manifest plus its
+ * `<ref>.snapshot.yaml` sidecar, then either mutates the manifest (operator hand-edit)
+ * or leaves it intact, then calls `detectInProgressHandEdit` directly.
  *
  * Pure deterministic — no LLM invocation, no network.
  */
@@ -22,7 +29,12 @@ import * as path from "node:path";
 import { stringify as yamlStringify, parse as yamlParse } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { InProgressHandEditError, ManifestNotFoundError, MalformedExecutionManifestError } from "../../errors.js";
-import { detectInProgressHandEdit, type OperatorEditableFields } from "../manifest-state-machine.js";
+import {
+  detectInProgressHandEdit,
+  writeInProgressSnapshot,
+  removeInProgressSnapshot,
+  type OperatorEditableFields,
+} from "../manifest-state-machine.js";
 import type { ExecutionManifest } from "../../schemas/execution-manifest.js";
 
 // ---------------------------------------------------------------------------
@@ -87,6 +99,17 @@ async function seedInProgressManifest(
   return absPath;
 }
 
+/**
+ * Story 5.29 helper: seed the claim-time sidecar that `detectInProgressHandEdit`
+ * reads as its baseline. The sidecar mirrors the manifest at the moment of claim.
+ */
+async function seedSidecar(
+  root: string,
+  manifest: ExecutionManifest,
+): Promise<void> {
+  await writeInProgressSnapshot({ targetRepoRoot: root, ref: REF, manifest });
+}
+
 async function mutateManifest(
   absPath: string,
   mutate: (obj: Record<string, unknown>) => void,
@@ -95,10 +118,6 @@ async function mutateManifest(
   const obj = yamlParse(raw) as Record<string, unknown>;
   mutate(obj);
   const newText = yamlStringify(obj, { lineWidth: 0 });
-  // Simulate operator writing (editor-style) via atomicWriteFile — the canonical
-  // write primitive available to test code inside src test directories.
-  // (Note: the static guard in canonical-fs-guard.test.ts bans direct write-shaped
-  // node:fs imports; this code uses atomicWriteFile from managed-fs instead.)
   await atomicWriteFile(absPath, newText);
 }
 
@@ -124,6 +143,7 @@ describe("detectInProgressHandEdit (c1) — hand-edit title only", () => {
   it("throws InProgressHandEditError with changedFields:[title]", async () => {
     const manifest = makeManifest(CANONICAL_SOURCE_HASH, CANONICAL_SOURCE_FIELDS);
     const absPath = await seedInProgressManifest(scratch, manifest);
+    await seedSidecar(scratch, manifest);
 
     // Operator edits the title in their text editor.
     await mutateManifest(absPath, (obj) => {
@@ -133,8 +153,6 @@ describe("detectInProgressHandEdit (c1) — hand-edit title only", () => {
     const err = await detectInProgressHandEdit({
       targetRepoRoot: scratch,
       ref: REF,
-      sourceHash: CANONICAL_SOURCE_HASH,
-      sourceFields: CANONICAL_SOURCE_FIELDS,
     }).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(InProgressHandEditError);
@@ -160,6 +178,7 @@ describe("detectInProgressHandEdit (c2) — acceptance_criteria reorder detected
   it("throws InProgressHandEditError with changedFields:[acceptance_criteria]", async () => {
     const manifest = makeManifest(CANONICAL_SOURCE_HASH, CANONICAL_SOURCE_FIELDS);
     await seedInProgressManifest(scratch, manifest);
+    await seedSidecar(scratch, manifest);
 
     // Operator swaps the two ACs — changing their order.
     const absPath = path.join(scratch, ".crew", "state", "in-progress", `${REF}.yaml`);
@@ -172,8 +191,6 @@ describe("detectInProgressHandEdit (c2) — acceptance_criteria reorder detected
     const err = await detectInProgressHandEdit({
       targetRepoRoot: scratch,
       ref: REF,
-      sourceHash: CANONICAL_SOURCE_HASH,
-      sourceFields: CANONICAL_SOURCE_FIELDS,
     }).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(InProgressHandEditError);
@@ -190,6 +207,7 @@ describe("detectInProgressHandEdit (c3) — withdrawn flip detected", () => {
   it("throws InProgressHandEditError with changedFields:[withdrawn]", async () => {
     const manifest = makeManifest(CANONICAL_SOURCE_HASH, CANONICAL_SOURCE_FIELDS);
     await seedInProgressManifest(scratch, manifest);
+    await seedSidecar(scratch, manifest);
 
     const absPath = path.join(scratch, ".crew", "state", "in-progress", `${REF}.yaml`);
     await mutateManifest(absPath, (obj) => {
@@ -199,8 +217,6 @@ describe("detectInProgressHandEdit (c3) — withdrawn flip detected", () => {
     const err = await detectInProgressHandEdit({
       targetRepoRoot: scratch,
       ref: REF,
-      sourceHash: CANONICAL_SOURCE_HASH,
-      sourceFields: CANONICAL_SOURCE_FIELDS,
     }).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(InProgressHandEditError);
@@ -210,23 +226,29 @@ describe("detectInProgressHandEdit (c3) — withdrawn flip detected", () => {
 });
 
 // ---------------------------------------------------------------------------
-// (c4) source hash drift (no manifest edit, opts.sourceHash differs)
+// (c4) manifest source_hash drift from sidecar — operator-tampered manifest
 // ---------------------------------------------------------------------------
 
-describe("detectInProgressHandEdit (c4) — source hash drift detected", () => {
+describe("detectInProgressHandEdit (c4) — manifest source_hash drift from sidecar detected", () => {
   it("throws InProgressHandEditError with changedFields:[source_hash]", async () => {
     const manifest = makeManifest(CANONICAL_SOURCE_HASH, CANONICAL_SOURCE_FIELDS);
     await seedInProgressManifest(scratch, manifest);
+    await seedSidecar(scratch, manifest);
 
-    // Supply a DIFFERENT sourceHash to simulate source story content change.
-    const driftedHash =
-      "ffff1111ffff1111ffff1111ffff1111ffff1111ffff1111ffff1111ffff1111";
+    // Operator hand-edits source_hash in the in-progress manifest.
+    // Under Story 5.29 this is a manifest-vs-sidecar drift, which IS a hand-edit
+    // signal (the operator tampered with state-machine bookkeeping). Source-hash
+    // drift between the manifest and the LIVE source story is no longer the trigger
+    // (see (c5) below).
+    const absPath = path.join(scratch, ".crew", "state", "in-progress", `${REF}.yaml`);
+    await mutateManifest(absPath, (obj) => {
+      obj["source_hash"] =
+        "ffff1111ffff1111ffff1111ffff1111ffff1111ffff1111ffff1111ffff1111";
+    });
 
     const err = await detectInProgressHandEdit({
       targetRepoRoot: scratch,
       ref: REF,
-      sourceHash: driftedHash,
-      sourceFields: CANONICAL_SOURCE_FIELDS,
     }).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(InProgressHandEditError);
@@ -236,19 +258,74 @@ describe("detectInProgressHandEdit (c4) — source hash drift detected", () => {
 });
 
 // ---------------------------------------------------------------------------
+// (c5) Story 5.29 regression — source story edit, manifest untouched → ok
+// ---------------------------------------------------------------------------
+
+describe("detectInProgressHandEdit (c5) — Story 5.29 regression: source-story edit does not trip the guard", () => {
+  it("returns { ok: true } when the source story would have a different source_hash but the manifest+sidecar are intact", async () => {
+    // This case is the exact failure mode from PR #176 / bmad:6.1 close-out.
+    // Under the OLD (Story 4.1) contract, the check re-read the source story via
+    // the active adapter to derive `{ sourceHash, sourceFields }`. When the dev
+    // legitimately edited the source story's `## Implementation Notes` (which the
+    // story-spec placeholder instructs them to do), the recomputed source_hash
+    // and implementation_notes would differ from the manifest, and the check would
+    // throw InProgressHandEditError.
+    //
+    // Under the NEW (Story 5.29) contract, the check reads its baseline from the
+    // sidecar — not the source story. So even if the source story has been edited
+    // (and would produce a different source_hash if scan-sources re-ran), the
+    // check sees manifest === sidecar and passes.
+    const manifest = makeManifest(CANONICAL_SOURCE_HASH, CANONICAL_SOURCE_FIELDS);
+    await seedInProgressManifest(scratch, manifest);
+    await seedSidecar(scratch, manifest);
+
+    // No mutation to the in-progress manifest. No sidecar mutation. The "source
+    // story has been edited" condition is implicit — the check never reads the
+    // source story at all under Story 5.29, so it does not matter what the source
+    // file on disk says. This is the regression guard: the check MUST succeed in
+    // this configuration.
+    const result = await detectInProgressHandEdit({
+      targetRepoRoot: scratch,
+      ref: REF,
+    });
+    expect(result).toEqual({ ok: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (c6) sidecar missing
+// ---------------------------------------------------------------------------
+
+describe("detectInProgressHandEdit (c6) — sidecar missing", () => {
+  it("throws InProgressHandEditError with changedFields:[_snapshot_missing]", async () => {
+    const manifest = makeManifest(CANONICAL_SOURCE_HASH, CANONICAL_SOURCE_FIELDS);
+    await seedInProgressManifest(scratch, manifest);
+    // Deliberately do NOT seed the sidecar.
+
+    const err = await detectInProgressHandEdit({
+      targetRepoRoot: scratch,
+      ref: REF,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(InProgressHandEditError);
+    const typed = err as InProgressHandEditError;
+    expect(typed.changedFields).toEqual(["_snapshot_missing"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // (d) no edit, no drift → { ok: true }
 // ---------------------------------------------------------------------------
 
 describe("detectInProgressHandEdit (d) — no edit, no drift → { ok: true }", () => {
-  it("returns { ok: true } when manifest matches source fields exactly", async () => {
+  it("returns { ok: true } when manifest matches sidecar exactly", async () => {
     const manifest = makeManifest(CANONICAL_SOURCE_HASH, CANONICAL_SOURCE_FIELDS);
     await seedInProgressManifest(scratch, manifest);
+    await seedSidecar(scratch, manifest);
 
     const result = await detectInProgressHandEdit({
       targetRepoRoot: scratch,
       ref: REF,
-      sourceHash: CANONICAL_SOURCE_HASH,
-      sourceFields: CANONICAL_SOURCE_FIELDS,
     });
 
     expect(result).toEqual({ ok: true });
@@ -265,8 +342,6 @@ describe("detectInProgressHandEdit — non-existent ref", () => {
       detectInProgressHandEdit({
         targetRepoRoot: scratch,
         ref: "native:does-not-exist",
-        sourceHash: CANONICAL_SOURCE_HASH,
-        sourceFields: CANONICAL_SOURCE_FIELDS,
       }),
     ).rejects.toBeInstanceOf(ManifestNotFoundError);
   });
@@ -280,6 +355,7 @@ describe("detectInProgressHandEdit — alphabetically sorted field list in error
   it("changedFields list in error message is sorted alphabetically", async () => {
     const manifest = makeManifest(CANONICAL_SOURCE_HASH, CANONICAL_SOURCE_FIELDS);
     await seedInProgressManifest(scratch, manifest);
+    await seedSidecar(scratch, manifest);
 
     const absPath = path.join(scratch, ".crew", "state", "in-progress", `${REF}.yaml`);
     // Edit title and narrative simultaneously.
@@ -291,8 +367,6 @@ describe("detectInProgressHandEdit — alphabetically sorted field list in error
     const err = await detectInProgressHandEdit({
       targetRepoRoot: scratch,
       ref: REF,
-      sourceHash: CANONICAL_SOURCE_HASH,
-      sourceFields: CANONICAL_SOURCE_FIELDS,
     }).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(InProgressHandEditError);
@@ -316,6 +390,7 @@ describe("detectInProgressHandEdit — malformed manifest propagates MalformedEx
   it("throws MalformedExecutionManifestError when the in-progress manifest is invalid", async () => {
     const manifest = makeManifest(CANONICAL_SOURCE_HASH, CANONICAL_SOURCE_FIELDS);
     await seedInProgressManifest(scratch, manifest);
+    await seedSidecar(scratch, manifest);
 
     const absPath = path.join(scratch, ".crew", "state", "in-progress", `${REF}.yaml`);
     // Remove the required `title` field to make the manifest malformed.
@@ -327,9 +402,44 @@ describe("detectInProgressHandEdit — malformed manifest propagates MalformedEx
       detectInProgressHandEdit({
         targetRepoRoot: scratch,
         ref: REF,
-        sourceHash: CANONICAL_SOURCE_HASH,
-        sourceFields: CANONICAL_SOURCE_FIELDS,
       }),
     ).rejects.toBeInstanceOf(MalformedExecutionManifestError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sidecar lifecycle — writeInProgressSnapshot + removeInProgressSnapshot
+// ---------------------------------------------------------------------------
+
+describe("writeInProgressSnapshot + removeInProgressSnapshot (Story 5.29 lifecycle)", () => {
+  it("writes the sidecar at the canonical path and removes it on completion", async () => {
+    const manifest = makeManifest(CANONICAL_SOURCE_HASH, CANONICAL_SOURCE_FIELDS);
+    await seedInProgressManifest(scratch, manifest);
+
+    const { absPath: sidecarAbs } = await writeInProgressSnapshot({
+      targetRepoRoot: scratch,
+      ref: REF,
+      manifest,
+    });
+
+    expect(sidecarAbs).toBe(
+      path.join(scratch, ".crew", "state", "in-progress", `${REF}.snapshot.yaml`),
+    );
+
+    // The sidecar is parseable YAML containing the operator-editable fields + source_hash.
+    const raw = await fs.readFile(sidecarAbs, "utf8");
+    const parsed = yamlParse(raw) as Record<string, unknown>;
+    expect(parsed["source_hash"]).toBe(CANONICAL_SOURCE_HASH);
+    expect(parsed["title"]).toBe(CANONICAL_SOURCE_FIELDS.title);
+    expect(parsed["implementation_notes"]).toBe(CANONICAL_SOURCE_FIELDS.implementation_notes);
+
+    // Completion-time removal is best-effort and successful on a present sidecar.
+    await removeInProgressSnapshot({ targetRepoRoot: scratch, ref: REF });
+    await expect(fs.stat(sidecarAbs)).rejects.toMatchObject({ code: "ENOENT" });
+
+    // Idempotent — removing a missing sidecar is a no-op.
+    await expect(
+      removeInProgressSnapshot({ targetRepoRoot: scratch, ref: REF }),
+    ).resolves.toBeUndefined();
   });
 });

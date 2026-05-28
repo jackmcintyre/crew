@@ -30,9 +30,16 @@
  * **No `--force` bypass.** The hand-edit refusal is unconditional (Story 3.7).
  *
  * FR17 — atomic claim, FR18 — dependency check, FR14a — hand-edit guard.
+ *
+ * **Story 5.29 — sidecar snapshot.** After moving the manifest to `in-progress/`
+ * and rewriting it with `claimed_by`, `claimStory` writes a sidecar baseline at
+ * `.crew/state/in-progress/<ref>.snapshot.yaml` capturing the source-hash and
+ * operator-editable fields at claim time. `detectInProgressHandEdit` reads this
+ * sidecar as the baseline; it no longer re-reads the source story.
+ *
  * See also: `moveBetweenStates` (manifest-state-machine.ts),
  *           `detectInProgressHandEdit` (manifest-state-machine.ts),
- *           `deriveSourceBaseline` (state/derive-source-baseline.ts).
+ *           `writeInProgressSnapshot` (manifest-state-machine.ts).
  */
 /**
  * Atomically claim a story for dev work.
