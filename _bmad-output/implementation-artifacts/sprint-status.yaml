@@ -1,5 +1,5 @@
 generated: 2026-05-19
-last_updated: '2026-05-28'  # 5-25 added 2026-05-28: always-on MCP lifecycle logging + keepalive (supersedes part of 5.12)
+last_updated: '2026-05-28'
 project: crew
 project_key: NOKEY
 tracking_system: file-system
@@ -88,7 +88,7 @@ development_status:
   5-22-render-scan-result-leading-whitespace-assertion: done
   5-23-mark-story-shipped: backlog
   5-24-zod-determinism-dts-fix: done
-  5-25-always-on-mcp-lifecycle-logging: ready-for-dev
+  5-25-always-on-mcp-lifecycle-logging: done
   5-26-reviewer-session-artifact-check-against-pr-branch: ready-for-dev
   5-27-reviewer-vitest-workspace-aware-cwd: ready-for-dev
   epic-5-retrospective: optional

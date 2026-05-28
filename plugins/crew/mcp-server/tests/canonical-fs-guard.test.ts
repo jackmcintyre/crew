@@ -12,6 +12,11 @@ const SRC_DIR = path.resolve(HERE, "..", "src");
 const FS_WRITE_WHITELIST = new Set<string>([
   path.join(SRC_DIR, "lib", "managed-fs.ts"),
   path.join(SRC_DIR, "lib", "logger.ts"),
+  // Story 5.25: lifecycle-log.ts is the designated fs write layer for the
+  // always-on MCP lifecycle log file (append-only JSON-line stream).
+  // It uses fs.createWriteStream for efficiency and is intentionally kept
+  // separate from managed-fs.ts (which handles canonical state writes).
+  path.join(SRC_DIR, "lib", "lifecycle-log.ts"),
   // Story 5.10: the persistence test exercises raw fs.writeFile to simulate what
   // SKILL.md step 4.5 does via Claude Code's built-in Write tool. This is a test
   // file, not production code — the write originates outside mcp-server/src/ in
@@ -36,6 +41,17 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // Story 5.20: reviewer-only respawn tests write manifest fixtures to tmpdir.
   // Test file only; production code routes all writes through sanctioned seams.
   path.join(SRC_DIR, "tools", "__tests__", "orphan-recovery-reviewer-only.test.ts"),
+  // Story 5.25: the AC6b unwritable-log-path test needs a blocker file under
+  // tmpDir so that mkdirSync throws ENOTDIR synchronously on every Unix-like
+  // platform (replaces the unreliable /proc/nonexistent/log Linux path that
+  // hung CI for 57min). Test file only; production lifecycle log writes route
+  // through src/lib/lifecycle-log.ts (already whitelisted).
+  path.join(SRC_DIR, "__tests__", "mcp-lifecycle-log.test.ts"),
+  // Story 5.25: the lifecycle-log unit-test's "(b) survives unwritable path"
+  // case uses the same blocker-file pattern for the same cross-platform
+  // reliability reason. Test file only; whitelisted to match the integration
+  // test's allowance.
+  path.join(SRC_DIR, "lib", "__tests__", "lifecycle-log.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [
