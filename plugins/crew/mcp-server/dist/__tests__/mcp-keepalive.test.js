@@ -46,9 +46,6 @@ beforeAll(() => {
 }, 90_000);
 function sendRequest(child, req, timeout = 8_000) {
     return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-            reject(new Error(`Timed out waiting for response to id=${req.id}`));
-        }, timeout);
         let buffer = "";
         const onData = (chunk) => {
             buffer += chunk.toString();
@@ -61,8 +58,7 @@ function sendRequest(child, req, timeout = 8_000) {
                 try {
                     const parsed = JSON.parse(trimmed);
                     if (parsed["id"] === req.id) {
-                        clearTimeout(timer);
-                        child.stdout?.removeListener("data", onData);
+                        cleanup();
                         resolve(parsed);
                         return;
                     }
@@ -72,12 +68,19 @@ function sendRequest(child, req, timeout = 8_000) {
                 }
             }
         };
+        const cleanup = () => {
+            clearTimeout(timer);
+            child.stdout?.removeListener("data", onData);
+        };
+        const timer = setTimeout(() => {
+            cleanup();
+            reject(new Error(`Timed out waiting for response to id=${req.id}`));
+        }, timeout);
         child.stdout?.on("data", onData);
         const line = JSON.stringify(req) + "\n";
         child.stdin?.write(line, (err) => {
             if (err) {
-                clearTimeout(timer);
-                child.stdout?.removeListener("data", onData);
+                cleanup();
                 reject(err);
             }
         });
@@ -172,14 +175,24 @@ beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "crew-keepalive-test-"));
     cleanupPingResponder = null;
 });
-afterEach(() => {
+afterEach(async () => {
     if (cleanupPingResponder) {
         cleanupPingResponder();
         cleanupPingResponder = null;
     }
-    if (child && !child.killed) {
+    if (child && child.exitCode === null && child.signalCode === null) {
         child.kill("SIGKILL");
+        await new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(), 2_000);
+            child.once("exit", () => {
+                clearTimeout(timer);
+                resolve();
+            });
+        });
     }
+    child?.stdout?.destroy();
+    child?.stderr?.destroy();
+    child?.stdin?.destroy();
     try {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -194,7 +207,7 @@ describe("AC7a — keepalive timer fires and pong is received", () => {
     it("logs 3+ keepalive.sent and 1+ keepalive.response within 7 seconds (2000ms interval)", async () => {
         const logPath = path.join(tmpDir, "mcp-lifecycle.log");
         child = cp.spawn("node", [DIST_INDEX], {
-            stdio: ["pipe", "pipe", "pipe"],
+            stdio: ["pipe", "pipe", "ignore"],
             env: {
                 ...process.env,
                 CREW_MCP_LIFECYCLE_LOG: logPath,
@@ -220,7 +233,7 @@ describe("AC7b — keepalive disabled when CREW_MCP_KEEPALIVE_MS=0", () => {
     it("no keepalive.sent events appear within 5 seconds when interval is 0", async () => {
         const logPath = path.join(tmpDir, "mcp-lifecycle.log");
         child = cp.spawn("node", [DIST_INDEX], {
-            stdio: ["pipe", "pipe", "pipe"],
+            stdio: ["pipe", "pipe", "ignore"],
             env: {
                 ...process.env,
                 CREW_MCP_LIFECYCLE_LOG: logPath,

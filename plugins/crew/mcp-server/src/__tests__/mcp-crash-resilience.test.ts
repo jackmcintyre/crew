@@ -77,10 +77,6 @@ function sendRequest(
   timeout = 8_000,
 ): Promise<JsonRpcResponse> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Timed out waiting for response to id=${req.id}`));
-    }, timeout);
-
     let buffer = "";
 
     const onData = (chunk: Buffer | string): void => {
@@ -93,8 +89,7 @@ function sendRequest(
         try {
           const parsed = JSON.parse(trimmed) as Record<string, unknown>;
           if (parsed["id"] === req.id) {
-            clearTimeout(timer);
-            child.stdout?.removeListener("data", onData);
+            cleanup();
             resolve(parsed as JsonRpcResponse);
             return;
           }
@@ -104,13 +99,22 @@ function sendRequest(
       }
     };
 
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      child.stdout?.removeListener("data", onData);
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for response to id=${req.id}`));
+    }, timeout);
+
     child.stdout?.on("data", onData);
 
     const line = JSON.stringify(req) + "\n";
     child.stdin?.write(line, (err) => {
       if (err) {
-        clearTimeout(timer);
-        child.stdout?.removeListener("data", onData);
+        cleanup();
         reject(err);
       }
     });
@@ -177,10 +181,20 @@ beforeEach(() => {
   _reqId = 100; // reset per test to avoid cross-test ID collisions
 });
 
-afterEach(() => {
-  if (child && !child.killed) {
+afterEach(async () => {
+  if (child && child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => resolve(), 2_000);
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
+  child?.stdout?.destroy();
+  child?.stderr?.destroy();
+  child?.stdin?.destroy();
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch {
@@ -195,7 +209,7 @@ afterEach(() => {
 
 function spawnServer(logPath: string): cp.ChildProcess {
   return cp.spawn("node", [DIST_INDEX], {
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "ignore"],
     env: {
       ...process.env,
       CREW_MCP_LIFECYCLE_LOG: logPath,

@@ -68,10 +68,6 @@ function sendRequest(
   timeout = 8_000,
 ): Promise<JsonRpcResponse> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Timed out waiting for response to id=${req.id}`));
-    }, timeout);
-
     let buffer = "";
 
     const onData = (chunk: Buffer | string): void => {
@@ -84,8 +80,7 @@ function sendRequest(
         try {
           const parsed = JSON.parse(trimmed) as Record<string, unknown>;
           if (parsed["id"] === req.id) {
-            clearTimeout(timer);
-            child.stdout?.removeListener("data", onData);
+            cleanup();
             resolve(parsed as JsonRpcResponse);
             return;
           }
@@ -95,13 +90,22 @@ function sendRequest(
       }
     };
 
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      child.stdout?.removeListener("data", onData);
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for response to id=${req.id}`));
+    }, timeout);
+
     child.stdout?.on("data", onData);
 
     const line = JSON.stringify(req) + "\n";
     child.stdin?.write(line, (err) => {
       if (err) {
-        clearTimeout(timer);
-        child.stdout?.removeListener("data", onData);
+        cleanup();
         reject(err);
       }
     });
@@ -161,10 +165,24 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "crew-lifecycle-test-"));
 });
 
-afterEach(() => {
-  if (child && !child.killed) {
+afterEach(async () => {
+  if (child && child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
+    // Wait for the child to be reaped so vitest can release its stdio pipes.
+    // Without this await, a dangling child can hang the worker indefinitely
+    // (observed on CI: AC6b timeout left an orphan, suite hung for 57min).
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => resolve(), 2_000);
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
+  // Drain stdio buffers so vitest's worker can close them.
+  child?.stdout?.destroy();
+  child?.stderr?.destroy();
+  child?.stdin?.destroy();
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch {
@@ -183,7 +201,7 @@ describe("AC6a — lifecycle log contains expected event sequence", () => {
       const logPath = path.join(tmpDir, "mcp-lifecycle.log");
 
       child = cp.spawn("node", [DIST_INDEX], {
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "ignore"],
         env: {
           ...process.env,
           CREW_MCP_LIFECYCLE_LOG: logPath,
@@ -257,14 +275,17 @@ describe("AC6b — unwritable log path does not crash server", () => {
   it(
     "server still answers tool calls when log path is unwritable",
     async () => {
-      // Use a path that is guaranteed to fail mkdir + write
-      const unwritablePath =
-        process.platform === "darwin"
-          ? "/nonexistent-root-dir/crew-lifecycle.log"
-          : "/proc/nonexistent/log";
+      // Create a regular file inside tmpDir, then point the log path
+      // UNDER it (as if it were a directory). On every Unix-like platform,
+      // mkdirSync(<file>/<sub>, { recursive: true }) throws ENOTDIR
+      // synchronously. This is more reliable than platform-specific paths
+      // like /proc/nonexistent which behave differently across kernels.
+      const blocker = path.join(tmpDir, "not-a-directory");
+      fs.writeFileSync(blocker, "");
+      const unwritablePath = path.join(blocker, "crew-lifecycle.log");
 
       child = cp.spawn("node", [DIST_INDEX], {
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "ignore"],
         env: {
           ...process.env,
           CREW_MCP_LIFECYCLE_LOG: unwritablePath,
