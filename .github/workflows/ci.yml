@@ -21,6 +21,12 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Hard ceiling — prevents a runaway integration test (or vitest worker
+    # waiting on a hung child) from burning hours of CI minutes. The full
+    # suite normally completes in ~5-7 minutes; 15 gives generous headroom
+    # while still failing fast if something hangs. Story 5.25 retro: a
+    # previous run wedged for 57 minutes after AC6b left an orphan child.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,4 +57,6 @@ jobs:
       - name: Verify committed dist/ matches fresh build (main only)
         if: github.event_name == 'push'
         run: git diff --exit-code mcp-server/dist
-      - run: pnpm test
+      - name: Run pnpm test
+        run: pnpm test
+        timeout-minutes: 10
