@@ -41,6 +41,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // Story 5.20: reviewer-only respawn tests write manifest fixtures to tmpdir.
   // Test file only; production code routes all writes through sanctioned seams.
   path.join(SRC_DIR, "tools", "__tests__", "orphan-recovery-reviewer-only.test.ts"),
+  // Story 5.25: the AC6b unwritable-log-path test needs a blocker file under
+  // tmpDir so that mkdirSync throws ENOTDIR synchronously on every Unix-like
+  // platform (replaces the unreliable /proc/nonexistent/log Linux path that
+  // hung CI for 57min). Test file only; production lifecycle log writes route
+  // through src/lib/lifecycle-log.ts (already whitelisted).
+  path.join(SRC_DIR, "__tests__", "mcp-lifecycle-log.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [
