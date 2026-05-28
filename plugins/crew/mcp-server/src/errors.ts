@@ -1399,6 +1399,43 @@ export class ReviewerFirstCallSkippedError extends DomainError {
 }
 
 /**
+ * `runReviewerSession` failed to fetch the PR's head ref via `gh pr view`.
+ * Thrown on any `gh` failure (recoverable or otherwise) during the
+ * head-ref fetch step (AC1 / AC4 of Story 5.26).
+ *
+ * The reviewer session MUST NOT fall back to the local filesystem — it halts
+ * immediately and surfaces this error verbatim to the inner cycle caller.
+ *
+ * Fields:
+ * - `prNumber`          — the PR number that was being fetched.
+ * - `ghSubcommand`      — the kebab-cased gh subcommand that failed (e.g. `"pr-view"`).
+ * - `underlyingMessage` — the raw error message from the gh wrapper.
+ *
+ * Story 5.26 — reviewer artifact-check against PR branch.
+ */
+export class ReviewerPrBranchFetchError extends DomainError {
+  readonly prNumber: number;
+  readonly ghSubcommand: string;
+  readonly underlyingMessage: string;
+
+  constructor(opts: {
+    prNumber: number;
+    ghSubcommand: string;
+    underlyingMessage: string;
+  }) {
+    super(
+      `runReviewerSession: failed to fetch head ref for PR #${opts.prNumber} ` +
+        `via 'gh ${opts.ghSubcommand}': ${opts.underlyingMessage}. ` +
+        `The reviewer session has been halted — do NOT fall back to the local filesystem. ` +
+        `(Story 5.26 AC4)`,
+    );
+    this.prNumber = opts.prNumber;
+    this.ghSubcommand = opts.ghSubcommand;
+    this.underlyingMessage = opts.underlyingMessage;
+  }
+}
+
+/**
  * `reattachOrphan` was called on a manifest whose `claimed_by` already matches
  * the current session ULID. This is a race condition where the orphan was
  * claimed by another concurrent step between the scan and the rewrite attempt.

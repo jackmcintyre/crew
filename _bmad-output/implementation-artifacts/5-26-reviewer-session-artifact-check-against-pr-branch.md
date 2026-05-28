@@ -1,7 +1,7 @@
 # Story 5.26: `runReviewerSession` artifact-check against PR branch
 
 story_shape: substrate
-Status: ready-for-dev
+Status: review
 
 <!-- Authored 2026-05-28 after bmad:5.24 re-roll exposed the gap. Sourced from carry-forward entry 13. -->
 
