@@ -13,14 +13,18 @@ This story is a tight follow-up to Story 5.24 (post-build normaliser). 5.24 cove
 
 ## Acceptance Criteria
 
-**AC1:**
+**AC1 (user-surface):**
 
-`pnpm --dir plugins/crew/mcp-server build:watch` invokes `scripts/normalise-dist.mjs` after each tsc recompile cycle. No new runtime or dev dependencies are introduced — `package.json` `dependencies` / `devDependencies` blocks are byte-identical to pre-story state (verified by diff). The watcher remains responsive (tsc-foreground; normaliser runs async post-emit) and inert when no source changes occur (no busy loop, no periodic re-runs without a tsc rebuild).
+`pnpm --dir plugins/crew/mcp-server build:watch` invokes `scripts/normalise-dist.mjs` after each tsc recompile cycle.
+
+<!-- user-surface: AC1 names `pnpm build:watch` — a CLI command the operator types verbatim per CLAUDE.md's "Dev loop" guidance — so rubric (ii) applies. -->
+ No new runtime or dev dependencies are introduced — `package.json` `dependencies` / `devDependencies` blocks are byte-identical to pre-story state (verified by diff). The watcher remains responsive (tsc-foreground; normaliser runs async post-emit) and inert when no source changes occur (no busy loop, no periodic re-runs without a tsc rebuild).
 artifact: plugins/crew/mcp-server/package.json
 artifact: plugins/crew/mcp-server/scripts/watch-and-normalise.mjs
 
-**AC2:**
+**AC2 (user-surface):**
 
+<!-- user-surface: AC2 also requires the operator to run `pnpm build:watch` and observe `git status` go clean — both are CLI surfaces the operator directly invokes/inspects, so rubric (ii) and (iv) apply. -->
 With a clean working tree, running `pnpm --dir plugins/crew/mcp-server build:watch` and then editing any `.ts` source file that produces a `.d.ts` containing a `z.enum([...])` (the construct sensitive to V8 hidden-class ordering — see 5.24 Dev Notes) results in a working tree that returns to clean once the watcher's recompile cycle settles. Validated 5 times consecutively — zero drift on any pair across an edit→settle cycle.
 artifact: plugins/crew/mcp-server/scripts/watch-and-normalise.mjs
 
@@ -94,10 +98,11 @@ async function maybeRun() {
 tsc.stdout.on("data", (buf) => {
   process.stdout.write(buf); // preserve operator visibility
   const s = buf.toString("utf8");
-  // Match the tsc-watch success sentinel. Locale-stable in English builds; if a
-  // different locale is ever a concern, gate on exit code via --listEmittedFiles.
-  if (/Found 0 errors\. Watching for file changes\./.test(s) ||
-      /Found \d+ error[s]?\. Watching for file changes\./.test(s)) {
+  // Match the tsc-watch *success* sentinel only — running the normaliser after a
+  // failed compile is wasteful and may touch stale .d.ts. Locale-stable in English
+  // builds; if a different locale is ever a concern, gate on exit code via
+  // --listEmittedFiles instead.
+  if (/Found 0 errors\. Watching for file changes\./.test(s)) {
     maybeRun();
   }
 });
