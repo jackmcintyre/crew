@@ -1,8 +1,9 @@
 /**
  * Story 5.27: `runVitestCheck` workspace-aware cwd resolution.
  *
- * Tests for `findPackageRoot` and the workspace-aware cwd logic in `runVitestCheck`.
- * Seeds three fixture trees (AC3) and exercises both pre-5.26 and post-5.26 paths (AC4).
+ * Tests for `findPackageRoot` (unit) and workspace-aware cwd logic exercised
+ * through `runReviewerSession` (integration). Seeds three fixture trees (AC3)
+ * and exercises both pre-5.26 and post-5.26 paths (AC4).
  *
  * AC3 fixtures:
  *   A (workspace shape)   — outer dir with no package.json + inner package with package.json
@@ -13,17 +14,23 @@
  *   Path 1 (pre-5.26)  — checkRoot === targetRepoRoot (or fixtureRoot); asserted by fixture A
  *   Path 2 (post-5.26) — checkRoot === a separate worktree-shaped directory
  *
+ * Integration tests (AC3-A(b/c), AC3-B fail-reason, AC3-C cwd, AC4) drive
+ * `runReviewerSession` with seeded fixtures and capture real `execa` stub calls —
+ * same pattern as `run-reviewer-session.test.ts:456`.
+ *
  * `vitest: plugins/crew/mcp-server/src/tools/__tests__/reviewer-vitest-cwd.test.ts`
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, promises as fsP } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { findPackageRoot } from "../run-reviewer-session.js";
+import { findPackageRoot, runReviewerSession } from "../run-reviewer-session.js";
+import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 
 // ---------------------------------------------------------------------------
-// Helper: sync fixture builder
+// Helper: sync fixture builder (for unit tests and fixture tree seeding)
 // ---------------------------------------------------------------------------
 
 function mkdir(p: string): void {
@@ -55,39 +62,218 @@ describe("cwd-fixture", () => {
 `;
 
 // ---------------------------------------------------------------------------
-// execaImpl stub factory — captures last pnpm vitest call's cwd
+// runReviewerSession integration fixture helpers
+//
+// These build the full fixture tree that runReviewerSession needs:
+//   <root>/.crew/config.yaml
+//   <root>/.crew/native-stories/<ULID>.md   — spec with one vitest: AC
+//   <root>/.crew/state/in-progress/<ref>.yaml
+//   <root>/docs/standards.md
+//   <root>/.crew/state/sessions/            — created by runReviewerSession
+//
+// The spec body is parameterised so each test can supply the vitest: path.
 // ---------------------------------------------------------------------------
 
-interface StubCallRecord {
-  cmd: string;
+const FIXTURE_ULID = "01JCWDTEST5270000000000001";
+const FIXTURE_REF = `native:${FIXTURE_ULID}`;
+const FIXTURE_SESSION_ULID = "01JCSESSION527000000000001";
+const FIXTURE_PR_NUMBER = 99;
+
+const FIXTURE_STANDARDS = `version: "0.1.0"
+updated: "2026-05-28"
+criteria:
+  - name: "story-aligned"
+    what: "The PR's diff implements only what the story's acceptance criteria require."
+    check: "Map each diff hunk to one or more ACs."
+    anti_criterion: "Scope creep."
+`;
+
+const FAKE_PR_DIFF = `diff --git a/placeholder.txt b/placeholder.txt
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/placeholder.txt
+@@ -0,0 +1 @@
++placeholder
+`;
+
+const FAKE_HEAD_REF_NAME = "story-5-27-pr-head";
+const FAKE_HEAD_REF_OID = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+
+/** Build the spec markdown for a story with a single vitest: AC pointing at testFilePath. */
+function makeSpecWithVitestAc(vitestPath: string): string {
+  return `# Fixture Story 5.27
+
+## Narrative
+
+As a tester, I want to verify runVitestCheck uses the correct cwd.
+
+## Acceptance Criteria
+
+**AC1:**
+**Given** the vitest marker points at a test file, **When** the reviewer runs it, **Then** it uses the package-root cwd.
+vitest: ${vitestPath}
+
+## Implementation Notes
+
+None.
+
+## Dependencies
+
+`;
+}
+
+function makeManifestYaml(ulid: string, ref: string, sessionUlid: string): string {
+  return [
+    `ref: "${ref}"`,
+    `status: in-progress`,
+    `adapter: native`,
+    `source_path: ".crew/native-stories/${ulid}.md"`,
+    `source_hash: "${"a".repeat(64)}"`,
+    `depends_on: []`,
+    `acceptance_criteria:`,
+    `  - text: "Given the vitest marker points at a test file."`,
+    `    kind: integration`,
+    `title: "Fixture Story 5.27"`,
+    `narrative: "As a tester, I want to verify runVitestCheck uses the correct cwd."`,
+    `withdrawn: false`,
+    `claimed_by: "${sessionUlid}"`,
+  ].join("\n");
+}
+
+/** Populate tmpRoot with the base runReviewerSession fixture (no worktree content). */
+async function buildRunnerFixture(tmpRoot: string, vitestPath: string): Promise<void> {
+  // .crew/config.yaml
+  await fsP.mkdir(path.join(tmpRoot, ".crew"), { recursive: true });
+  await atomicWriteFile(
+    path.join(tmpRoot, ".crew", "config.yaml"),
+    "adapter: native\nadapter_config: {}\n",
+  );
+
+  // Native stories dir + spec file
+  const storiesDir = path.join(tmpRoot, ".crew", "native-stories");
+  await fsP.mkdir(storiesDir, { recursive: true });
+  await atomicWriteFile(
+    path.join(storiesDir, `${FIXTURE_ULID}.md`),
+    makeSpecWithVitestAc(vitestPath),
+  );
+
+  // In-progress state dir + manifest
+  const inProgressDir = path.join(tmpRoot, ".crew", "state", "in-progress");
+  await fsP.mkdir(inProgressDir, { recursive: true });
+  await atomicWriteFile(
+    path.join(inProgressDir, `${FIXTURE_REF}.yaml`),
+    makeManifestYaml(FIXTURE_ULID, FIXTURE_REF, FIXTURE_SESSION_ULID),
+  );
+
+  // docs/standards.md
+  await fsP.mkdir(path.join(tmpRoot, "docs"), { recursive: true });
+  await atomicWriteFile(path.join(tmpRoot, "docs", "standards.md"), FIXTURE_STANDARDS);
+}
+
+// ---------------------------------------------------------------------------
+// Discriminating execaImpl stub — routes by command.
+//
+// runReviewerSession calls materialisePrBranchWorktree which invokes:
+//   - gh pr view --json headRefName,headRefOid
+//   - git fetch origin <headRefName>
+//   - git worktree add <worktreePath> <sha>  → we populate the worktree dir here
+//   - git worktree remove <path> --force     → cleanup
+//
+// The `populateWorktree` callback is called when `git worktree add` is
+// intercepted. It receives the worktree path and is responsible for creating
+// whatever fixture content the test needs inside it.
+// ---------------------------------------------------------------------------
+
+interface RunnerStubOpts {
+  /** Called after mkdir(worktreePath) so the test can seed fixture content there. */
+  populateWorktree: (worktreePath: string) => Promise<void> | void;
+  /** Override for pnpm vitest exit code (default: 0). */
+  vitestExitCode?: number;
+}
+
+interface PnpmCallRecord {
   args: string[];
   cwd: string | undefined;
   exitCode: number;
 }
 
-function makeCapturingStub(vitestExitCode = 0) {
-  const calls: StubCallRecord[] = [];
+function makeRunnerStub(opts: RunnerStubOpts) {
+  const pnpmCalls: PnpmCallRecord[] = [];
 
   const stub = vi.fn().mockImplementation(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    async (cmd: string, args: string[], cmdOpts?: any) => {
-      const record: StubCallRecord = {
-        cmd,
-        args: args as string[],
-        cwd: cmdOpts?.cwd as string | undefined,
-        exitCode: vitestExitCode,
-      };
-      calls.push(record);
-      return {
-        stdout: vitestExitCode === 0 ? "All tests passed." : "1 test failed.",
-        stderr: "",
-        exitCode: vitestExitCode,
-        timedOut: false,
-      };
+    async (cmd: string, args: string[], cmdOpts?: { cwd?: string; [k: string]: unknown }) => {
+      if (cmd === "gh") {
+        const argsArr = args as string[];
+        const isPrDiff = argsArr.includes("diff");
+        const isHeadRefQuery =
+          argsArr.includes("headRefName,headRefOid") ||
+          (argsArr.includes("--json") && argsArr.some((a) => a.includes("headRefOid")));
+
+        if (isPrDiff) {
+          return { stdout: FAKE_PR_DIFF, stderr: "", exitCode: 0, timedOut: false };
+        }
+        if (isHeadRefQuery) {
+          return {
+            stdout: JSON.stringify({
+              headRefName: FAKE_HEAD_REF_NAME,
+              headRefOid: FAKE_HEAD_REF_OID,
+            }),
+            stderr: "",
+            exitCode: 0,
+            timedOut: false,
+          };
+        }
+        // All other gh calls (e.g. pr-view --json commits for risk-tier):
+        return { stdout: '["chore: fixture commit"]', stderr: "", exitCode: 0, timedOut: false };
+      }
+
+      if (cmd === "git") {
+        const argsArr = args as string[];
+        if (argsArr[0] === "worktree" && argsArr[1] === "add") {
+          const worktreePath = argsArr[2];
+          if (worktreePath) {
+            await fsP.mkdir(worktreePath, { recursive: true });
+            await opts.populateWorktree(worktreePath);
+          }
+          return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+        }
+        if (argsArr[0] === "worktree" && argsArr[1] === "remove") {
+          const removePath = argsArr[2];
+          if (removePath) {
+            await fsP.rm(removePath, { recursive: true, force: true }).catch(() => {
+              /* best-effort */
+            });
+          }
+          return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+        }
+        // git fetch and all other git commands — succeed silently.
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }
+
+      if (cmd === "pnpm") {
+        const exitCode = opts.vitestExitCode ?? 0;
+        pnpmCalls.push({
+          args: args as string[],
+          cwd: cmdOpts?.cwd,
+          exitCode,
+        });
+        return {
+          stdout: exitCode === 0 ? "All tests passed." : "1 test failed.",
+          stderr: "",
+          exitCode,
+          timedOut: false,
+        };
+      }
+
+      return { stdout: "", stderr: `unexpected command: ${cmd}`, exitCode: 1, timedOut: false };
     },
   );
 
-  return { stub, calls };
+  return {
+    stub: stub as unknown as typeof import("execa").execa,
+    pnpmCalls,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -169,24 +355,6 @@ describe("findPackageRoot — unit tests", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("boundary guard: does NOT walk above checkRoot into sibling path", () => {
-    // Arrange: /tmp/crew-5-27-unit-xxx (checkRoot — no package.json)
-    //          /tmp/crew-5-27-unit-xxx/tests/test.ts
-    // Ensure there is no package.json at tmp or above in the test environment
-    // (we can't guarantee that, but we CAN assert ok:false when tmp has no package.json).
-    const subdir = path.join(tmp, "tests");
-    mkdir(subdir);
-    writeFile(path.join(subdir, "test.ts"), "// test");
-
-    const result = findPackageRoot({
-      testFilePathAbs: path.join(subdir, "test.ts"),
-      checkRoot: tmp,
-    });
-
-    // Must be ok:false — walk stops at checkRoot, doesn't escape above it.
-    expect(result.ok).toBe(false);
-  });
-
   it("sibling-path false-positive guard: /tmp/checker does not match checkRoot /tmp/check", () => {
     // Create two sibling dirs: check (no package.json) and checker (has package.json)
     const checkRoot = path.join(tmp, "check");
@@ -209,7 +377,7 @@ describe("findPackageRoot — unit tests", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC3: Fixture-tree integration tests
+// AC3: Fixture-tree integration tests driven through runReviewerSession
 // ---------------------------------------------------------------------------
 
 describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-level-manifest", () => {
@@ -217,6 +385,7 @@ describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-
 
   beforeEach(() => {
     tmp = mkdtempSync(path.join(os.tmpdir(), "crew-5-27-ac3-"));
+    __resetGhErrorMapCacheForTests();
   });
 
   afterEach(() => {
@@ -228,26 +397,21 @@ describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-
   // ---------------------------------------------------------------------------
 
   describe("Fixture A (workspace shape)", () => {
-    let outerDir: string;
-    let innerPkgDir: string;
-    let testFilePath: string;
+    /**
+     * The vitest: marker path in the spec — relative to checkRoot (the worktree).
+     * Production code does: path.resolve(checkRoot, testFilePath) to get the abs path.
+     */
+    const TEST_FILE_REL = "plugins/crew/mcp-server/tests/my-test.test.ts";
 
-    beforeEach(() => {
-      // outer/ (no package.json — mimics pnpm workspace root with no root manifest)
-      outerDir = path.join(tmp, "outer");
+    it("AC3-A(a): findPackageRoot identifies plugins/crew/mcp-server as the package root", () => {
+      // Seed a standalone fixture tree (no runReviewerSession needed — pure unit of walk).
+      const outerDir = path.join(tmp, "outer-a-unit");
       mkdir(outerDir);
-
-      // outer/plugins/crew/mcp-server/ (has package.json)
-      innerPkgDir = path.join(outerDir, "plugins", "crew", "mcp-server");
+      const innerPkgDir = path.join(outerDir, "plugins", "crew", "mcp-server");
       writePackageJson(innerPkgDir, "@crew/mcp-server");
-
-      // outer/plugins/crew/mcp-server/tests/my-test.test.ts
-      const testsDir = path.join(innerPkgDir, "tests");
-      testFilePath = path.join(testsDir, "my-test.test.ts");
+      const testFilePath = path.join(innerPkgDir, "tests", "my-test.test.ts");
       writeFile(testFilePath, PASSING_VITEST_TEST);
-    });
 
-    it("AC3-A(a): findPackageRoot identifies plugins/crew/mcp-server as cwd", () => {
       const result = findPackageRoot({
         testFilePathAbs: testFilePath,
         checkRoot: outerDir,
@@ -258,32 +422,53 @@ describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-
       expect(result.packageRoot).toBe(innerPkgDir);
     });
 
-    it("AC3-A(b/c): pnpm vitest invoked with cwd=innerPkgDir and returns status:pass", async () => {
-      const { stub, calls } = makeCapturingStub(0);
+    it("AC3-A(b/c): runReviewerSession invokes pnpm with cwd=innerPkgDir and returns status:pass", async () => {
+      // The spec's vitest: marker is TEST_FILE_REL.
+      // The worktree (checkRoot) will have the workspace-shaped fixture:
+      //   <worktree>/plugins/crew/mcp-server/package.json
+      //   <worktree>/plugins/crew/mcp-server/tests/my-test.test.ts
+      // (no package.json at <worktree> root — mimics pnpm-workspace with no root manifest)
+      await buildRunnerFixture(tmp, TEST_FILE_REL);
 
-      // Import runVitestCheck indirectly through run-reviewer-session internals.
-      // We test the integration by calling findPackageRoot then asserting the cwd
-      // that would be used — this tests the full chain without spawning a real pnpm subprocess.
-      const pkgRoot = findPackageRoot({
-        testFilePathAbs: testFilePath,
-        checkRoot: outerDir,
+      let capturedInnerPkgDir: string | null = null;
+
+      const { stub, pnpmCalls } = makeRunnerStub({
+        vitestExitCode: 0,
+        populateWorktree: (worktreePath) => {
+          // Seed workspace-shaped fixture inside the worktree.
+          // NO package.json at worktreePath root.
+          const innerPkgDir = path.join(worktreePath, "plugins", "crew", "mcp-server");
+          capturedInnerPkgDir = innerPkgDir;
+          writePackageJson(innerPkgDir, "@crew/mcp-server");
+          writeFile(
+            path.join(innerPkgDir, "tests", "my-test.test.ts"),
+            PASSING_VITEST_TEST,
+          );
+        },
       });
 
-      expect(pkgRoot.ok).toBe(true);
-      if (!pkgRoot.ok) return;
-
-      // Simulate what runVitestCheck does: call execaImpl with cwd=pkgRoot.packageRoot
-      const testRelPath = path.relative(outerDir, testFilePath);
-      await stub("pnpm", ["vitest", "--run", "-t", testRelPath], {
-        cwd: pkgRoot.packageRoot,
-        reject: false,
-        timeout: 90_000,
+      const result = await runReviewerSession({
+        targetRepoRoot: tmp,
+        sessionUlid: FIXTURE_SESSION_ULID,
+        ref: FIXTURE_REF,
+        prNumber: FIXTURE_PR_NUMBER,
+        execaImpl: stub,
       });
 
-      expect(calls).toHaveLength(1);
-      const call = calls[0]!;
-      expect(call.cwd).toBe(innerPkgDir);
-      expect(call.exitCode).toBe(0);
+      // AC3-A(c): status:pass
+      const ac1 = result.acResults[1];
+      expect(ac1).toBeDefined();
+      expect(ac1!.applicability).toBe("runnable-vitest");
+      if (ac1!.applicability !== "runnable-vitest") return;
+      expect(ac1!.status).toBe("pass");
+
+      // AC3-A(b): pnpm was called with cwd === innerPkgDir (not the worktree root)
+      expect(pnpmCalls).toHaveLength(1);
+      const pnpmCall = pnpmCalls[0]!;
+      expect(pnpmCall.cwd).toBe(capturedInnerPkgDir);
+      expect(pnpmCall.args).toEqual(
+        expect.arrayContaining(["vitest", "--run", "-t", TEST_FILE_REL]),
+      );
     });
   });
 
@@ -292,12 +477,12 @@ describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-
   // ---------------------------------------------------------------------------
 
   describe("Fixture B (no manifest — walk exhausts checkRoot)", () => {
-    it("AC3-B: findPackageRoot returns ok:false when no package.json found", () => {
-      const outerDir = path.join(tmp, "outer-b");
-      mkdir(outerDir);
+    const TEST_FILE_REL_B = "tests/orphan.test.ts";
 
-      // tests/orphan.test.ts — no package.json anywhere under outerDir
-      const orphanTest = path.join(outerDir, "tests", "orphan.test.ts");
+    it("AC3-B: findPackageRoot returns ok:false when no package.json found", () => {
+      const outerDir = path.join(tmp, "outer-b-unit");
+      mkdir(outerDir);
+      const orphanTest = path.join(outerDir, TEST_FILE_REL_B);
       writeFile(orphanTest, PASSING_VITEST_TEST);
 
       const result = findPackageRoot({
@@ -308,31 +493,53 @@ describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-
       expect(result.ok).toBe(false);
     });
 
-    it("AC3-B: runVitestCheck fail reason matches AC2 missing-manifest message template", async () => {
-      // Import runVitestCheck via run-reviewer-session module internals.
-      // Since runVitestCheck is not exported, we test the public contract through findPackageRoot
-      // and assert the exact reason string that runVitestCheck emits by calling findPackageRoot.
-      const outerDir = path.join(tmp, "outer-b2");
-      mkdir(outerDir);
-      const testFilePath = path.join(outerDir, "tests", "orphan.test.ts");
-      writeFile(testFilePath, PASSING_VITEST_TEST);
+    it("AC3-B: runVitestCheck fail reason matches AC2 verbatim string (from real production output)", async () => {
+      // Drive runReviewerSession with a fixture where the vitest: marker points at a
+      // test file that has NO package.json between it and checkRoot. The production
+      // runVitestCheck must return the AC2 fail reason verbatim — we assert on the
+      // real result.acResults[1].reason, NOT on a locally-constructed string.
+      //
+      // AC2 verbatim: "no package.json found between test file '<testFilePath>' and
+      //               checkRoot '<checkRoot>' — vitest cannot run without a manifest"
+      // where testFilePath = TEST_FILE_REL_B and checkRoot = the worktree path created
+      // by git worktree add.
+      await buildRunnerFixture(tmp, TEST_FILE_REL_B);
 
-      const result = findPackageRoot({
-        testFilePathAbs: testFilePath,
-        checkRoot: outerDir,
+      let capturedWorktreePath: string | null = null;
+
+      const { stub } = makeRunnerStub({
+        vitestExitCode: 0,
+        populateWorktree: (worktreePath) => {
+          capturedWorktreePath = worktreePath;
+          // Seed the test file but NO package.json anywhere under worktreePath.
+          writeFile(
+            path.join(worktreePath, TEST_FILE_REL_B),
+            PASSING_VITEST_TEST,
+          );
+        },
       });
 
-      // Verify ok:false — the caller (runVitestCheck) will emit the AC2 reason
-      expect(result.ok).toBe(false);
+      const result = await runReviewerSession({
+        targetRepoRoot: tmp,
+        sessionUlid: FIXTURE_SESSION_ULID,
+        ref: FIXTURE_REF,
+        prNumber: FIXTURE_PR_NUMBER,
+        execaImpl: stub,
+      });
 
-      // Reconstruct and assert the expected reason string (matching spec AC2 verbatim)
-      const relPath = path.relative(outerDir, testFilePath);
+      // The AC should fail with the exact verbatim reason from run-reviewer-session.ts:293.
+      const ac1 = result.acResults[1];
+      expect(ac1).toBeDefined();
+      expect(ac1!.applicability).toBe("runnable-vitest");
+      if (ac1!.applicability !== "runnable-vitest") return;
+      expect(ac1!.status).toBe("fail");
+
+      // Assert verbatim AC2 reason with the actual paths substituted.
+      // capturedWorktreePath is the real checkRoot that production code used.
+      expect(capturedWorktreePath).not.toBeNull();
       const expectedReason =
-        `no package.json found between test file '${relPath}' and checkRoot '${outerDir}' — vitest cannot run without a manifest`;
-
-      // Assert the reason is exactly what AC2 specifies
-      expect(expectedReason).toContain("no package.json found between test file");
-      expect(expectedReason).toContain("vitest cannot run without a manifest");
+        `no package.json found between test file '${TEST_FILE_REL_B}' and checkRoot '${capturedWorktreePath!}' — vitest cannot run without a manifest`;
+      expect(ac1!.reason).toBe(expectedReason);
     });
   });
 
@@ -341,12 +548,12 @@ describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-
   // ---------------------------------------------------------------------------
 
   describe("Fixture C (root-level manifest)", () => {
-    it("AC3-C: findPackageRoot resolves to outer dir; cwd is root", () => {
-      const outerDir = path.join(tmp, "outer-c");
-      writePackageJson(outerDir, "root-pkg");
+    const TEST_FILE_REL_C = "tests/root.test.ts";
 
-      // tests/root.test.ts
-      const rootTest = path.join(outerDir, "tests", "root.test.ts");
+    it("AC3-C: findPackageRoot resolves to outer dir when root has package.json", () => {
+      const outerDir = path.join(tmp, "outer-c-unit");
+      writePackageJson(outerDir, "root-pkg");
+      const rootTest = path.join(outerDir, TEST_FILE_REL_C);
       writeFile(rootTest, PASSING_VITEST_TEST);
 
       const result = findPackageRoot({
@@ -359,33 +566,44 @@ describe("AC3: fixture-tree integration — workspace-shaped, no-manifest, root-
       expect(result.packageRoot).toBe(outerDir);
     });
 
-    it("AC3-C: cwd resolves to root and stub returns pass", async () => {
-      const outerDir = path.join(tmp, "outer-c2");
-      writePackageJson(outerDir, "root-pkg");
-      const rootTest = path.join(outerDir, "tests", "root.test.ts");
-      writeFile(rootTest, PASSING_VITEST_TEST);
+    it("AC3-C: runReviewerSession invokes pnpm with cwd=worktree root and returns status:pass", async () => {
+      // The worktree has a root-level package.json — the walk should stop there.
+      await buildRunnerFixture(tmp, TEST_FILE_REL_C);
 
-      const { stub, calls } = makeCapturingStub(0);
+      let capturedWorktreeRoot: string | null = null;
 
-      const pkgRoot = findPackageRoot({
-        testFilePathAbs: rootTest,
-        checkRoot: outerDir,
+      const { stub, pnpmCalls } = makeRunnerStub({
+        vitestExitCode: 0,
+        populateWorktree: (worktreePath) => {
+          capturedWorktreeRoot = worktreePath;
+          // Root-level package.json present — walk stops at the root.
+          writePackageJson(worktreePath, "root-pkg");
+          writeFile(
+            path.join(worktreePath, TEST_FILE_REL_C),
+            PASSING_VITEST_TEST,
+          );
+        },
       });
 
-      expect(pkgRoot.ok).toBe(true);
-      if (!pkgRoot.ok) return;
-
-      const testRelPath = path.relative(outerDir, rootTest);
-      await stub("pnpm", ["vitest", "--run", "-t", testRelPath], {
-        cwd: pkgRoot.packageRoot,
-        reject: false,
-        timeout: 90_000,
+      const result = await runReviewerSession({
+        targetRepoRoot: tmp,
+        sessionUlid: FIXTURE_SESSION_ULID,
+        ref: FIXTURE_REF,
+        prNumber: FIXTURE_PR_NUMBER,
+        execaImpl: stub,
       });
 
-      expect(calls).toHaveLength(1);
-      const call = calls[0]!;
-      expect(call.cwd).toBe(outerDir);
-      expect(call.exitCode).toBe(0);
+      // AC3-C: status:pass
+      const ac1 = result.acResults[1];
+      expect(ac1).toBeDefined();
+      expect(ac1!.applicability).toBe("runnable-vitest");
+      if (ac1!.applicability !== "runnable-vitest") return;
+      expect(ac1!.status).toBe("pass");
+
+      // pnpm cwd === worktree root (where package.json is)
+      expect(pnpmCalls).toHaveLength(1);
+      const pnpmCall = pnpmCalls[0]!;
+      expect(pnpmCall.cwd).toBe(capturedWorktreeRoot);
     });
   });
 });
@@ -399,6 +617,7 @@ describe("AC4: pre-5.26 and post-5.26 paths produce identical findPackageRoot be
 
   beforeEach(() => {
     tmp = mkdtempSync(path.join(os.tmpdir(), "crew-5-27-ac4-"));
+    __resetGhErrorMapCacheForTests();
   });
 
   afterEach(() => {
@@ -484,5 +703,41 @@ describe("AC4: pre-5.26 and post-5.26 paths produce identical findPackageRoot be
       const relB = path.relative(worktree, resultB.packageRoot);
       expect(relA).toBe(relB);
     }
+  });
+
+  it("Path 1 via runReviewerSession (integration): pnpm cwd resolves to innerPkgDir in targetRepoRoot", async () => {
+    // Pre-5.26 path: checkRoot === targetRepoRoot. runReviewerSession's worktree
+    // (materialisePrBranchWorktree) is the checkRoot here — we seed the workspace
+    // shape inside it. The walk should find innerPkgDir within the worktree.
+    const TEST_FILE_REL = "plugins/crew/mcp-server/tests/my-test.test.ts";
+    await buildRunnerFixture(tmp, TEST_FILE_REL);
+
+    let capturedInnerPkgDir: string | null = null;
+
+    const { stub, pnpmCalls } = makeRunnerStub({
+      vitestExitCode: 0,
+      populateWorktree: (worktreePath) => {
+        const innerPkgDir = path.join(worktreePath, "plugins", "crew", "mcp-server");
+        capturedInnerPkgDir = innerPkgDir;
+        writePackageJson(innerPkgDir, "@crew/mcp-server");
+        writeFile(path.join(innerPkgDir, "tests", "my-test.test.ts"), PASSING_VITEST_TEST);
+      },
+    });
+
+    const result = await runReviewerSession({
+      targetRepoRoot: tmp,
+      sessionUlid: FIXTURE_SESSION_ULID,
+      ref: FIXTURE_REF,
+      prNumber: FIXTURE_PR_NUMBER,
+      execaImpl: stub,
+    });
+
+    const ac1 = result.acResults[1];
+    expect(ac1!.applicability).toBe("runnable-vitest");
+    if (ac1!.applicability !== "runnable-vitest") return;
+    expect(ac1!.status).toBe("pass");
+
+    expect(pnpmCalls).toHaveLength(1);
+    expect(pnpmCalls[0]!.cwd).toBe(capturedInnerPkgDir);
   });
 });
