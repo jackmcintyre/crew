@@ -491,3 +491,46 @@ So that the working-tree-clean invariant holds without the `git restore plugins/
 **AC1:** Build determinism — two consecutive clean builds produce byte-identical `dist/`, verified 5 times consecutively.
 **AC2:** Root cause documented in story Dev Notes — names the specific Zod construct(s), version/build behaviour responsible, and why the chosen fix strategy resolves it.
 **AC3 (integration):** vitest in `plugins/crew/mcp-server/tests/build-determinism.test.ts` runs the build twice and asserts `dist/` is byte-identical between runs. Investigation-first story; dev picks strategy (pin Zod / explicit enums / post-build normaliser) after diagnosis.
+
+## Story 5.25: Always-on MCP lifecycle logging + server-initiated keepalive — diagnose and prevent mid-session disconnects
+
+> Added 2026-05-28 from the post-5.12 disconnect-friction investigation.
+> Source: plan at `~/.claude/plans/continue-optimized-patterson.md`; informed by Anthropic issues #36308, #43177, #57207 and the MCP spec § stdio transport shutdown.
+> Re-investigates Story 5.12's keep-alive: external evidence shows stdin-close IS the spec's shutdown signal, so 5.12's setInterval is fighting the spec (zombie process). The real lever is preventing the parent's idle timer from ticking via periodic server-initiated traffic.
+
+As a plugin operator,
+I want the crew MCP server to (a) emit a persistent JSON-line lifecycle log so every disconnect reveals its trigger, (b) send a periodic keepalive ping that resets the parent's idle timer before the ~10 min reap fires, (c) survive unhandled errors and stdout EPIPE without crashing, and (d) drop Story 5.12's zombie-keeping setInterval since stdin-close is the spec-correct shutdown signal,
+So that mid-session "tools no longer available" stops being the dominant friction in long sessions, and so that when disconnects do happen, the log file tells me exactly which trigger fired.
+
+**Acceptance Criteria:**
+
+**AC1:**
+The MCP server appends JSON lines to a stable log path (default `~/.crew/mcp-lifecycle.log`, overridable via `CREW_MCP_LIFECYCLE_LOG` env). Events captured each as one JSON line: `boot` (pid, timestamp, plugin version), `transport.connected`, `tool.call` (name, ms-since-boot), `keepalive.sent`, `keepalive.response`, `stdin.end`, `stdin.close`, `stdout.error`, `transport.onclose`, `signal` (SIGTERM/SIGINT/SIGHUP), `uncaughtException`, `unhandledRejection`, `beforeExit`, `exit` (code). Logging is fail-open — an unwritable log path never crashes the server. The opt-in `CREW_MCP_DIAG` env from Story 5.12 is migrated into this layer (the old separate stderr stream is removed).
+artifact: plugins/crew/mcp-server/src/lib/lifecycle-log.ts
+artifact: plugins/crew/mcp-server/src/index.ts
+
+**AC2:**
+The server sends a JSON-RPC ping request (`{method: "ping"}`) to the client every 5 minutes (configurable via `CREW_MCP_KEEPALIVE_MS`, default 300000; disable with `0`). Each ping is logged as `keepalive.sent`; the client's pong reply is logged as `keepalive.response`. The keepalive uses the SDK's `Protocol.request()` method (inherited by `Server`) — no new MCP scaffolding is introduced. Ping failures are logged but do not crash the server. The timer is unref'd so it does not by itself hold the process alive after stdin close.
+artifact: plugins/crew/mcp-server/src/index.ts
+
+**AC3:**
+The server installs `process.on('uncaughtException')`, `process.on('unhandledRejection')`, and `process.stdout.on('error')` handlers that log the event to the lifecycle log and do NOT exit the process. The existing `main().catch(err => process.exit(1))` is preserved (it only fires on init failure, not on in-flight errors). SIGTERM/SIGINT default behaviour is unchanged — the server still terminates cleanly on signals (no custom handler added).
+artifact: plugins/crew/mcp-server/src/index.ts
+
+**AC4:**
+The module-level `_keepAliveHandle` setInterval and the `swallowStdinEnd`/`swallowStdinClose`/`process.stdin.resume()` block from Story 5.12 are removed from `plugins/crew/mcp-server/src/index.ts`. The story spec must document the justification: per MCP stdio transport spec, stdin close IS the parent's shutdown signal; the server should exit cleanly when it receives one. AC2's keepalive prevents stdin close from being the parent's choice in the first place; if the parent decides to shut down, we honour it.
+artifact: plugins/crew/mcp-server/src/index.ts
+
+**AC5:**
+The existing test `plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` is renamed to `mcp-stdin-close-shutdown.test.ts` and rewritten to assert the new contract: on stdin close, the child exits cleanly within 5 seconds with exit code 0. The "survive stdin close" assertions are deleted; the SIGTERM and dispatch-regression assertions are preserved.
+vitest: plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-shutdown.test.ts
+
+**AC6 (integration):**
+vitest spawns the real `dist/index.js` with `CREW_MCP_LIFECYCLE_LOG` set to a tmp path, drives a `tools/list` call, sends SIGTERM, and asserts the log file contains the expected event sequence (`boot` → `transport.connected` → `tool.call` → `signal` → `exit`). A second test asserts that an unwritable log path (e.g., `/proc/nonexistent/log`) does not crash the server (server still answers tool calls; log writes silently noop).
+vitest: plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts
+
+**AC7 (integration):**
+vitest spawns the dist with `CREW_MCP_KEEPALIVE_MS=2000` and `CREW_MCP_LIFECYCLE_LOG` set to a tmp path. After 7 seconds, the test reads the log and asserts at least 3 `keepalive.sent` events and at least 1 `keepalive.response` event (proving the SDK's auto-pong path works end-to-end). A second test sets `CREW_MCP_KEEPALIVE_MS=0` and asserts no `keepalive.sent` events appear within 5 seconds (disabled-by-zero contract).
+vitest: plugins/crew/mcp-server/src/__tests__/mcp-keepalive.test.ts
+
+**Note:** AC2's effectiveness against the real parent (does Claude Code's idle timer reset on incoming traffic?) is unverifiable in isolated tests — we can only confirm in real sessions. The lifecycle log from AC1 is the post-ship verification mechanism: if `stdin.end` events stop appearing in long idle sessions, the keepalive is working; if they still appear, the parent's timer is wall-clock and we revisit in a follow-up story (not a blocker for this one — the log gives us the signal).
