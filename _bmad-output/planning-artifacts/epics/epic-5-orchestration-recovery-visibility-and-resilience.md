@@ -572,3 +572,29 @@ So that vitest checks succeed in monorepo / pnpm-workspace target repos that hav
 **AC3 (integration):** vitest seeds a fixture mimicking the crew workspace shape: outer dir with no `package.json`, inner `plugins/crew/mcp-server/` with a valid `package.json` + a passing vitest test. Asserts `runVitestCheck` (a) correctly identifies `plugins/crew/mcp-server` as cwd, (b) runs vitest there, (c) returns status:pass. Repeat for a fixture with no nested `package.json` — asserts status:fail with the missing-manifest reason.
 **AC4:** Dependency on Story 5.26: this story sits on top of 5.26's PR-branch check root. If 5.26 hasn't shipped, the test-file path resolves against `targetRepoRoot` (orchestrator's local dev) and the workspace walk happens there — which still works for this repo's shape. If 5.26 has shipped, the walk happens inside the PR-branch worktree. Both paths must be exercised by AC3.
 
+## Story 5.28: `build:watch` chains `normalise-dist.mjs` after each tsc recompile
+
+> Added 2026-05-28 after `/ship-story 5-27` preflight tripped on Zod-determinism drift while `pnpm build:watch` was the active dev loop.
+> Source: carry-forward entry 16 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`.
+
+As a plugin operator,
+I want `pnpm build:watch` to run `scripts/normalise-dist.mjs` after every tsc recompile (the same chain `pnpm build` uses),
+So that the dev loop CLAUDE.md tells me to keep running stops producing continuous `dist/*.d.ts` drift that blocks `/ship-story` preflight on every substrate story.
+
+**Context:** Story 5.24 (commit `ee3506d`) wired the normaliser into `pnpm build` as `tsc -p tsconfig.json && node scripts/normalise-dist.mjs`. It only covered the one-shot build, which is what CI calls. `pnpm build:watch` is still bare `tsc -p tsconfig.json --watch`, so the watcher emits unnormalised `.d.ts` after every source change. Observed 2026-05-28: a fresh `pnpm build:watch` against `dev` produced 8 drifted `.d.ts` files matching the exact Zod enum-key reordering pattern (`haiku`/`opus`/`sonnet`, `BLOCKED`/`NEEDS CHANGES`/`READY FOR MERGE`, retry/needs-human, etc.) that 5.24's normaliser is designed to canonicalise. `/ship-story`'s preflight halts on dirty tree, so every substrate-story flow is now blocked-by-default whenever the dev watcher is running — which CLAUDE.md instructs operators to keep on (memory `project_dev_loop_plugin_dir`).
+
+**Acceptance Criteria:**
+
+**AC1:** `pnpm --dir plugins/crew/mcp-server build:watch` invokes `scripts/normalise-dist.mjs` after each tsc recompile cycle. No new runtime or dev dependencies are introduced — package.json `dependencies` / `devDependencies` are byte-identical to pre-story state (verified by diff). The watcher remains responsive (tsc-foreground; normaliser runs async post-emit) and inert when no source changes occur (no busy loop, no periodic re-runs without a tsc rebuild).
+artifact: plugins/crew/mcp-server/package.json
+artifact: plugins/crew/mcp-server/scripts/watch-and-normalise.mjs
+
+**AC2:** With a clean working tree, running `pnpm --dir plugins/crew/mcp-server build:watch` and then editing any `.ts` source file that produces a `.d.ts` containing a `z.enum([...])` (the construct sensitive to V8 hidden-class ordering — see 5.24 Dev Notes) results in a working tree that returns to clean once the watcher's recompile cycle settles. Validated 5 times consecutively — zero drift on any pair across an edit→settle cycle.
+artifact: plugins/crew/mcp-server/scripts/watch-and-normalise.mjs
+
+**AC3 (integration):** vitest in `plugins/crew/mcp-server/tests/build-watch-determinism.test.ts` spawns `pnpm build:watch` (or the wrapper script directly) as a child process inside a tmp project copy (or the package under test), triggers an idempotent source touch that forces a `.d.ts` re-emit, waits for the normaliser to settle (poll-with-timeout, ~5–10s cap), and asserts the resulting `.d.ts` files are byte-identical to what `pnpm build` (one-shot) produces from the same source. Child process and any spawned tsc workers are torn down unconditionally (try/finally + process-group teardown).
+vitest: plugins/crew/mcp-server/tests/build-watch-determinism.test.ts
+
+**AC4:** Root cause and design choice documented in the story's Dev Notes. The note names (a) why the bare `tsc --watch` path bypassed the 5.24 fix, (b) why the chosen seam (wrapper script vs. tsc programmatic API vs. fs.watch on `dist/`) was picked, and (c) what edge cases were considered (orphan child processes, debouncing rapid edits, normaliser concurrency with mid-emit tsc writes). Technical specifics required — one paragraph minimum.
+artifact: _bmad-output/implementation-artifacts/5-28-build-watch-normaliser-chaining.md
+

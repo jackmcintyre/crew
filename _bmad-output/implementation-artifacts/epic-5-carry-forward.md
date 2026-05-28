@@ -113,6 +113,14 @@
 **Implication for proof-point story:** the eventual writeup must either (a) acknowledge that v1 ships via human override on every story, with substrate fixes promised in the next iteration, or (b) wait until entries 7+13+14 are addressed before claiming the loop closes cleanly. Option (b) is the honest framing for a portfolio artifact.
 **Fold into:** sequencing decision for next planning round. Entries 13 + 14 should land before any further Epic 6 stories ship via /crew:start. Entry 7 (marker classifier) is partially mitigated by spec authoring discipline (the 6.1/6.2/6.3 specs already use clean markers); a permanent fix is its own substrate story.
 
+### 16. `build:watch` doesn't chain the 5.24 normaliser (Folded into 5.28)
+
+**Surface:** 2026-05-28, `/ship-story 5-27` preflight halted on dirty tree. `pnpm build:watch` (which CLAUDE.md tells operators to keep running for the dev loop) is defined as bare `tsc -p tsconfig.json --watch` — the normaliser chained into `pnpm build` by Story 5.24 (commit `ee3506d`) is **not** wired into the watcher. Every tsc recompile emits unnormalised `.d.ts`; working tree drifts continuously while build:watch is on. Observed 8 drifted `.d.ts` files (`catalogue`, `execution-manifest`, `gh-error-map`, `persona`, `risk-tiering-spec`, `telemetry-events`, `classify-risk-tier`, `run-auto-merge-gate`) matching the exact Zod enum-key reordering pattern 5.24 was designed to canonicalise.
+**Why this was hidden before:** 5.24 was validated by CI (which runs `pnpm build`, normaliser-chained) and by Jack's manual `pnpm build` cycles. Nobody ran a clean `build:watch` against the post-5.24 `dev` tree and checked for drift — the AC set covered the one-shot path only.
+**Workaround applied:** `git restore plugins/crew/mcp-server/dist/` + kill watchers before retrying preflight. Same as the pre-5.24 workaround; recurs every time `build:watch` runs.
+**Fold into:** Story 5.28 — small wrapper script `scripts/watch-and-normalise.mjs` that spawns `tsc --watch`, parses tsc's "Found N errors. Watching for file changes." sentinel from stdout, and runs `normaliseDistTree` from the existing `scripts/normalise-dist.mjs` after each successful emit. Re-uses 5.24's export; no new deps. CI unaffected (still uses `pnpm build`).
+**Scope discipline:** do NOT touch the `pnpm build` script (5.24's domain) or the normaliser itself (5.24's domain). The fix is additive — one new wrapper + one one-line edit to `package.json`'s `build:watch` script.
+
 ## Promotion history
 
 > Phase 2 (`dev → main` ff-promotion) records appended here as they happen, per deep-kettle plan Artefact P2.
