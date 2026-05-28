@@ -1250,3 +1250,50 @@ export class McpDisconnectedError extends DomainError {
         this.ref = opts.ref;
     }
 }
+/**
+ * A retro proposal (or the file-level wrapper) failed Zod schema validation —
+ * unknown discriminator literal, missing required field for a variant, path
+ * traversal in a `skill-create`/`skill-revise` `proposed_path`, malformed ULID
+ * `id`, non-UTC `created_at`, etc.
+ *
+ * Mirrors `MalformedExecutionManifestError`'s shape. Named so the MCP boundary
+ * maps Zod failures to a typed envelope downstream tooling (Epic 6b's apply
+ * paths) can pattern-match against.
+ *
+ * Thrown by `parseRetroProposalFile` in `schemas/retro-proposal.ts` — every
+ * caller MUST go through that helper.
+ *
+ * (Story 6.3 AC2 / FR59)
+ */
+export class MalformedRetroProposalError extends DomainError {
+    yamlPath;
+    zodMessage;
+    schemaModule;
+    constructor(opts) {
+        super(`Retro proposal payload is malformed at '${opts.yamlPath}': ${opts.zodMessage}. ` +
+            `See ${opts.schemaModule} for the canonical schema.`);
+        this.yamlPath = opts.yamlPath;
+        this.zodMessage = opts.zodMessage;
+        this.schemaModule = opts.schemaModule;
+    }
+}
+/**
+ * `writeRetroProposal` refused to overwrite an existing proposal file —
+ * proposals are immutable artifacts keyed by their ISO-8601 timestamp.
+ * A collision means the caller (the retro-analyst subagent) re-used a
+ * timestamp from a prior cycle, which is a bug in the caller, not a
+ * legitimate retry surface.
+ *
+ * (Story 6.3 AC1 / FR58)
+ */
+export class RetroProposalAlreadyExistsError extends DomainError {
+    absPath;
+    isoTimestamp;
+    constructor(opts) {
+        super(`writeRetroProposal refused: a proposal already exists at '${opts.absPath}' ` +
+            `(isoTimestamp='${opts.isoTimestamp}'). Proposals are immutable — collisions ` +
+            `indicate the caller re-used a timestamp. (Story 6.3 AC1)`);
+        this.absPath = opts.absPath;
+        this.isoTimestamp = opts.isoTimestamp;
+    }
+}
