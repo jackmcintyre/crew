@@ -598,3 +598,59 @@ vitest: plugins/crew/mcp-server/tests/build-watch-determinism.test.ts
 **AC4:** Root cause and design choice documented in the story's Dev Notes. The note names (a) why the bare `tsc --watch` path bypassed the 5.24 fix, (b) why the chosen seam (wrapper script vs. tsc programmatic API vs. fs.watch on `dist/`) was picked, and (c) what edge cases were considered (orphan child processes, debouncing rapid edits, normaliser concurrency with mid-emit tsc writes). Technical specifics required — one paragraph minimum.
 artifact: _bmad-output/implementation-artifacts/5-28-build-watch-normaliser-chaining.md
 
+## Story 5.30: MCP cascade halt seam in `/crew:start` + lifecycle-log diagnostic fields
+
+> Added 2026-05-28 after RCA confirmed Claude Code's `Task`-return SIGTERM cascade kills the parent MCP child paired with the subagent's child (8/8 paired SIGTERMs across 4 incidents in `~/.crew/mcp-lifecycle.log`).
+> Source: `~/.claude/plans/linked-knitting-stardust.md` § Recommendation — Path A.
+
+As a plugin operator,
+I want `/crew:start` to halt cleanly with a verbatim recovery line when the parent MCP child has been killed mid-cycle by Claude Code's subagent-termination cascade, AND I want the lifecycle log to carry `ppid` + `pgid` (and optional `sessionUlid`) on every event,
+So that the cascade failure mode stops manifesting as a stranded in-progress manifest with no operator-visible explanation, and future RCAs on disconnect events take minutes rather than the multi-hour pid-correlation pass that surfaced the cascade in the first place.
+
+**Context:** Stories 5.10/5.11/5.12 and 5.25 addressed idle-reap (a different failure mode); the cascade was invisible until 2026-05-28's RCA. The fix surface (process group semantics for subagent-spawned children) lives in Claude Code; we cannot fix the cascade from plugin code. Path A is the v1 strategy: accept the limitation, halt cleanly via a deterministic typed-error seam, add diagnostic fields so the next incident is observable from the log file alone. Paths B (HTTP daemon) and D2 (detached proxy) are deferred — D2 is the v1.1 candidate.
+
+**Acceptance Criteria:**
+
+**AC1:** A new typed error class `McpDisconnectedError` exists in `plugins/crew/mcp-server/src/errors.ts`, extending `DomainError`. The MCP-call wrapper used by `/crew:start`'s inner cycle catches the SDK's "tools no longer available" / "MCP server has disconnected" surface and re-raises as `McpDisconnectedError`, carrying `methodName`, `causeMessage`, and optional `ref`.
+artifact: plugins/crew/mcp-server/src/errors.ts
+
+**AC2:** `plugins/crew/skills/start/SKILL.md` gains a new "Failure modes" entry for `McpDisconnectedError`. When this error is caught at any MCP call site inside the inner cycle, the prose layer emits the verbatim halt line `[mcp-cascade-halted] MCP child killed by subagent Task termination — restart Claude Code and re-run /crew:start. The in-progress manifest will surface as an orphan; choose "reattach" to resume without losing work.` and stops — no further MCP calls; the manifest is left for Story 5.20's orphan-recovery branch on the next restart. The entry references memory `project_mcp_cascade_sigterm`.
+artifact: plugins/crew/skills/start/SKILL.md
+
+**AC3 (integration):** A vitest test in `plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` asserts that every event emitted by `createLifecycleLog().log(...)` and `createLifecycleLog().logSync(...)` carries `ppid` and `pgid` fields. The test covers every event-name the server emits today (`boot`, `transport.connected`, `tool.call`, `keepalive.sent`, `keepalive.response`, `keepalive.error`, `stdin.end`, `stdin.close`, `stdout.error`, `transport.onclose`, `signal`, `uncaughtException`, `unhandledRejection`, `beforeExit`, `exit`). `sessionUlid` MAY be present when `CREW_SESSION_ULID` env var is set; the test covers both presence and absence.
+vitest: plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts
+
+**AC4 (integration):** A vitest test in `plugins/crew/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts` simulates an MCP disconnect during the inner cycle and asserts (a) the verbatim halt line is emitted, (b) no further MCP calls are attempted after the halt, and (c) `McpDisconnectedError` is raised with the expected `methodName` / `causeMessage` fields.
+vitest: plugins/crew/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts
+
+## Story 5.31: Path D2 feasibility spike — detached proxy + parent-owned MCP daemon
+
+> Added 2026-05-28 as the v1.1 reliability candidate identified by the MCP-cascade RCA (`~/.claude/plans/linked-knitting-stardust.md` § Recommendation, step 4).
+> Time-boxed research spike. No production code modified. Output is a notes file with concrete evidence answering five blocking questions; the spike's exit is either "all five answered with green evidence" or "one hard blocker, escalate".
+
+As a **plugin engineer planning v1.1 reliability work**,
+I want **a half-day spike that confirms or invalidates Path D2 — a detached proxy script that re-execs the real MCP server in its own process group so the server survives the SIGTERM cascade that Story 5.30 only halts cleanly against**,
+So that **the next reliability investment is grounded in concrete evidence (manifest support confirmed, OS-level detachment validated, framing/lockfile/auth patterns decided) rather than design speculation, and we either commit to building D2 as v1.1's headline story or pivot to Path B (HTTP daemon) without losing a week to a dead end**.
+
+**Context:** Story 5.30 ships Path A (accept the cascade, halt cleanly, document). The RCA memo identifies Path D2 as the right v1.1 investment: 2–3 days of engineering for the same outcome as Path B (HTTP daemon, 4–7 days) without B's first-install ergonomic regression. D2's shape: the plugin manifest points at a stdio shim (`mcp-proxy.js`); on first connection, the shim `spawn(..., { detached: true, stdio: 'ignore' })`s the real MCP server, putting it in its own process group; the shim forwards JSON-RPC frames over a per-user unix socket between Claude Code's stdio and the daemon; when the host SIGTERMs the proxy's process group at subagent `Task` return, the detached daemon survives. None of this is built by the spike — the spike investigates the five questions that, if any answer is hostile, would invalidate the entire approach before the build is scheduled. The spike must NOT modify `plugin.json`, `mcp-server/src/`, or any other production code; output is a notes document under `_bmad-output/implementation-artifacts/spikes/`.
+
+**Acceptance Criteria:**
+
+**AC1 (spike notes file exists with all five answers):** A notes file at `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` exists and answers all five investigation questions below, each with concrete evidence (a URL with quoted excerpt, a runnable repro snippet with observed output, or a quoted fragment of an existing source file). The notes file's top section names the spike's verdict in one of three forms: `proceed-with-d2`, `pivot-to-path-b`, or `blocked-escalate-to-jack` with the named blocker.
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
+**AC2 (manifest support — Q1):** The notes file answers: does Claude Code's plugin manifest at `plugins/crew/.claude-plugin/plugin.json` support pointing `mcpServers.*.command` at an arbitrary stdio shim (e.g., a one-line bash script that `exec`s the real server) and have the host treat the shim as the MCP child? Evidence: either (a) a quoted excerpt from Claude Code's MCP docs (https://code.claude.com/docs/en/mcp.md) confirming the manifest treats `command` as an arbitrary executable path, OR (b) a runnable repro outside this repo (a tiny test plugin with a shell shim) showing MCP tools list correctly through the shim. The notes record the verdict as `manifest-supports-shim: yes | no | unclear-with-caveats`.
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
+**AC3 (OS-level detachment — Q2):** The notes file answers: does `spawn(..., { detached: true, stdio: 'ignore' })` from a Node child actually survive a SIGTERM to its grandparent's process group on darwin? Evidence: a 20–40 line standalone Node repro outside this repo (not in `plugins/crew/`) that (a) spawns a "real server" child with `detached: true` + `stdio: 'ignore'`, (b) sends `SIGTERM` to the parent's process group via `process.kill(-pgid, 'SIGTERM')`, and (c) observes the detached child's pid is still alive 2s later (`process.kill(pid, 0)` returns truthy). The notes include the repro source verbatim and the observed terminal output. Records verdict as `detached-survives-sigterm: yes | no | partial-with-caveats`.
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
+**AC4 (JSON-RPC framing — Q3):** The notes file answers: what's the cleanest framing for the shim's stdio→unix-socket bridge? The shim must forward JSON-RPC frames between Claude Code (stdio) and the daemon (unix socket). The notes identify any framing gotchas (chunked frames across socket reads, large payloads >64KB exceeding default buffer sizes, partial reads requiring buffering, line-delimited vs Content-Length framing) and recommend one framing approach with rationale. Evidence: either (a) a quoted reference to the MCP SDK's transport framing (`@modelcontextprotocol/sdk` source or docs via Context7), OR (b) a quoted note from the spike's investigation of the existing `plugins/crew/mcp-server/src/index.ts` stdio transport setup. Records verdict as `framing-approach: <named approach>` (e.g., `line-delimited-json`, `content-length-prefixed`).
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
+**AC5 (lockfile + stale-daemon detection — Q4):** The notes file answers: what's the right pattern for "is a daemon already running, or do I need to spawn one"? The notes evaluate at minimum two patterns — (a) PID file + `kill(pid, 0)` check, and (b) optimistic socket-connect probe — and recommend one with rationale covering: stale-PID handling on crash, race condition on first two concurrent shim spawns, cross-session correctness when multiple Claude Code instances run. Evidence: either a quoted reference from a well-known daemon's source (sshd, pgsql, redis), or a short pseudocode sketch validated against the four edge cases above. Records verdict as `daemon-liveness-pattern: <pidfile-with-kill-zero | socket-connect-probe | hybrid>`.
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
+**AC6 (auth / multi-user safety — Q5):** The notes file answers: does the unix socket need a per-connection token, or is filesystem permission (`0600` on the socket path under `~/.crew/`) sufficient for the darwin reference platform? The notes identify the threat model (other unprivileged processes on the same machine; not a network adversary — unix sockets are local-only), evaluate filesystem-permission-only vs token-handshake-on-connect, and recommend one with rationale. Evidence: either a quoted reference from unix-socket auth best-practices (e.g., man 2 socket section on `SO_PEERCRED` / macOS equivalents) or a quoted note on equivalent patterns in adjacent local-IPC daemons. Records verdict as `socket-auth: <filesystem-permission-only | token-handshake | other>`.
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
