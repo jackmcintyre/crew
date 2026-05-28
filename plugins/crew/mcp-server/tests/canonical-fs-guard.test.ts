@@ -56,6 +56,17 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // (workspace-shape, no-manifest, root-manifest) using sync fs writes.
   // Test file only; no production writes — findPackageRoot is read-only.
   path.join(SRC_DIR, "tools", "__tests__", "reviewer-vitest-cwd.test.ts"),
+  // Story 5.32: index.ts now writes the daemon's PID file to ~/.crew/mcp-daemon.pid
+  // so the proxy shim (mcp-proxy) can detect the running daemon (Q4 hybrid pattern).
+  // This is the transport-layer coordination file, NOT a canonical state write —
+  // it lives outside any target-repo .crew/state/** path. Whitelisted because the
+  // alternative (routing through managed-fs) would couple boot-time infrastructure
+  // to the per-repo write policy, which is a category error.
+  path.join(SRC_DIR, "index.ts"),
+  // Story 5.32: proxy-spawn.test.ts is a unit test that constructs an FsPort
+  // (injected) by passing real node:fs callables through to the acquire-daemon
+  // factory's mocked-out write path. Test file only; no production writes.
+  path.join(SRC_DIR, "__tests__", "proxy-spawn.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [
