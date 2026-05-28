@@ -937,6 +937,31 @@ export declare class ReviewerFirstCallSkippedError extends DomainError {
     });
 }
 /**
+ * `runReviewerSession` failed to fetch the PR's head ref via `gh pr view`.
+ * Thrown on any `gh` failure (recoverable or otherwise) during the
+ * head-ref fetch step (AC1 / AC4 of Story 5.26).
+ *
+ * The reviewer session MUST NOT fall back to the local filesystem — it halts
+ * immediately and surfaces this error verbatim to the inner cycle caller.
+ *
+ * Fields:
+ * - `prNumber`          — the PR number that was being fetched.
+ * - `ghSubcommand`      — the kebab-cased gh subcommand that failed (e.g. `"pr-view"`).
+ * - `underlyingMessage` — the raw error message from the gh wrapper.
+ *
+ * Story 5.26 — reviewer artifact-check against PR branch.
+ */
+export declare class ReviewerPrBranchFetchError extends DomainError {
+    readonly prNumber: number;
+    readonly ghSubcommand: string;
+    readonly underlyingMessage: string;
+    constructor(opts: {
+        prNumber: number;
+        ghSubcommand: string;
+        underlyingMessage: string;
+    });
+}
+/**
  * `reattachOrphan` was called on a manifest whose `claimed_by` already matches
  * the current session ULID. This is a race condition where the orphan was
  * claimed by another concurrent step between the scan and the rewrite attempt.
@@ -949,5 +974,49 @@ export declare class NotAnOrphanError extends DomainError {
     constructor(opts: {
         ref: string;
         currentSessionUlid: string;
+    });
+}
+/**
+ * A story retro payload (the argument to `recordStoryRetro`) failed schema
+ * validation: malformed shape, unknown key (strict-mode rejection), invalid
+ * `kind` value (closed enum), missing `failure_class` on a `pitfall` lesson,
+ * or `duration_seconds` not a non-negative integer.
+ *
+ * Mirrors `MalformedExecutionManifestError`'s shape. Named so the MCP
+ * boundary maps Zod failures to a typed envelope.
+ *
+ * Thrown by `parseStoryRetroPayload` in
+ * `schemas/story-retro.ts` — every caller MUST go through that helper.
+ * (Story 6.1 AC2, FR11)
+ */
+export declare class MalformedStoryRetroPayloadError extends DomainError {
+    readonly yamlPath: string;
+    readonly zodMessage: string;
+    readonly schemaModule: string;
+    constructor(opts: {
+        yamlPath: string;
+        zodMessage: string;
+        schemaModule: string;
+    });
+}
+/**
+ * `recordStoryRetro` refused to attach a retro payload because the target
+ * manifest is not in `done/`. The state-guard says retros are a
+ * post-completion concern — attaching a retro to a `to-do/`, `blocked/`,
+ * or `in-progress/` manifest is a structural error.
+ *
+ * `foundIn` carries the actual state directory where the manifest was
+ * located (one of `"to-do"`, `"blocked"`, `"in-progress"`). If the
+ * manifest does not exist anywhere, `recordStoryRetro` throws
+ * `ManifestNotFoundError` instead.
+ *
+ * Story 6.1 AC1, FR55.
+ */
+export declare class StoryNotInDoneStateError extends DomainError {
+    readonly ref: string;
+    readonly foundIn: "to-do" | "blocked" | "in-progress";
+    constructor(opts: {
+        ref: string;
+        foundIn: "to-do" | "blocked" | "in-progress";
     });
 }

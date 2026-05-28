@@ -5,8 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "build:watch": "tsc -p tsconfig.json --watch",
+    "build": "tsc -p tsconfig.json && node scripts/normalise-dist.mjs",
+    "build:watch": "node scripts/watch-and-normalise.mjs",
     "test": "NODE_OPTIONS=--max-old-space-size=8192 vitest run"
   },
   "dependencies": {

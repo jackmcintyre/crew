@@ -4,6 +4,7 @@ import { getPluginRoot } from "../lib/plugin-root.js";
 import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { claimStory } from "./claim-story.js";
 import { completeStory } from "./complete-story.js";
+import { recordStoryRetro } from "./record-story-retro.js";
 import { listClaimableTodos } from "./list-claimable-todos.js";
 import { mintSessionUlid } from "./mint-session-ulid.js";
 import { getStatus, renderStatus } from "./get-status.js";
@@ -501,6 +502,59 @@ export function registerAllTools(server) {
                 })
                     .parse(args);
                 const result = await completeStory(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({ error: err.name, message: err.message }),
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 6.1 — recordStoryRetro: attach structured retro entries (lessons[],
+    // failure_class, duration_seconds) to a done/ manifest after story completion.
+    // Reviewer-side tool. State-guards against to-do/, blocked/, in-progress/
+    // (post-completion concern). FR11, FR55.
+    server.registerTool({
+        name: "recordStoryRetro",
+        description: "Attach structured retro entries (lessons[], failure_class, duration_seconds) " +
+            "to a done/ manifest after story completion. Reviewer-side tool (Story 6.1, FR11, FR55). " +
+            "Refuses with StoryNotInDoneStateError when the manifest lives in to-do/, blocked/, " +
+            "or in-progress/. Throws ManifestNotFoundError when the ref does not exist anywhere. " +
+            "Throws MalformedStoryRetroPayloadError when the payload fails schema validation " +
+            "(closed kind enum, pitfall requires failure_class, etc.).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                ref: { type: "string" },
+                payload: { type: "object" },
+                role: { type: "string" },
+            },
+            required: ["targetRepoRoot", "ref", "payload"],
+        },
+        handler: async (args) => {
+            try {
+                const parsed = z
+                    .object({
+                    targetRepoRoot: z.string().min(1),
+                    ref: z.string().min(1),
+                    payload: z.unknown(),
+                    role: z.string().optional(),
+                })
+                    .parse(args);
+                const result = await recordStoryRetro(parsed);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };

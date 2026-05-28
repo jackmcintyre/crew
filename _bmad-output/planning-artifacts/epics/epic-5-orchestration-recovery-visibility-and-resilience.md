@@ -451,3 +451,206 @@ New MCP tool `markStoryShipped(ref: string)` that:
 - Surfaced via an operator-facing slash command (`/crew:mark-shipped <ref>`) or one-shot CLI helper.
 
 **Why not now:** if the classifier carried debt resolves first (Epic 6→7), this tool's surface disappears — the BLOCKED-with-merged-PR case stops happening because the classifier stops false-positiving. Authoring now risks wasted spec work. Same shape of protection as Story 5.18 (structural parser) — trigger-condition gating, no premature authoring.
+
+## Story 5.18: Structural / AST-style story parser (stub-only, protected backlog)
+
+> Stub-only — protected backlog. Added 2026-05-28 (originally proposed in `sprint-change-proposal-2026-05-27-reframe.md` Phase B; promoted from carry-forward entry 11 on Phase A complete).
+> Source: memory `project_current_blocker_story_parser`; trigger-condition gated.
+
+As a plugin operator,
+I want the BMad story parser to extract semantic fields from a markdown AST rather than chain-matching brittle line-shape regexes,
+So that stories from any planner (BMad, native, future adapters) survive minor formatting drift without losing scan/validate capability.
+
+**Trigger condition (verbatim — do NOT author the spec until this fires):**
+
+This story MUST NOT be authored or shipped unless one of the following triggers:
+
+1. A **non-BMad adapter input shape** lands (e.g. JIRA, Linear, GitHub Issues, a custom user adapter whose `parseSourceStory` differs structurally from `parseBmadStory` / `parseNativeStory`) — author 5.18 BEFORE merging that adapter.
+2. An **external-planner integration** ships — same shape as (1).
+3. **Cumulative regex-widening cost** exceeds the structural-refactor cost — when total widening surface in `parse-bmad-story.ts` / `parse-native-story.ts` gets too large to safely add another widening, OR when a proposed widening would conflict with another.
+
+When any trigger fires, author the full spec via `/bmad-create-story 5.18` and ship via `/ship-story 5-18`. Until then, leave this block in place as protected backlog.
+
+**Scope sketch (NOT authoritative — spec authoring required when triggered):**
+
+Replace chain-of-whitespace-strict-regexes in `parse-bmad-story.ts` and `parse-native-story.ts` with markdown-AST extraction (`remark` / `mdast` or equivalent). Drop-in: same interface, same return shape, same error types. No upstream callers change.
+
+**Why not now:** Current parser + 5.14 + 5.17 widening patches accommodate authored stories acceptably. Cost-per-widening has been small (~quarterly). Structural refactor is substantial (~1-2 weeks). Trigger ensures authoring at the moment it pays off.
+
+## Story 5.24: `.d.ts` Zod-determinism fix — eliminate cosmetic dist/ drift across clean rebuilds
+
+> Added 2026-05-27 post-`pre-dogfood-resumption-3` (5th occurrence of the drift).
+> Source: carry-forward entry 4 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`.
+
+As a plugin operator,
+I want the `.d.ts` files under `plugins/crew/mcp-server/dist/` to be byte-identical across clean `tsc` rebuilds,
+So that the working-tree-clean invariant holds without the `git restore plugins/crew/mcp-server/dist/` workaround.
+
+**Acceptance Criteria:**
+
+**AC1:** Build determinism — two consecutive clean builds produce byte-identical `dist/`, verified 5 times consecutively.
+**AC2:** Root cause documented in story Dev Notes — names the specific Zod construct(s), version/build behaviour responsible, and why the chosen fix strategy resolves it.
+**AC3 (integration):** vitest in `plugins/crew/mcp-server/tests/build-determinism.test.ts` runs the build twice and asserts `dist/` is byte-identical between runs. Investigation-first story; dev picks strategy (pin Zod / explicit enums / post-build normaliser) after diagnosis.
+
+## Story 5.25: Always-on MCP lifecycle logging + server-initiated keepalive — diagnose and prevent mid-session disconnects
+
+> Added 2026-05-28 from the post-5.12 disconnect-friction investigation.
+> Source: plan at `~/.claude/plans/continue-optimized-patterson.md`; informed by Anthropic issues #36308, #43177, #57207 and the MCP spec § stdio transport shutdown.
+> Re-investigates Story 5.12's keep-alive: external evidence shows stdin-close IS the spec's shutdown signal, so 5.12's setInterval is fighting the spec (zombie process). The real lever is preventing the parent's idle timer from ticking via periodic server-initiated traffic.
+
+As a plugin operator,
+I want the crew MCP server to (a) emit a persistent JSON-line lifecycle log so every disconnect reveals its trigger, (b) send a periodic keepalive ping that resets the parent's idle timer before the ~10 min reap fires, (c) survive unhandled errors and stdout EPIPE without crashing, and (d) drop Story 5.12's zombie-keeping setInterval since stdin-close is the spec-correct shutdown signal,
+So that mid-session "tools no longer available" stops being the dominant friction in long sessions, and so that when disconnects do happen, the log file tells me exactly which trigger fired.
+
+**Acceptance Criteria:**
+
+**AC1:**
+The MCP server appends JSON lines to a stable log path (default `~/.crew/mcp-lifecycle.log`, overridable via `CREW_MCP_LIFECYCLE_LOG` env). Events captured each as one JSON line: `boot` (pid, timestamp, plugin version), `transport.connected`, `tool.call` (name, ms-since-boot), `keepalive.sent`, `keepalive.response`, `stdin.end`, `stdin.close`, `stdout.error`, `transport.onclose`, `signal` (SIGTERM/SIGINT/SIGHUP), `uncaughtException`, `unhandledRejection`, `beforeExit`, `exit` (code). Logging is fail-open — an unwritable log path never crashes the server. The opt-in `CREW_MCP_DIAG` env from Story 5.12 is migrated into this layer (the old separate stderr stream is removed).
+artifact: plugins/crew/mcp-server/src/lib/lifecycle-log.ts
+artifact: plugins/crew/mcp-server/src/index.ts
+
+**AC2:**
+The server sends a JSON-RPC ping request (`{method: "ping"}`) to the client every 5 minutes (configurable via `CREW_MCP_KEEPALIVE_MS`, default 300000; disable with `0`). Each ping is logged as `keepalive.sent`; the client's pong reply is logged as `keepalive.response`. The keepalive uses the SDK's `Protocol.request()` method (inherited by `Server`) — no new MCP scaffolding is introduced. Ping failures are logged but do not crash the server. The timer is unref'd so it does not by itself hold the process alive after stdin close.
+artifact: plugins/crew/mcp-server/src/index.ts
+
+**AC3:**
+The server installs `process.on('uncaughtException')`, `process.on('unhandledRejection')`, and `process.stdout.on('error')` handlers that log the event to the lifecycle log and do NOT exit the process. The existing `main().catch(err => process.exit(1))` is preserved (it only fires on init failure, not on in-flight errors). SIGTERM/SIGINT default behaviour is unchanged — the server still terminates cleanly on signals (no custom handler added).
+artifact: plugins/crew/mcp-server/src/index.ts
+
+**AC4:**
+The module-level `_keepAliveHandle` setInterval and the `swallowStdinEnd`/`swallowStdinClose`/`process.stdin.resume()` block from Story 5.12 are removed from `plugins/crew/mcp-server/src/index.ts`. The story spec must document the justification: per MCP stdio transport spec, stdin close IS the parent's shutdown signal; the server should exit cleanly when it receives one. AC2's keepalive prevents stdin close from being the parent's choice in the first place; if the parent decides to shut down, we honour it.
+artifact: plugins/crew/mcp-server/src/index.ts
+
+**AC5:**
+The existing test `plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-resilience.test.ts` is renamed to `mcp-stdin-close-shutdown.test.ts` and rewritten to assert the new contract: on stdin close, the child exits cleanly within 5 seconds with exit code 0. The "survive stdin close" assertions are deleted; the SIGTERM and dispatch-regression assertions are preserved.
+vitest: plugins/crew/mcp-server/src/__tests__/mcp-stdin-close-shutdown.test.ts
+
+**AC6 (integration):**
+vitest spawns the real `dist/index.js` with `CREW_MCP_LIFECYCLE_LOG` set to a tmp path, drives a `tools/list` call, sends SIGTERM, and asserts the log file contains the expected event sequence (`boot` → `transport.connected` → `tool.call` → `signal` → `exit`). A second test asserts that an unwritable log path (e.g., `/proc/nonexistent/log`) does not crash the server (server still answers tool calls; log writes silently noop).
+vitest: plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts
+
+**AC7 (integration):**
+vitest spawns the dist with `CREW_MCP_KEEPALIVE_MS=2000` and `CREW_MCP_LIFECYCLE_LOG` set to a tmp path. After 7 seconds, the test reads the log and asserts at least 3 `keepalive.sent` events and at least 1 `keepalive.response` event (proving the SDK's auto-pong path works end-to-end). A second test sets `CREW_MCP_KEEPALIVE_MS=0` and asserts no `keepalive.sent` events appear within 5 seconds (disabled-by-zero contract).
+vitest: plugins/crew/mcp-server/src/__tests__/mcp-keepalive.test.ts
+
+**Note:** AC2's effectiveness against the real parent (does Claude Code's idle timer reset on incoming traffic?) is unverifiable in isolated tests — we can only confirm in real sessions. The lifecycle log from AC1 is the post-ship verification mechanism: if `stdin.end` events stop appearing in long idle sessions, the keepalive is working; if they still appear, the parent's timer is wall-clock and we revisit in a follow-up story (not a blocker for this one — the log gives us the signal).
+
+## Story 5.26: `runReviewerSession` artifact-check against PR branch
+
+> Added 2026-05-28 after bmad:5.24 re-roll exposed the gap.
+> Source: carry-forward entry 13 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`.
+
+As a plugin operator,
+I want the reviewer's artifact-presence check to verify against the PR branch's filesystem (not the orchestrator's local `dev`),
+So that the reviewer can return a true verdict on dev-shipped code without requiring an operator-side pre-merge.
+
+**Context:** `runReviewerSession.runArtifactCheck` currently does `fs.access(path.resolve(targetRepoRoot, artifactPath))`. `targetRepoRoot` is the orchestrator's working dir, which sits on `dev` — but the dev subagent's new files live on the PR's head branch (e.g. `bmad-5-24-zod-determinism-dts-fix`) in a sibling worktree at `../crew-<ref>` that gets torn down after handoff. Net effect: every PR's artifact check sees "file missing" → status:fail → verdict:NEEDS CHANGES. This was hidden in v1 because the marker classifier (carry-forward entry 7) returned manual-check-required for every backticked-marker AC, so the artifact-check filesystem path was never reached. Fixing markers in spec authoring discipline (6.1/6.3/6.2 now do this) exposed this gap.
+
+**Acceptance Criteria:**
+
+**AC1:** Before running per-AC artifact checks, `runReviewerSession` fetches the PR's `headRefName` and `headRefOid` via `gh pr view <prNumber> --json headRefName,headRefOid`, then materialises that ref's filesystem state for the duration of the check.
+**AC2:** The check root used by `runArtifactCheck` and `runVitestCheck` is the PR-branch filesystem, not `targetRepoRoot`. Implementation strategy is dev's choice: (a) `git worktree add <tmp> <sha>` + use `<tmp>` as check root + tear down on exit; or (b) for artifact-presence only, `git cat-file -e <sha>:<path>` to verify without checkout. Strategy (a) is required for AC3.
+**AC3 (integration):** vitest seeds a tmp git repo with two branches (orchestrator branch lacking the artifact; PR branch containing it), seeds a `to-do/<ref>.yaml` + reviewer-result.json shape that drives `runReviewerSession`, runs the reviewer against a stub PR number with `gh` mocked to return the PR-branch ref, asserts artifact check passes against the PR branch's filesystem rather than the orchestrator's. Repeats for the missing-artifact case (returns status:fail correctly).
+**AC4:** On any `gh` failure during the head-ref fetch (recoverable or otherwise), surface a typed error and halt the reviewer session — do NOT silently fall back to the local-filesystem check. Old behaviour is structurally wrong; failing-closed is correct.
+**AC5:** After check completion, the temporary worktree (if strategy a) is cleaned up unconditionally (try/finally). Stale temp worktrees from prior interrupted runs are detected and reaped on subsequent invocations.
+
+## Story 5.27: `runVitestCheck` workspace-aware cwd resolution
+
+> Added 2026-05-28 after bmad:5.24 re-roll exposed the gap.
+> Source: carry-forward entry 14 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`.
+
+As a plugin operator,
+I want the reviewer's vitest invocation to run from the package directory that owns the test file (not the workspace root),
+So that vitest checks succeed in monorepo / pnpm-workspace target repos that have no root `package.json`.
+
+**Context:** `runReviewerSession.runVitestCheck` currently invokes `pnpm vitest --run -t '<filter>'` with `cwd: targetRepoRoot`. The crew repo is a pnpm workspace with no root `package.json` (the vitest-owning package is `plugins/crew/mcp-server/`). Invocation fails with `ERR_PNPM_NO_PKG_MANIFEST`; test never executes; AC status:fail; verdict:NEEDS CHANGES. Hidden behind the same marker-classifier issue as Story 5.26 until 2026-05-28.
+
+**Acceptance Criteria:**
+
+**AC1:** `runVitestCheck` resolves the cwd from the test file's location: walks up from the resolved absolute path of the test file (derived from the `vitest:` marker) until it finds the nearest `package.json`, and uses that directory as the `cwd` for the `pnpm vitest` invocation.
+**AC2:** If no `package.json` is found between the test file and `targetRepoRoot` (inclusive), the check returns status:fail with a clear reason naming the missing-manifest condition — does NOT silently fall back to `targetRepoRoot`.
+**AC3 (integration):** vitest seeds a fixture mimicking the crew workspace shape: outer dir with no `package.json`, inner `plugins/crew/mcp-server/` with a valid `package.json` + a passing vitest test. Asserts `runVitestCheck` (a) correctly identifies `plugins/crew/mcp-server` as cwd, (b) runs vitest there, (c) returns status:pass. Repeat for a fixture with no nested `package.json` — asserts status:fail with the missing-manifest reason.
+**AC4:** Dependency on Story 5.26: this story sits on top of 5.26's PR-branch check root. If 5.26 hasn't shipped, the test-file path resolves against `targetRepoRoot` (orchestrator's local dev) and the workspace walk happens there — which still works for this repo's shape. If 5.26 has shipped, the walk happens inside the PR-branch worktree. Both paths must be exercised by AC3.
+
+## Story 5.28: `build:watch` chains `normalise-dist.mjs` after each tsc recompile
+
+> Added 2026-05-28 after `/ship-story 5-27` preflight tripped on Zod-determinism drift while `pnpm build:watch` was the active dev loop.
+> Source: carry-forward entry 16 in `_bmad-output/implementation-artifacts/epic-5-carry-forward.md`.
+
+As a plugin operator,
+I want `pnpm build:watch` to run `scripts/normalise-dist.mjs` after every tsc recompile (the same chain `pnpm build` uses),
+So that the dev loop CLAUDE.md tells me to keep running stops producing continuous `dist/*.d.ts` drift that blocks `/ship-story` preflight on every substrate story.
+
+**Context:** Story 5.24 (commit `ee3506d`) wired the normaliser into `pnpm build` as `tsc -p tsconfig.json && node scripts/normalise-dist.mjs`. It only covered the one-shot build, which is what CI calls. `pnpm build:watch` is still bare `tsc -p tsconfig.json --watch`, so the watcher emits unnormalised `.d.ts` after every source change. Observed 2026-05-28: a fresh `pnpm build:watch` against `dev` produced 8 drifted `.d.ts` files matching the exact Zod enum-key reordering pattern (`haiku`/`opus`/`sonnet`, `BLOCKED`/`NEEDS CHANGES`/`READY FOR MERGE`, retry/needs-human, etc.) that 5.24's normaliser is designed to canonicalise. `/ship-story`'s preflight halts on dirty tree, so every substrate-story flow is now blocked-by-default whenever the dev watcher is running — which CLAUDE.md instructs operators to keep on (memory `project_dev_loop_plugin_dir`).
+
+**Acceptance Criteria:**
+
+**AC1 (user-surface):** `pnpm --dir plugins/crew/mcp-server build:watch` invokes `scripts/normalise-dist.mjs` after each tsc recompile cycle. No new runtime or dev dependencies are introduced — package.json `dependencies` / `devDependencies` are byte-identical to pre-story state (verified by diff). The watcher remains responsive (tsc-foreground; normaliser runs async post-emit) and inert when no source changes occur (no busy loop, no periodic re-runs without a tsc rebuild).
+artifact: plugins/crew/mcp-server/package.json
+artifact: plugins/crew/mcp-server/scripts/watch-and-normalise.mjs
+
+**AC2 (user-surface):** With a clean working tree, running `pnpm --dir plugins/crew/mcp-server build:watch` and then editing any `.ts` source file that produces a `.d.ts` containing a `z.enum([...])` (the construct sensitive to V8 hidden-class ordering — see 5.24 Dev Notes) results in a working tree that returns to clean once the watcher's recompile cycle settles. Validated 5 times consecutively — zero drift on any pair across an edit→settle cycle.
+artifact: plugins/crew/mcp-server/scripts/watch-and-normalise.mjs
+
+**AC3 (integration):** vitest in `plugins/crew/mcp-server/tests/build-watch-determinism.test.ts` spawns `pnpm build:watch` (or the wrapper script directly) as a child process inside a tmp project copy (or the package under test), triggers an idempotent source touch that forces a `.d.ts` re-emit, waits for the normaliser to settle (poll-with-timeout, ~5–10s cap), and asserts the resulting `.d.ts` files are byte-identical to what `pnpm build` (one-shot) produces from the same source. Child process and any spawned tsc workers are torn down unconditionally (try/finally + process-group teardown).
+vitest: plugins/crew/mcp-server/tests/build-watch-determinism.test.ts
+
+**AC4:** Root cause and design choice documented in the story's Dev Notes. The note names (a) why the bare `tsc --watch` path bypassed the 5.24 fix, (b) why the chosen seam (wrapper script vs. tsc programmatic API vs. fs.watch on `dist/`) was picked, and (c) what edge cases were considered (orphan child processes, debouncing rapid edits, normaliser concurrency with mid-emit tsc writes). Technical specifics required — one paragraph minimum.
+artifact: _bmad-output/implementation-artifacts/5-28-build-watch-normaliser-chaining.md
+
+## Story 5.30: MCP cascade halt seam in `/crew:start` + lifecycle-log diagnostic fields
+
+> Added 2026-05-28 after RCA confirmed Claude Code's `Task`-return SIGTERM cascade kills the parent MCP child paired with the subagent's child (8/8 paired SIGTERMs across 4 incidents in `~/.crew/mcp-lifecycle.log`).
+> Source: `~/.claude/plans/linked-knitting-stardust.md` § Recommendation — Path A.
+
+As a plugin operator,
+I want `/crew:start` to halt cleanly with a verbatim recovery line when the parent MCP child has been killed mid-cycle by Claude Code's subagent-termination cascade, AND I want the lifecycle log to carry `ppid` + `pgid` (and optional `sessionUlid`) on every event,
+So that the cascade failure mode stops manifesting as a stranded in-progress manifest with no operator-visible explanation, and future RCAs on disconnect events take minutes rather than the multi-hour pid-correlation pass that surfaced the cascade in the first place.
+
+**Context:** Stories 5.10/5.11/5.12 and 5.25 addressed idle-reap (a different failure mode); the cascade was invisible until 2026-05-28's RCA. The fix surface (process group semantics for subagent-spawned children) lives in Claude Code; we cannot fix the cascade from plugin code. Path A is the v1 strategy: accept the limitation, halt cleanly via a deterministic typed-error seam, add diagnostic fields so the next incident is observable from the log file alone. Paths B (HTTP daemon) and D2 (detached proxy) are deferred — D2 is the v1.1 candidate.
+
+**Acceptance Criteria:**
+
+**AC1:** A new typed error class `McpDisconnectedError` exists in `plugins/crew/mcp-server/src/errors.ts`, extending `DomainError`. The MCP-call wrapper used by `/crew:start`'s inner cycle catches the SDK's "tools no longer available" / "MCP server has disconnected" surface and re-raises as `McpDisconnectedError`, carrying `methodName`, `causeMessage`, and optional `ref`.
+artifact: plugins/crew/mcp-server/src/errors.ts
+
+**AC2:** `plugins/crew/skills/start/SKILL.md` gains a new "Failure modes" entry for `McpDisconnectedError`. When this error is caught at any MCP call site inside the inner cycle, the prose layer emits the verbatim halt line `[mcp-cascade-halted] MCP child killed by subagent Task termination — restart Claude Code and re-run /crew:start. The in-progress manifest will surface as an orphan; choose "reattach" to resume without losing work.` and stops — no further MCP calls; the manifest is left for Story 5.20's orphan-recovery branch on the next restart. The entry references memory `project_mcp_cascade_sigterm`.
+artifact: plugins/crew/skills/start/SKILL.md
+
+**AC3 (integration):** A vitest test in `plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts` asserts that every event emitted by `createLifecycleLog().log(...)` and `createLifecycleLog().logSync(...)` carries `ppid` and `pgid` fields. The test covers every event-name the server emits today (`boot`, `transport.connected`, `tool.call`, `keepalive.sent`, `keepalive.response`, `keepalive.error`, `stdin.end`, `stdin.close`, `stdout.error`, `transport.onclose`, `signal`, `uncaughtException`, `unhandledRejection`, `beforeExit`, `exit`). `sessionUlid` MAY be present when `CREW_SESSION_ULID` env var is set; the test covers both presence and absence.
+vitest: plugins/crew/mcp-server/src/__tests__/mcp-lifecycle-log.test.ts
+
+**AC4 (integration):** A vitest test in `plugins/crew/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts` simulates an MCP disconnect during the inner cycle and asserts (a) the verbatim halt line is emitted, (b) no further MCP calls are attempted after the halt, and (c) `McpDisconnectedError` is raised with the expected `methodName` / `causeMessage` fields.
+vitest: plugins/crew/mcp-server/src/__tests__/start-skill-mcp-disconnect.test.ts
+
+## Story 5.31: Path D2 feasibility spike — detached proxy + parent-owned MCP daemon
+
+> Added 2026-05-28 as the v1.1 reliability candidate identified by the MCP-cascade RCA (`~/.claude/plans/linked-knitting-stardust.md` § Recommendation, step 4).
+> Time-boxed research spike. No production code modified. Output is a notes file with concrete evidence answering five blocking questions; the spike's exit is either "all five answered with green evidence" or "one hard blocker, escalate".
+
+As a **plugin engineer planning v1.1 reliability work**,
+I want **a half-day spike that confirms or invalidates Path D2 — a detached proxy script that re-execs the real MCP server in its own process group so the server survives the SIGTERM cascade that Story 5.30 only halts cleanly against**,
+So that **the next reliability investment is grounded in concrete evidence (manifest support confirmed, OS-level detachment validated, framing/lockfile/auth patterns decided) rather than design speculation, and we either commit to building D2 as v1.1's headline story or pivot to Path B (HTTP daemon) without losing a week to a dead end**.
+
+**Context:** Story 5.30 ships Path A (accept the cascade, halt cleanly, document). The RCA memo identifies Path D2 as the right v1.1 investment: 2–3 days of engineering for the same outcome as Path B (HTTP daemon, 4–7 days) without B's first-install ergonomic regression. D2's shape: the plugin manifest points at a stdio shim (`mcp-proxy.js`); on first connection, the shim `spawn(..., { detached: true, stdio: 'ignore' })`s the real MCP server, putting it in its own process group; the shim forwards JSON-RPC frames over a per-user unix socket between Claude Code's stdio and the daemon; when the host SIGTERMs the proxy's process group at subagent `Task` return, the detached daemon survives. None of this is built by the spike — the spike investigates the five questions that, if any answer is hostile, would invalidate the entire approach before the build is scheduled. The spike must NOT modify `plugin.json`, `mcp-server/src/`, or any other production code; output is a notes document under `_bmad-output/implementation-artifacts/spikes/`.
+
+**Acceptance Criteria:**
+
+**AC1 (spike notes file exists with all five answers):** A notes file at `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` exists and answers all five investigation questions below, each with concrete evidence (a URL with quoted excerpt, a runnable repro snippet with observed output, or a quoted fragment of an existing source file). The notes file's top section names the spike's verdict in one of three forms: `proceed-with-d2`, `pivot-to-path-b`, or `blocked-escalate-to-jack` with the named blocker.
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
+**AC2 (manifest support — Q1):** The notes file answers: does Claude Code's plugin manifest at `plugins/crew/.claude-plugin/plugin.json` support pointing `mcpServers.*.command` at an arbitrary stdio shim (e.g., a one-line bash script that `exec`s the real server) and have the host treat the shim as the MCP child? Evidence: either (a) a quoted excerpt from Claude Code's MCP docs (https://code.claude.com/docs/en/mcp.md) confirming the manifest treats `command` as an arbitrary executable path, OR (b) a runnable repro outside this repo (a tiny test plugin with a shell shim) showing MCP tools list correctly through the shim. The notes record the verdict as `manifest-supports-shim: yes | no | unclear-with-caveats`.
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
+**AC3 (OS-level detachment — Q2):** The notes file answers: does `spawn(..., { detached: true, stdio: 'ignore' })` from a Node child actually survive a SIGTERM to its grandparent's process group on darwin? Evidence: a 20–40 line standalone Node repro outside this repo (not in `plugins/crew/`) that (a) spawns a "real server" child with `detached: true` + `stdio: 'ignore'`, (b) sends `SIGTERM` to the parent's process group via `process.kill(-pgid, 'SIGTERM')`, and (c) observes the detached child's pid is still alive 2s later (`process.kill(pid, 0)` returns truthy). The notes include the repro source verbatim and the observed terminal output. Records verdict as `detached-survives-sigterm: yes | no | partial-with-caveats`.
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
+**AC4 (JSON-RPC framing — Q3):** The notes file answers: what's the cleanest framing for the shim's stdio→unix-socket bridge? The shim must forward JSON-RPC frames between Claude Code (stdio) and the daemon (unix socket). The notes identify any framing gotchas (chunked frames across socket reads, large payloads >64KB exceeding default buffer sizes, partial reads requiring buffering, line-delimited vs Content-Length framing) and recommend one framing approach with rationale. Evidence: either (a) a quoted reference to the MCP SDK's transport framing (`@modelcontextprotocol/sdk` source or docs via Context7), OR (b) a quoted note from the spike's investigation of the existing `plugins/crew/mcp-server/src/index.ts` stdio transport setup. Records verdict as `framing-approach: <named approach>` (e.g., `line-delimited-json`, `content-length-prefixed`).
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
+**AC5 (lockfile + stale-daemon detection — Q4):** The notes file answers: what's the right pattern for "is a daemon already running, or do I need to spawn one"? The notes evaluate at minimum two patterns — (a) PID file + `kill(pid, 0)` check, and (b) optimistic socket-connect probe — and recommend one with rationale covering: stale-PID handling on crash, race condition on first two concurrent shim spawns, cross-session correctness when multiple Claude Code instances run. Evidence: either a quoted reference from a well-known daemon's source (sshd, pgsql, redis), or a short pseudocode sketch validated against the four edge cases above. Records verdict as `daemon-liveness-pattern: <pidfile-with-kill-zero | socket-connect-probe | hybrid>`.
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+
+**AC6 (auth / multi-user safety — Q5):** The notes file answers: does the unix socket need a per-connection token, or is filesystem permission (`0600` on the socket path under `~/.crew/`) sufficient for the darwin reference platform? The notes identify the threat model (other unprivileged processes on the same machine; not a network adversary — unix sockets are local-only), evaluate filesystem-permission-only vs token-handshake-on-connect, and recommend one with rationale. Evidence: either a quoted reference from unix-socket auth best-practices (e.g., man 2 socket section on `SO_PEERCRED` / macOS equivalents) or a quoted note on equivalent patterns in adjacent local-IPC daemons. Records verdict as `socket-auth: <filesystem-permission-only | token-handshake | other>`.
+artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+

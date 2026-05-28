@@ -33,6 +33,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
+import { accessSync } from "node:fs";
 import { execa as defaultExeca } from "execa";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 import { lookupStandards } from "../state/lookup-standards.js";
@@ -43,6 +44,7 @@ import { slugifyStandardsCriterion } from "../lib/slugify-standards-criterion.js
 import { atomicWriteFile } from "../lib/managed-fs.js";
 import { DuplicateStandardsCriterionIdError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
+import { materialisePrBranchWorktree } from "../lib/materialise-pr-branch-worktree.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
 import type { SourceStory } from "../adapters/adapter.js";
 import type { Criterion, StandardsDoc } from "../schemas/standards-doc.js";
@@ -159,6 +161,9 @@ function classifyAc(bodyLines: string[]): {
   applicability: "runnable-artifact-check" | "runnable-vitest" | "manual-check-required";
   artifactPath?: string;
   testNameFilter?: string;
+  /** Story 5.27: raw path from the vitest: marker — same value as testNameFilter today,
+   *  kept separate so a future refactor can split the filter from the file path. */
+  testFilePath?: string;
 } {
   const bodyText = bodyLines.join("\n");
 
@@ -170,7 +175,12 @@ function classifyAc(bodyLines: string[]): {
 
   const vitestMatch = VITEST_RE.exec(bodyText);
   if (vitestMatch) {
-    return { applicability: "runnable-vitest", testNameFilter: vitestMatch[1]!.trim() };
+    const captured = vitestMatch[1]!.trim();
+    return {
+      applicability: "runnable-vitest",
+      testNameFilter: captured,
+      testFilePath: captured,
+    };
   }
 
   return { applicability: "manual-check-required" };
@@ -184,9 +194,9 @@ async function runArtifactCheck(
   index: number,
   tag: string | null,
   artifactPath: string,
-  targetRepoRoot: string,
+  checkRoot: string,
 ): Promise<AcResult> {
-  const resolved = path.resolve(targetRepoRoot, artifactPath);
+  const resolved = path.resolve(checkRoot, artifactPath);
   try {
     await fs.access(resolved);
     return {
@@ -223,15 +233,72 @@ function capString(s: string): string {
   return s.slice(0, STDOUT_STDERR_CAP) + TRUNCATION_MARKER;
 }
 
+/**
+ * Walk up from `testFilePathAbs` to find the nearest enclosing `package.json`.
+ *
+ * Starts at `path.dirname(testFilePathAbs)` and walks toward the filesystem
+ * root, stopping (inclusively) at `checkRoot`. Returns `{ ok: true, packageRoot }`
+ * if found, `{ ok: false }` if the walk exhausts `checkRoot` without finding one.
+ *
+ * Guard: `d === checkRootAbs || d.startsWith(checkRootAbs + path.sep)` prevents
+ * false-positive prefix matches on sibling paths (e.g. `/tmp/checker` when
+ * checkRoot is `/tmp/check`). ESM — uses `accessSync` from "node:fs" (top-level
+ * import), NOT `require(...)`.
+ *
+ * Story 5.27 — AC1, AC2.
+ */
+export function findPackageRoot(opts: {
+  testFilePathAbs: string;
+  checkRoot: string;
+}): { ok: true; packageRoot: string } | { ok: false } {
+  const checkRootAbs = path.resolve(opts.checkRoot);
+  let dir = path.dirname(opts.testFilePathAbs);
+
+  const isWithinCheckRoot = (d: string): boolean =>
+    d === checkRootAbs || d.startsWith(checkRootAbs + path.sep);
+
+  while (isWithinCheckRoot(dir)) {
+    try {
+      accessSync(path.join(dir, "package.json"));
+      return { ok: true, packageRoot: dir };
+    } catch {
+      // package.json not present here — walk up.
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // filesystem root reached
+    dir = parent;
+  }
+  return { ok: false };
+}
+
 async function runVitestCheck(
   index: number,
   tag: string | null,
   testNameFilter: string,
-  targetRepoRoot: string,
+  testFilePath: string,
+  checkRoot: string,
   execaImpl: typeof defaultExeca,
 ): Promise<AcResult> {
+  // Story 5.27: resolve the package root by walking up from the test file.
+  const testFilePathAbs = path.resolve(checkRoot, testFilePath);
+  const pkgRoot = findPackageRoot({ testFilePathAbs, checkRoot });
+
+  if (!pkgRoot.ok) {
+    return {
+      index,
+      tag,
+      applicability: "runnable-vitest",
+      testNameFilter,
+      status: "fail",
+      reason: `no package.json found between test file '${testFilePath}' and checkRoot '${checkRoot}' — vitest cannot run without a manifest`,
+      stdout: "",
+      stderr: "",
+      exitCode: -1,
+    };
+  }
+
   const result = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
-    cwd: targetRepoRoot,
+    cwd: pkgRoot.packageRoot,
     reject: false,
     timeout: VITEST_TIMEOUT_MS,
   });
@@ -417,101 +484,129 @@ export async function runReviewerSession(
 
   // -------------------------------------------------------------------------
   // AC execution (spec §2a–2h)
+  //
+  // Story 5.26: Before running any per-AC check, materialise the PR's head
+  // ref into a temporary git worktree. All artifact and vitest checks run
+  // against the worktree path (checkRoot), NOT targetRepoRoot. The worktree
+  // is torn down unconditionally in the finally block (AC5).
   // -------------------------------------------------------------------------
   // The spec says to use sourceStory.specPath, but the SourceStory type has
   // raw_path which is the absolute path to the on-disk spec file.
   const specPath = sourceStory.raw_path;
   const acEntries = await extractAcsFromSpec(specPath);
 
-  // Execute serially in numeric-index order (spec §2f)
+  // Materialise the PR branch worktree (AC1). Throws ReviewerPrBranchFetchError
+  // on any gh or git failure — do NOT catch here (AC4 requires propagation).
+  const { worktreePath, cleanup } = await materialisePrBranchWorktree({
+    targetRepoRoot,
+    sessionUlid,
+    prNumber,
+    role,
+    execaImpl,
+    pluginRootOverride: pluginRoot,
+    permissionsOverride: permissions,
+  });
+
+  // Execute serially in numeric-index order (spec §2f), wrapped in try/finally
+  // so the worktree is always removed (AC5).
+  // setupLog is available for diagnostics but not persisted here — the log
+  // entries are internal to materialisePrBranchWorktree (stale-reap notices etc.).
   const acResults: Record<number, AcResult> = {};
+  let riskTierBlock: RiskTierBlock | undefined;
 
-  for (const ac of acEntries) {
-    const classification = classifyAc(ac.body);
+  try {
+    for (const ac of acEntries) {
+      const classification = classifyAc(ac.body);
 
-    if (classification.applicability === "runnable-artifact-check") {
-      acResults[ac.index] = await runArtifactCheck(
-        ac.index,
-        ac.tag,
-        classification.artifactPath!,
-        targetRepoRoot,
-      );
-    } else if (classification.applicability === "runnable-vitest") {
-      acResults[ac.index] = await runVitestCheck(
-        ac.index,
-        ac.tag,
-        classification.testNameFilter!,
-        targetRepoRoot,
-        execaImpl,
-      );
-    } else {
-      // manual-check-required (spec §2c)
-      acResults[ac.index] = {
-        index: ac.index,
-        tag: ac.tag,
-        applicability: "manual-check-required",
-        reason: "AC body has no `artifact:` or `vitest:` marker — manual check required before merge",
-      };
+      if (classification.applicability === "runnable-artifact-check") {
+        acResults[ac.index] = await runArtifactCheck(
+          ac.index,
+          ac.tag,
+          classification.artifactPath!,
+          worktreePath,  // checkRoot — AC2
+        );
+      } else if (classification.applicability === "runnable-vitest") {
+        acResults[ac.index] = await runVitestCheck(
+          ac.index,
+          ac.tag,
+          classification.testNameFilter!,
+          classification.testFilePath!,  // Story 5.27: explicit file path for cwd walk
+          worktreePath,                   // checkRoot — AC2 (Story 5.26 worktree path)
+          execaImpl,
+        );
+      } else {
+        // manual-check-required (spec §2c)
+        acResults[ac.index] = {
+          index: ac.index,
+          tag: ac.tag,
+          applicability: "manual-check-required",
+          reason: "AC body has no `artifact:` or `vitest:` marker — manual check required before merge",
+        };
+      }
     }
+
+    // -----------------------------------------------------------------------
+    // Risk-tier classification (Story 4.9b — FR40a, Pattern §11)
+    //
+    // Runs AFTER the AC-walk and BEFORE writing reviewer-result.json.
+    // Still uses targetRepoRoot for spec lookups (planning-artifacts/ live on
+    // dev, not on the PR branch). Wrapped in try/catch: a malformed spec or
+    // missing default must not break the reviewer pass.
+    // -----------------------------------------------------------------------
+    try {
+      // Collect changed paths from the diff (lines starting with "+++ b/" or "--- a/" are headers)
+      const changedPaths = collectChangedPathsFromDiff(prDiff);
+
+      // Collect commit messages via `gh pr view --json commits`
+      const commitsResult = await gh({
+        role,
+        permissions,
+        subcommand: "pr-view",
+        args: [String(prNumber), "--json", "commits", "--jq", "[.commits[].messageHeadline]"],
+        execaImpl,
+        pluginRootOverride: pluginRoot,
+      });
+      let commitMessages: string[] = [];
+      try {
+        const parsed = JSON.parse(commitsResult.stdout) as unknown;
+        if (Array.isArray(parsed)) {
+          commitMessages = parsed.filter((m): m is string => typeof m === "string");
+        }
+      } catch {
+        // Failed to parse commits — use empty array (classifier still runs)
+      }
+
+      // Compute diffSize: count lines starting with + or - (excluding +++ and --- headers)
+      const diffSize = computeDiffSize(prDiff);
+
+      const classificationResult = await classifyRiskTier({
+        targetRepoRoot,
+        pluginRoot,
+        storyId: ref,
+        changedPaths,
+        commitMessages,
+        diffSize,
+      });
+
+      // Attach to result file as riskTier block (drop story_id — file already has ref)
+      const { story_id: _dropped, ...block } = classificationResult;
+      riskTierBlock = block;
+    } catch {
+      // Malformed spec, missing default, or unexpected error — continue without classification.
+      // postReviewerComments handles absent riskTier gracefully (no evidence block, no stamp).
+    }
+  } finally {
+    // Unconditional cleanup per AC5. Cleanup failures are NOT fatal — they produce
+    // warnings returned from cleanup() which are surfaced in the returned result's
+    // chatLog (not persisted to disk here to stay within the fs-write guard). The
+    // worktree lives under <sessionDir>/ which is operator-collectable garbage.
+    await cleanup();
   }
 
   // -------------------------------------------------------------------------
   // Derive recommendedVerdict deterministically (spec §3f — revision 2)
   // -------------------------------------------------------------------------
   const recommendedVerdict = deriveRecommendedVerdict(acResults);
-
-  // -------------------------------------------------------------------------
-  // Risk-tier classification (Story 4.9b — FR40a, Pattern §11)
-  //
-  // Runs AFTER the AC-walk and BEFORE writing reviewer-result.json.
-  // Wrapped in try/catch: a malformed spec or missing default must not
-  // break the reviewer pass — the result file is written without riskTier
-  // and downstream consumers (postReviewerComments) silently omit the
-  // evidence block and manifest stamp.
-  // -------------------------------------------------------------------------
-  let riskTierBlock: RiskTierBlock | undefined;
-  try {
-    // Collect changed paths from the diff (lines starting with "+++ b/" or "--- a/" are headers)
-    const changedPaths = collectChangedPathsFromDiff(prDiff);
-
-    // Collect commit messages via `gh pr view --json commits`
-    const commitsResult = await gh({
-      role,
-      permissions,
-      subcommand: "pr-view",
-      args: [String(prNumber), "--json", "commits", "--jq", "[.commits[].messageHeadline]"],
-      execaImpl,
-      pluginRootOverride: pluginRoot,
-    });
-    let commitMessages: string[] = [];
-    try {
-      const parsed = JSON.parse(commitsResult.stdout) as unknown;
-      if (Array.isArray(parsed)) {
-        commitMessages = parsed.filter((m): m is string => typeof m === "string");
-      }
-    } catch {
-      // Failed to parse commits — use empty array (classifier still runs)
-    }
-
-    // Compute diffSize: count lines starting with + or - (excluding +++ and --- headers)
-    const diffSize = computeDiffSize(prDiff);
-
-    const classificationResult = await classifyRiskTier({
-      targetRepoRoot,
-      pluginRoot,
-      storyId: ref,
-      changedPaths,
-      commitMessages,
-      diffSize,
-    });
-
-    // Attach to result file as riskTier block (drop story_id — file already has ref)
-    const { story_id: _dropped, ...block } = classificationResult;
-    riskTierBlock = block;
-  } catch {
-    // Malformed spec, missing default, or unexpected error — continue without classification.
-    // postReviewerComments handles absent riskTier gracefully (no evidence block, no stamp).
-  }
 
   // -------------------------------------------------------------------------
   // Persist reviewer-result.json (spec §3g — revision 2)

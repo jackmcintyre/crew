@@ -108,6 +108,3 @@ Other ruleset entries (status-check requirements, etc.) are conventional and can
 - After any incident that touches branch state or git history (force-push, history rewrite, mass branch cleanup).
 - On a cadence (e.g. weekly) if dogfood is paused for an extended period.
 
-## Known recurring drift
-
-The `plugins/crew/mcp-server/dist/*.d.ts` files occasionally show pure key-ordering churn (`medium`/`low` swap inside Zod enum inferences) between local `tsc` rebuilds and the committed copy. This is cosmetic — the runtime types are identical — but it trips the working-tree-clean check above. Workaround: `git restore plugins/crew/mcp-server/dist/` before running the checklist; investigating the underlying TS/Zod determinism is a separate substrate follow-up.

@@ -121,4 +121,27 @@ export interface RunReviewerSessionOptions {
     /** Plugin root override — test seam for loadRolePermissions. */
     pluginRootOverride?: string;
 }
+/**
+ * Walk up from `testFilePathAbs` to find the nearest enclosing `package.json`.
+ *
+ * Starts at `path.dirname(testFilePathAbs)` and walks toward the filesystem
+ * root, stopping (inclusively) at `checkRoot`. Returns `{ ok: true, packageRoot }`
+ * if found, `{ ok: false }` if the walk exhausts `checkRoot` without finding one.
+ *
+ * Guard: `d === checkRootAbs || d.startsWith(checkRootAbs + path.sep)` prevents
+ * false-positive prefix matches on sibling paths (e.g. `/tmp/checker` when
+ * checkRoot is `/tmp/check`). ESM — uses `accessSync` from "node:fs" (top-level
+ * import), NOT `require(...)`.
+ *
+ * Story 5.27 — AC1, AC2.
+ */
+export declare function findPackageRoot(opts: {
+    testFilePathAbs: string;
+    checkRoot: string;
+}): {
+    ok: true;
+    packageRoot: string;
+} | {
+    ok: false;
+};
 export declare function runReviewerSession(opts: RunReviewerSessionOptions): Promise<ReviewerSessionResult>;

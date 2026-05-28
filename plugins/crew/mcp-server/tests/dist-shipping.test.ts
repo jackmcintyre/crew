@@ -78,6 +78,13 @@ describe("dist shipping contract (Story 1.9)", () => {
           ["exec", "tsc", "-p", "tsconfig.json", "--outDir", tmpRoot],
           { cwd: SERVER_ROOT },
         );
+        // Story 5.24: committed dist/ is post-`normalise-dist.mjs` (the build script
+        // chains it after tsc). Mirror that here so this drift check compares
+        // apples-to-apples against what `pnpm build` actually produces.
+        const normaliser = await import(
+          resolve(SERVER_ROOT, "scripts/normalise-dist.mjs")
+        ) as { normaliseDistTree: (root: string) => Promise<string[]> };
+        await normaliser.normaliseDistTree(tmpRoot);
 
         const [committed, fresh] = await Promise.all([
           walkFiles(DIST_DIR),
