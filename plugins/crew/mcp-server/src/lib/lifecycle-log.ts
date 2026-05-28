@@ -17,6 +17,54 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { execSync } from "node:child_process";
+
+/**
+ * Resolve the process-group ID on POSIX. Returns `undefined` on Windows
+ * or if resolution fails for any reason — fail-open, no throw.
+ *
+ * Implementation note: Node exposes `process.pid` and `process.ppid` but
+ * not `getpgrp` as a stdlib API on most builds. We use a one-time `ps`
+ * invocation at module load to read the process group, then cache the
+ * result. `pgid` only changes if a process calls `setsid`/`setpgid`,
+ * which the MCP server does not — so the cached value is correct for
+ * the lifetime of the process.
+ *
+ * Story 5.30: the cascade RCA was invisible because every log line carried
+ * only `pid`. With `pgid`, paired SIGTERMs across the parent + subagent
+ * MCP children become a one-pass `awk` correlation.
+ */
+function resolvePgid(): number | undefined {
+  if (os.platform() === "win32") return undefined;
+  // Try the (non-stdlib but present on many Node builds) typed getpgrp first.
+  try {
+    const candidate = (process as unknown as { getpgrp?: () => number }).getpgrp;
+    if (typeof candidate === "function") {
+      const value = candidate.call(process);
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+    }
+  } catch {
+    // fall through to ps
+  }
+  // Fallback: spawn `ps` once and parse the pgid column. POSIX-portable;
+  // works on darwin + linux.
+  try {
+    const out = execSync(`ps -o pgid= -p ${process.pid}`, {
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1_000,
+    })
+      .toString()
+      .trim();
+    const parsed = Number.parseInt(out, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Resolved once at module load. `pgid` is invariant across the process
+// lifetime unless the process calls setsid/setpgid (we do not).
+const RESOLVED_PGID = resolvePgid();
 
 export interface LifecycleLog {
   /** Fire-and-forget async log — suitable for most event sites. */
@@ -62,10 +110,18 @@ export function createLifecycleLog(opts?: CreateLifecycleLogOptions): LifecycleL
   }
 
   function buildLine(event: string, fields?: Record<string, unknown>): string {
+    // Story 5.30: ppid and pgid are mandatory on every event so cascade-class
+    // disconnects are observable from the log file alone. sessionUlid is
+    // optional — included only when CREW_SESSION_ULID is set in the
+    // environment (fail-open: absence is documented, not an error).
+    const sessionUlid = process.env["CREW_SESSION_ULID"];
     const line: Record<string, unknown> = {
       event,
       ts: Date.now(),
       pid: process.pid,
+      ppid: process.ppid,
+      ...(RESOLVED_PGID !== undefined ? { pgid: RESOLVED_PGID } : {}),
+      ...(sessionUlid ? { sessionUlid } : {}),
       ...fields,
     };
     return JSON.stringify(line) + "\n";

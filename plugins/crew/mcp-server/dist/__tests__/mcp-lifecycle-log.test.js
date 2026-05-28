@@ -203,6 +203,52 @@ describe("AC6a — lifecycle log contains expected event sequence", () => {
         const bootLine = lines.find((l) => l["event"] === "boot");
         expect(typeof bootLine?.["version"]).toBe("string");
         expect(typeof bootLine?.["nodeVersion"]).toBe("string");
+        // Story 5.30: ppid + pgid mandatory on every event (sessionUlid optional).
+        const isPosix = os.platform() !== "win32";
+        for (const line of lines) {
+            expect(typeof line["ppid"]).toBe("number");
+            if (isPosix) {
+                expect(typeof line["pgid"]).toBe("number");
+            }
+            // sessionUlid is intentionally absent here — env var not set.
+            expect(line["sessionUlid"]).toBeUndefined();
+        }
+    }, { timeout: 20_000 });
+    // -------------------------------------------------------------------------
+    // Story 5.30 — sessionUlid appears when CREW_SESSION_ULID is set
+    // -------------------------------------------------------------------------
+    it("(5.30) sessionUlid appears on every event when CREW_SESSION_ULID is set", async () => {
+        const logPath = path.join(tmpDir, "mcp-lifecycle.log");
+        const ulid = "01TESTULIDINTEGRATION0000000";
+        child = cp.spawn("node", [DIST_INDEX], {
+            stdio: ["pipe", "pipe", "ignore"],
+            env: {
+                ...process.env,
+                CREW_MCP_LIFECYCLE_LOG: logPath,
+                CREW_MCP_KEEPALIVE_MS: "0",
+                CREW_SESSION_ULID: ulid,
+            },
+        });
+        await doInitHandshake(child);
+        const res = await sendRequest(child, {
+            jsonrpc: "2.0",
+            id: 10,
+            method: "tools/list",
+            params: {},
+        });
+        expect(res.error).toBeUndefined();
+        const exitPromise = new Promise((resolve) => {
+            child.on("exit", (code, signal) => resolve({ code, signal }));
+        });
+        child.kill("SIGTERM");
+        await exitPromise;
+        await new Promise((r) => setTimeout(r, 200));
+        const lines = readLogLines(logPath);
+        expect(lines.length).toBeGreaterThan(0);
+        for (const line of lines) {
+            expect(line["sessionUlid"]).toBe(ulid);
+            expect(typeof line["ppid"]).toBe("number");
+        }
     }, { timeout: 20_000 });
 });
 // ---------------------------------------------------------------------------
