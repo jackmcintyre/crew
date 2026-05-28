@@ -341,6 +341,14 @@ async function buildFixture(tmpRoot: string): Promise<void> {
   // The artifact AC1 expects
   await atomicWriteFile(path.join(tmpRoot, "hello-a.txt"), "hello world\n");
 
+  // package.json at root so Story 5.27's findPackageRoot can resolve cwd for vitest checks.
+  // The vitest: marker value "fixture passing test" is used as testFilePath; the walk starts
+  // at path.dirname(path.resolve(tmpRoot, "fixture passing test")) === tmpRoot.
+  await atomicWriteFile(
+    path.join(tmpRoot, "package.json"),
+    JSON.stringify({ name: "fixture-4-6", version: "0.0.0", private: true }, null, 2),
+  );
+
   // vitest test file (passing)
   await fs.mkdir(path.join(tmpRoot, "__tests__"), { recursive: true });
   await atomicWriteFile(path.join(tmpRoot, "__tests__", "fixture.test.ts"), FIXTURE_VITEST_TEST);

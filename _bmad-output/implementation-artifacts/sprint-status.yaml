@@ -90,7 +90,7 @@ development_status:
   5-24-zod-determinism-dts-fix: done
   5-25-always-on-mcp-lifecycle-logging: done
   5-26-reviewer-session-artifact-check-against-pr-branch: done
-  5-27-reviewer-vitest-workspace-aware-cwd: ready-for-dev
+  5-27-reviewer-vitest-workspace-aware-cwd: done
   5-28-build-watch-normaliser-chaining: done
   epic-5-retrospective: optional
   epic-6: in-progress

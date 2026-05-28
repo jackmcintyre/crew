@@ -33,6 +33,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
+import { accessSync } from "node:fs";
 import { execa as defaultExeca } from "execa";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
 import { lookupStandards } from "../state/lookup-standards.js";
@@ -160,6 +161,9 @@ function classifyAc(bodyLines: string[]): {
   applicability: "runnable-artifact-check" | "runnable-vitest" | "manual-check-required";
   artifactPath?: string;
   testNameFilter?: string;
+  /** Story 5.27: raw path from the vitest: marker — same value as testNameFilter today,
+   *  kept separate so a future refactor can split the filter from the file path. */
+  testFilePath?: string;
 } {
   const bodyText = bodyLines.join("\n");
 
@@ -171,7 +175,12 @@ function classifyAc(bodyLines: string[]): {
 
   const vitestMatch = VITEST_RE.exec(bodyText);
   if (vitestMatch) {
-    return { applicability: "runnable-vitest", testNameFilter: vitestMatch[1]!.trim() };
+    const captured = vitestMatch[1]!.trim();
+    return {
+      applicability: "runnable-vitest",
+      testNameFilter: captured,
+      testFilePath: captured,
+    };
   }
 
   return { applicability: "manual-check-required" };
@@ -224,15 +233,72 @@ function capString(s: string): string {
   return s.slice(0, STDOUT_STDERR_CAP) + TRUNCATION_MARKER;
 }
 
+/**
+ * Walk up from `testFilePathAbs` to find the nearest enclosing `package.json`.
+ *
+ * Starts at `path.dirname(testFilePathAbs)` and walks toward the filesystem
+ * root, stopping (inclusively) at `checkRoot`. Returns `{ ok: true, packageRoot }`
+ * if found, `{ ok: false }` if the walk exhausts `checkRoot` without finding one.
+ *
+ * Guard: `d === checkRootAbs || d.startsWith(checkRootAbs + path.sep)` prevents
+ * false-positive prefix matches on sibling paths (e.g. `/tmp/checker` when
+ * checkRoot is `/tmp/check`). ESM — uses `accessSync` from "node:fs" (top-level
+ * import), NOT `require(...)`.
+ *
+ * Story 5.27 — AC1, AC2.
+ */
+export function findPackageRoot(opts: {
+  testFilePathAbs: string;
+  checkRoot: string;
+}): { ok: true; packageRoot: string } | { ok: false } {
+  const checkRootAbs = path.resolve(opts.checkRoot);
+  let dir = path.dirname(opts.testFilePathAbs);
+
+  const isWithinCheckRoot = (d: string): boolean =>
+    d === checkRootAbs || d.startsWith(checkRootAbs + path.sep);
+
+  while (isWithinCheckRoot(dir)) {
+    try {
+      accessSync(path.join(dir, "package.json"));
+      return { ok: true, packageRoot: dir };
+    } catch {
+      // package.json not present here — walk up.
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // filesystem root reached
+    dir = parent;
+  }
+  return { ok: false };
+}
+
 async function runVitestCheck(
   index: number,
   tag: string | null,
   testNameFilter: string,
+  testFilePath: string,
   checkRoot: string,
   execaImpl: typeof defaultExeca,
 ): Promise<AcResult> {
+  // Story 5.27: resolve the package root by walking up from the test file.
+  const testFilePathAbs = path.resolve(checkRoot, testFilePath);
+  const pkgRoot = findPackageRoot({ testFilePathAbs, checkRoot });
+
+  if (!pkgRoot.ok) {
+    return {
+      index,
+      tag,
+      applicability: "runnable-vitest",
+      testNameFilter,
+      status: "fail",
+      reason: `no package.json found between test file '${testFilePath}' and checkRoot '${checkRoot}' — vitest cannot run without a manifest`,
+      stdout: "",
+      stderr: "",
+      exitCode: -1,
+    };
+  }
+
   const result = await execaImpl("pnpm", ["vitest", "--run", "-t", testNameFilter], {
-    cwd: checkRoot,
+    cwd: pkgRoot.packageRoot,
     reject: false,
     timeout: VITEST_TIMEOUT_MS,
   });
@@ -464,7 +530,8 @@ export async function runReviewerSession(
           ac.index,
           ac.tag,
           classification.testNameFilter!,
-          worktreePath,  // checkRoot — AC2
+          classification.testFilePath!,  // Story 5.27: explicit file path for cwd walk
+          worktreePath,                   // checkRoot — AC2 (Story 5.26 worktree path)
           execaImpl,
         );
       } else {

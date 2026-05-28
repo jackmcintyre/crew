@@ -1,7 +1,7 @@
 # Story 5.27: `runVitestCheck` workspace-aware cwd resolution
 
 story_shape: substrate
-Status: ready-for-dev
+Status: review
 
 <!-- Authored 2026-05-28 after bmad:5.24 re-roll exposed the gap. Sourced from carry-forward entry 14. -->
 
@@ -153,6 +153,10 @@ async function runVitestCheck(
   // ... rest unchanged
 }
 
+// NOTE: import { accessSync } from "node:fs" at the top of run-reviewer-session.ts —
+// the existing import is `import * as fs from "node:fs/promises"` which is async-only.
+// `require(...)` is NOT available here: the mcp-server package is ESM
+// (`"type": "module"` in package.json).
 function findPackageRoot(opts: {
   testFilePathAbs: string;
   checkRoot: string;
@@ -161,11 +165,15 @@ function findPackageRoot(opts: {
   let dir = path.dirname(opts.testFilePathAbs);
 
   // Bound the walk: stop when we reach checkRoot OR escape it.
-  while (dir.startsWith(checkRootAbs)) {
+  // The separator suffix on the prefix check prevents the classic
+  // `"/foobar".startsWith("/foo")` false-positive (a sibling whose name
+  // happens to begin with the checkRoot path).
+  const isWithinCheckRoot = (d: string) =>
+    d === checkRootAbs || d.startsWith(checkRootAbs + path.sep);
+
+  while (isWithinCheckRoot(dir)) {
     try {
-      // fs.accessSync is fine — we want sync semantics here and the walk
-      // is bounded by checkRoot depth.
-      require("node:fs").accessSync(path.join(dir, "package.json"));
+      accessSync(path.join(dir, "package.json"));
       return { ok: true, packageRoot: dir };
     } catch {
       // Not found here — walk up.
@@ -174,9 +182,6 @@ function findPackageRoot(opts: {
     if (parent === dir) break;  // root filesystem reached
     dir = parent;
   }
-  // Last attempt: check checkRoot itself if not already checked.
-  // (The while loop covers this if checkRootAbs has a package.json; the
-  // edge case is when checkRootAbs === path.dirname(testFilePathAbs).)
   return { ok: false };
 }
 ```
@@ -218,7 +223,7 @@ After any change in `plugins/crew/mcp-server/src/`, run `pnpm --dir plugins/crew
 
 ### Edge cases worth surfacing in dev/review
 
-- **Walk escapes `checkRoot`.** The `dir.startsWith(checkRootAbs)` guard in `findPackageRoot` ensures we never walk above `checkRoot`. This protects against a test file with a misleading path that resolves to outside the worktree (shouldn't happen if 5.26's worktree materialisation is correct, but defence in depth).
+- **Walk escapes `checkRoot`.** The `isWithinCheckRoot` guard in `findPackageRoot` (equality OR `startsWith(checkRootAbs + path.sep)`) ensures we never walk above `checkRoot` AND never falsely admit a sibling whose path string happens to begin with the `checkRoot` prefix (e.g. `checkRoot=/tmp/check`, sibling `/tmp/checker`). This protects against a test file with a misleading path that resolves to outside the worktree (shouldn't happen if 5.26's worktree materialisation is correct, but defence in depth).
 - **Symlinks in the walk.** `path.dirname` doesn't resolve symlinks. If a test file lives under a symlinked directory inside `checkRoot`, the walk may produce unexpected paths. Use `fs.realpathSync` on `testFilePathAbs` before starting the walk to canonicalise. Confirm in dev whether this matters for the crew repo's actual layout.
 - **Multiple `package.json` in the walk.** The first one found (closest to the test file) wins. That's the right semantic — the closest package owns the test. If a higher-level workspace `package.json` should override for some reason, the spec author should put the test elsewhere.
 - **`pnpm-workspace.yaml` at root with no root `package.json`.** This is the crew repo's actual shape. The walk skips `pnpm-workspace.yaml` (we're only looking for `package.json`) and continues up until either finding a `package.json` or hitting `checkRoot`. For crew, it'll find `plugins/crew/mcp-server/package.json` correctly.
@@ -237,17 +242,27 @@ After any change in `plugins/crew/mcp-server/src/`, run `pnpm --dir plugins/crew
 
 ## Definition of Done
 
-- [ ] All five ACs met (AC1–AC5).
-- [ ] `pnpm --dir plugins/crew/mcp-server test` green; new vitest at `reviewer-vitest-cwd.test.ts` exercises every AC3 fixture + AC4 paths.
-- [ ] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
+- [x] All five ACs met (AC1–AC5).
+- [x] `pnpm --dir plugins/crew/mcp-server test` green; new vitest at `reviewer-vitest-cwd.test.ts` exercises every AC3 fixture + AC4 paths.
+- [x] `pnpm --dir plugins/crew/mcp-server build` green; `dist/` rebuilt and staged in the same commit.
 - [ ] PR opens against `dev`. CI green.
 - [ ] Reviewer cycle clean — this PR's own reviewer pass should now use the fixed path (recursive validation). If the reviewer hits a vitest cwd failure on its own AC checks, that's a defect in the new code that the test suite missed.
-- [ ] No changes to `docs/standards.md`, `discipline-rules.yaml`, persona files, or any state directory.
-- [ ] `classifyAc` return type updated if `testFilePath` is added as a new field; one call site updated.
+- [x] No changes to `docs/standards.md`, `discipline-rules.yaml`, persona files, or any state directory.
+- [x] `classifyAc` return type updated if `testFilePath` is added as a new field; one call site updated.
 - [ ] Carry-forward entry 14 updated to "Folded into 5.27" once shipped.
 
 ---
 
 ## Dev Notes
 
-*(Dev fills this in during implementation — any deviation from the binding tool shapes above, classifyAc transformation discoveries, walk edge cases worth recording for the next person.)*
+### Implementation discoveries (2026-05-28)
+
+**`classifyAc` inspection result:** `testNameFilter` IS the file path verbatim (outcome 1 from the spec). The `VITEST_RE` captures the full value after `vitest: `. Both `testNameFilter` and `testFilePath` are set to the same trimmed string. Both fields kept in the return type per spec guidance ("keep both for clarity").
+
+**`findPackageRoot` export:** Exported as a named export so the `reviewer-vitest-cwd.test.ts` unit tests can exercise the walk directly without going through `runReviewerSession`.
+
+**`runVitestCheck` cwd change:** `cwd: checkRoot` → `cwd: pkgRoot.packageRoot`. The failing-loud path (AC2) returns `{ status: "fail", exitCode: -1 }` without spawning pnpm at all. This is the correct behaviour — we never fall back to `checkRoot`.
+
+**Existing test fixture update:** `run-reviewer-session.test.ts`'s `buildFixture` function now writes a `package.json` at `tmpRoot` so that `findPackageRoot` can resolve cwd for the `vitest: fixture passing test` AC. The walk starts at `path.dirname(path.resolve(tmpRoot, "fixture passing test"))` = `tmpRoot`; the root-level `package.json` is found there.
+
+**canonical-fs-guard whitelist:** `reviewer-vitest-cwd.test.ts` uses sync `writeFileSync`/`mkdirSync` for fixture tree seeding (test-file only, no production writes). Added to the whitelist in `tests/canonical-fs-guard.test.ts`.
