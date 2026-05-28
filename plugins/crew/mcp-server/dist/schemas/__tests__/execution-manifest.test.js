@@ -93,3 +93,50 @@ describe("blocked_by field — closed enum (Story 5.13)", () => {
         expect(() => parseExecutionManifest({ ...BASE_MANIFEST, blocked_by: "source-drift" }, { absPath: "/fake/path.yaml" })).toThrow(MalformedExecutionManifestError);
     });
 });
+// ---------------------------------------------------------------------------
+// retro fields (Story 6.1) — AC4
+// ---------------------------------------------------------------------------
+describe("retro fields (Story 6.1)", () => {
+    it("parses successfully when retro fields are omitted (all three resolve to undefined)", () => {
+        const manifest = parseExecutionManifest(BASE_MANIFEST, {
+            absPath: "/fake/path.yaml",
+        });
+        expect(manifest.lessons).toBeUndefined();
+        expect(manifest.failure_class).toBeUndefined();
+        expect(manifest.duration_seconds).toBeUndefined();
+    });
+    it("round-trips a populated lessons array unchanged", () => {
+        const lessons = [
+            {
+                kind: "pattern",
+                text: "Use parseExecutionManifest as the single seam for manifest reads.",
+            },
+            {
+                kind: "pitfall",
+                text: "Don't add z.string() fallbacks to closed enums.",
+                failure_class: "schema-erosion",
+                routed_to: "rule",
+            },
+        ];
+        const manifest = parseExecutionManifest({ ...BASE_MANIFEST, lessons }, { absPath: "/fake/path.yaml" });
+        expect(manifest.lessons).toEqual(lessons);
+    });
+    it("round-trips a story-level failure_class", () => {
+        const manifest = parseExecutionManifest({ ...BASE_MANIFEST, failure_class: "ac-marker-gap" }, { absPath: "/fake/path.yaml" });
+        expect(manifest.failure_class).toBe("ac-marker-gap");
+    });
+    it("accepts duration_seconds = 0 (non-negative integer)", () => {
+        const manifest = parseExecutionManifest({ ...BASE_MANIFEST, duration_seconds: 0 }, { absPath: "/fake/path.yaml" });
+        expect(manifest.duration_seconds).toBe(0);
+    });
+    it("accepts duration_seconds = 3600 (non-negative integer)", () => {
+        const manifest = parseExecutionManifest({ ...BASE_MANIFEST, duration_seconds: 3600 }, { absPath: "/fake/path.yaml" });
+        expect(manifest.duration_seconds).toBe(3600);
+    });
+    it("throws MalformedExecutionManifestError when duration_seconds is negative (-1)", () => {
+        expect(() => parseExecutionManifest({ ...BASE_MANIFEST, duration_seconds: -1 }, { absPath: "/fake/path.yaml" })).toThrow(MalformedExecutionManifestError);
+    });
+    it("throws MalformedExecutionManifestError when duration_seconds is a float (1.5)", () => {
+        expect(() => parseExecutionManifest({ ...BASE_MANIFEST, duration_seconds: 1.5 }, { absPath: "/fake/path.yaml" })).toThrow(MalformedExecutionManifestError);
+    });
+});

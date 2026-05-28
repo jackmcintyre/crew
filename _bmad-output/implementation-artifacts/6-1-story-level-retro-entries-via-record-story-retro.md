@@ -248,4 +248,11 @@ After any change in `plugins/crew/mcp-server/src/`, run `pnpm --dir plugins/crew
 
 ## Dev Notes
 
-*(Dev fills this in during implementation — root cause of any unexpected behaviour, design decisions inside the AC envelope, anything a future retro-analyst would want to see.)*
+Implementation followed the binding spec verbatim. Key choices inside the AC envelope:
+
+- **`LessonSchema` lives in `story-retro.ts` and is imported by `execution-manifest.ts`.** This keeps the closed `kind` enum + `pitfall` superRefine as a single source of truth. The dependency direction (`execution-manifest.ts` → `story-retro.ts` → `errors.ts`) is acyclic.
+- **`stripUndefined` mirrors `complete-story.ts`.** Same shallow `Object.fromEntries(Object.entries(...).filter(v !== undefined))` pattern, so YAML round-trip drops optional unset fields rather than emitting `key: null`. Empty arrays (`lessons: []`) are preserved because they are not `undefined`.
+- **State-guard probes in `in-progress → to-do → blocked` order.** Returns the first hit. Operators most often hit this guard mid-cycle, hence `in-progress/` first.
+- **Default `role`: `"generalist-reviewer"`** — matches the v1 caller documented in FR55 and the permissions allowlist update.
+- **Tool-count assertions across six existing tests bumped 35 → 36.** Each existing assertion already carried a story-history comment; appended `"; Story 6.1 added recordStoryRetro (36)"` to each. No semantic change to those tests beyond the new sentinel.
+- **`dist/` rebuild was deterministic** — second `pnpm build` produced byte-identical output; build-determinism vitest stayed green.

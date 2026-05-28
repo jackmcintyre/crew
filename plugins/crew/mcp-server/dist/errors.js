@@ -1161,3 +1161,53 @@ export class NotAnOrphanError extends DomainError {
         this.currentSessionUlid = opts.currentSessionUlid;
     }
 }
+/**
+ * A story retro payload (the argument to `recordStoryRetro`) failed schema
+ * validation: malformed shape, unknown key (strict-mode rejection), invalid
+ * `kind` value (closed enum), missing `failure_class` on a `pitfall` lesson,
+ * or `duration_seconds` not a non-negative integer.
+ *
+ * Mirrors `MalformedExecutionManifestError`'s shape. Named so the MCP
+ * boundary maps Zod failures to a typed envelope.
+ *
+ * Thrown by `parseStoryRetroPayload` in
+ * `schemas/story-retro.ts` — every caller MUST go through that helper.
+ * (Story 6.1 AC2, FR11)
+ */
+export class MalformedStoryRetroPayloadError extends DomainError {
+    yamlPath;
+    zodMessage;
+    schemaModule;
+    constructor(opts) {
+        super(`Story retro payload is malformed at '${opts.yamlPath}': ${opts.zodMessage}. ` +
+            `See ${opts.schemaModule} for the canonical schema.`);
+        this.yamlPath = opts.yamlPath;
+        this.zodMessage = opts.zodMessage;
+        this.schemaModule = opts.schemaModule;
+    }
+}
+/**
+ * `recordStoryRetro` refused to attach a retro payload because the target
+ * manifest is not in `done/`. The state-guard says retros are a
+ * post-completion concern — attaching a retro to a `to-do/`, `blocked/`,
+ * or `in-progress/` manifest is a structural error.
+ *
+ * `foundIn` carries the actual state directory where the manifest was
+ * located (one of `"to-do"`, `"blocked"`, `"in-progress"`). If the
+ * manifest does not exist anywhere, `recordStoryRetro` throws
+ * `ManifestNotFoundError` instead.
+ *
+ * Story 6.1 AC1, FR55.
+ */
+export class StoryNotInDoneStateError extends DomainError {
+    ref;
+    foundIn;
+    constructor(opts) {
+        super(`recordStoryRetro refused: '${opts.ref}' is not in done/ — found in '${opts.foundIn}/'. ` +
+            `Retros are a post-completion concern; only completed manifests can carry retro entries. ` +
+            `Either complete the story first or, if it is permanently blocked, do not record a retro. ` +
+            `(Story 6.1)`);
+        this.ref = opts.ref;
+        this.foundIn = opts.foundIn;
+    }
+}
