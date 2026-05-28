@@ -61,6 +61,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // keeping the integration test isolated from the real dist/.
 const DIST_ROOT = process.env["WATCH_NORMALISE_DIST_ROOT"] ?? path.resolve(__dirname, "..", "dist");
 
+// Story 5.32 — also chain the mcp-proxy's normaliser after each successful tsc
+// cycle so the dev loop keeps proxy/bin/ in sync without a second watcher.
+// Disabled when WATCH_NORMALISE_DIST_ROOT is set (the 5.28 integration test
+// expects the watcher to operate on its scratch outDir only).
+const PROXY_ROOT = path.resolve(__dirname, "..", "..", "mcp-proxy");
+const RUN_PROXY_NORMALISE = !process.env["WATCH_NORMALISE_DIST_ROOT"];
+
 // Locate tsc in node_modules so we don't require a global TypeScript install.
 // This mirrors what `pnpm build` does via the `scripts` field.
 const TSC = path.resolve(__dirname, "..", "node_modules", ".bin", "tsc");
@@ -95,6 +102,20 @@ async function maybeRun() {
     const changed = await normaliseDistTree(DIST_ROOT);
     if (changed.length > 0) {
       console.log(`normalise-dist: rewrote ${changed.length} file(s) for deterministic enum key ordering.`);
+    }
+    // Story 5.32 — also rebuild the mcp-proxy package so its bin/ stays in
+    // sync with the daemon's dist/. The proxy's `build` script runs tsc and
+    // its own normaliser; we shell out to keep this watcher untyped.
+    if (RUN_PROXY_NORMALISE) {
+      await new Promise((resolve) => {
+        const proxyBuild = spawn("pnpm", ["--silent", "build"], {
+          cwd: PROXY_ROOT,
+          stdio: "inherit",
+          shell: false,
+        });
+        proxyBuild.on("exit", () => resolve(undefined));
+        proxyBuild.on("error", () => resolve(undefined));
+      });
     }
   } catch (err) {
     console.error("normalise-dist: error during normalisation:", err);

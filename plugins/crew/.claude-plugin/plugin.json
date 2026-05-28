@@ -4,8 +4,7 @@
   "description": "AI Engineering Team v1 — a project-shaped team of long-lived AI agents driving a continuous-flow backlog.",
   "mcpServers": {
     "crew": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js"],
+      "command": "${CLAUDE_PLUGIN_ROOT}/mcp-proxy/bin/mcp-proxy.js",
       "cwd": "${CLAUDE_PLUGIN_ROOT}"
     }
   }
