@@ -1,7 +1,7 @@
 # Story 5.28: `build:watch` chains `normalise-dist.mjs` after each tsc recompile
 
 story_shape: substrate
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -13,14 +13,18 @@ This story is a tight follow-up to Story 5.24 (post-build normaliser). 5.24 cove
 
 ## Acceptance Criteria
 
-**AC1:**
+**AC1 (user-surface):**
 
-`pnpm --dir plugins/crew/mcp-server build:watch` invokes `scripts/normalise-dist.mjs` after each tsc recompile cycle. No new runtime or dev dependencies are introduced — `package.json` `dependencies` / `devDependencies` blocks are byte-identical to pre-story state (verified by diff). The watcher remains responsive (tsc-foreground; normaliser runs async post-emit) and inert when no source changes occur (no busy loop, no periodic re-runs without a tsc rebuild).
+`pnpm --dir plugins/crew/mcp-server build:watch` invokes `scripts/normalise-dist.mjs` after each tsc recompile cycle.
+
+<!-- user-surface: AC1 names `pnpm build:watch` — a CLI command the operator types verbatim per CLAUDE.md's "Dev loop" guidance — so rubric (ii) applies. -->
+ No new runtime or dev dependencies are introduced — `package.json` `dependencies` / `devDependencies` blocks are byte-identical to pre-story state (verified by diff). The watcher remains responsive (tsc-foreground; normaliser runs async post-emit) and inert when no source changes occur (no busy loop, no periodic re-runs without a tsc rebuild).
 artifact: plugins/crew/mcp-server/package.json
 artifact: plugins/crew/mcp-server/scripts/watch-and-normalise.mjs
 
-**AC2:**
+**AC2 (user-surface):**
 
+<!-- user-surface: AC2 also requires the operator to run `pnpm build:watch` and observe `git status` go clean — both are CLI surfaces the operator directly invokes/inspects, so rubric (ii) and (iv) apply. -->
 With a clean working tree, running `pnpm --dir plugins/crew/mcp-server build:watch` and then editing any `.ts` source file that produces a `.d.ts` containing a `z.enum([...])` (the construct sensitive to V8 hidden-class ordering — see 5.24 Dev Notes) results in a working tree that returns to clean once the watcher's recompile cycle settles. Validated 5 times consecutively — zero drift on any pair across an edit→settle cycle.
 artifact: plugins/crew/mcp-server/scripts/watch-and-normalise.mjs
 
@@ -94,10 +98,11 @@ async function maybeRun() {
 tsc.stdout.on("data", (buf) => {
   process.stdout.write(buf); // preserve operator visibility
   const s = buf.toString("utf8");
-  // Match the tsc-watch success sentinel. Locale-stable in English builds; if a
-  // different locale is ever a concern, gate on exit code via --listEmittedFiles.
-  if (/Found 0 errors\. Watching for file changes\./.test(s) ||
-      /Found \d+ error[s]?\. Watching for file changes\./.test(s)) {
+  // Match the tsc-watch *success* sentinel only — running the normaliser after a
+  // failed compile is wasteful and may touch stale .d.ts. Locale-stable in English
+  // builds; if a different locale is ever a concern, gate on exit code via
+  // --listEmittedFiles instead.
+  if (/Found 0 errors\. Watching for file changes\./.test(s)) {
     maybeRun();
   }
 });
@@ -159,4 +164,35 @@ None. Leaf story — depends only on Story 5.24's `normaliseDistTree` export (al
 
 ## Dev Notes
 
-_(Populated by the dev agent during implementation per AC4.)_
+**Root cause, design choice, and edge cases (AC4)**
+
+The bare `tsc -p tsconfig.json --watch` command in the old `build:watch` script ran tsc directly without any post-emit hook. Story 5.24's fix — chaining `node scripts/normalise-dist.mjs` after `tsc` in the `build` script — only applies to the one-shot build path because shell command chaining (`&&`) is inherently sequential and single-shot. The watch path is a long-running process: once tsc starts, it never exits, so there is no natural point to chain a follow-up command in the `package.json` script.
+
+**Chosen seam: stdout-marker wrapper (stdout-sentinel approach)**. A thin Node wrapper (`scripts/watch-and-normalise.mjs`) spawns `tsc --watch` as a child process with stdout piped (so we can parse it) and stderr/stdin inherited (so operators still see tsc's error output and can send CTRL-C). The wrapper subscribes to stdout and triggers `normaliseDistTree` whenever tsc emits the stable English-locale success line `"Found 0 errors. Watching for file changes."`. That sentinel line is only printed after tsc has flushed all emitted files for the recompile cycle — the normaliser therefore always starts after a complete, consistent set of `.d.ts` files is on disk. The `normaliseDistTree` export from `normalise-dist.mjs` (Story 5.24's seam) is reused directly; the wrapper adds no duplicate regex logic.
+
+**Alternatives considered and rejected**: (a) `fs.watch` on `dist/**/*.d.ts` — simpler in concept, but tsc writes files individually; a watch handler can fire mid-emit and read a partially-written file, introducing a race. Debouncing makes this safer but not safe, and a time-based debounce has no semantic meaning relative to tsc's emit boundary. (b) tsc's programmatic API (`ts.createWatchProgram` with `afterProgramCreate`) — semantically correct but locks the seam to the TypeScript compiler API surface, which has changed between major versions; also pulls `typescript` into runtime-require territory even though it's a devDep.
+
+**Edge cases handled**: (i) Rapid edits — a `running`/`pending` flag pair ensures at most one normaliser run is in flight with exactly one follow-up queued; no busy loop. (ii) Orphan tsc processes — SIGINT/SIGTERM/SIGHUP are forwarded to the tsc child; the wrapper re-exits with tsc's exit code. (iii) Operator visibility — every stdout byte is forwarded via `process.stdout.write(buf)` before pattern-matching. (iv) Locale-sensitive sentinel — the match string is English-only; this is an acceptable v1 trade-off for a project that is English-only; a future follow-up could switch to `--listEmittedFiles` parsing. (v) AC3 test isolation — the integration test creates a completely self-contained scratch project in tmpdir with its own tsconfig.json and source file, and drives the wrapper via `WATCH_NORMALISE_TSCONFIG` / `WATCH_NORMALISE_OUT_DIR` / `WATCH_NORMALISE_DIST_ROOT` env vars so neither the real `src/` tree nor the real `dist/` is touched. This prevents parallel vitest workers from observing mid-compilation states.
+
+## File List
+
+- `plugins/crew/mcp-server/scripts/watch-and-normalise.mjs` (new)
+- `plugins/crew/mcp-server/tests/build-watch-determinism.test.ts` (new)
+- `plugins/crew/mcp-server/package.json` (modified — `build:watch` script)
+- `_bmad-output/implementation-artifacts/5-28-build-watch-normaliser-chaining.md` (updated Dev Notes, File List, Change Log, Status)
+
+## Change Log
+
+- 2026-05-28: Implemented Story 5.28. Created `watch-and-normalise.mjs` wrapper that chains `normaliseDistTree` after each successful tsc --watch emit cycle. Updated `package.json` `build:watch` script to invoke wrapper. Added AC3 integration test (`build-watch-determinism.test.ts`) with full isolation (scratch project in tmpdir, unconditional process teardown). Populated Dev Notes per AC4. All 127 test files / 1520 tests green; `pnpm build` green.
+
+## Dev Agent Record
+
+### Completion Notes
+
+AC1: `pnpm build:watch` now invokes `scripts/watch-and-normalise.mjs` which chains `normaliseDistTree` after each successful tsc recompile. No new runtime or dev dependencies introduced — `package.json` `dependencies`/`devDependencies` blocks are unchanged. The watcher is tsc-foreground; the normaliser runs async post-emit via the sentinel callback.
+
+AC2: The wrapper runs the normaliser only after the `"Found 0 errors. Watching for file changes."` sentinel, which tsc emits after all files for a recompile cycle are written. The `pending`/`running` debounce ensures coalescing of rapid edits. Verified in AC3 test.
+
+AC3: `tests/build-watch-determinism.test.ts` passes in the full `pnpm test` suite (127 files, 1520 tests). Child process torn down unconditionally via try/finally + SIGTERM → SIGKILL escalation. Test uses a fully isolated scratch project in tmpdir to avoid contaminating `dist/` or `src/` during parallel test runs.
+
+AC4: Dev Notes section populated with root cause, design choice, and edge cases. One paragraph minimum as required.
