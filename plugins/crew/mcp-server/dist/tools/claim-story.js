@@ -30,9 +30,16 @@
  * **No `--force` bypass.** The hand-edit refusal is unconditional (Story 3.7).
  *
  * FR17 — atomic claim, FR18 — dependency check, FR14a — hand-edit guard.
+ *
+ * **Story 5.29 — sidecar snapshot.** After moving the manifest to `in-progress/`
+ * and rewriting it with `claimed_by`, `claimStory` writes a sidecar baseline at
+ * `.crew/state/in-progress/<ref>.snapshot.yaml` capturing the source-hash and
+ * operator-editable fields at claim time. `detectInProgressHandEdit` reads this
+ * sidecar as the baseline; it no longer re-reads the source story.
+ *
  * See also: `moveBetweenStates` (manifest-state-machine.ts),
  *           `detectInProgressHandEdit` (manifest-state-machine.ts),
- *           `deriveSourceBaseline` (state/derive-source-baseline.ts).
+ *           `writeInProgressSnapshot` (manifest-state-machine.ts).
  */
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
@@ -40,8 +47,7 @@ import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { ManifestNotFoundError } from "../errors.js";
 import { writeManagedFile } from "../lib/managed-fs.js";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
-import { moveBetweenStates, detectInProgressHandEdit, } from "../state/manifest-state-machine.js";
-import { deriveSourceBaseline } from "../state/derive-source-baseline.js";
+import { moveBetweenStates, detectInProgressHandEdit, writeInProgressSnapshot, } from "../state/manifest-state-machine.js";
 import { DependenciesNotReadyError } from "../errors.js";
 /**
  * Strip keys with `undefined` values before YAML stringification.
@@ -77,19 +83,14 @@ export async function claimStory(opts) {
     const stateRoot = path.join(targetRepoRoot, ".crew", "state");
     const absToDoPath = path.join(stateRoot, "to-do", `${ref}.yaml`);
     const absInProgressPath = path.join(stateRoot, "in-progress", `${ref}.yaml`);
-    // Step 1: Hand-edit guard (AC5 / FR14a).
+    // Step 1: Hand-edit guard (AC5 / FR14a; Story 5.29 — sidecar-driven baseline).
     // If the ref is already in in-progress/ (re-entry), call the hand-edit guard
-    // and let any thrown InProgressHandEditError propagate.
+    // and let any thrown InProgressHandEditError propagate. The guard loads the
+    // claim-time sidecar internally; no baseline-derivation call is needed here.
     try {
         await fs.stat(absInProgressPath);
-        // File exists — ref is already in in-progress/. Derive baseline and guard.
-        const baseline = await deriveSourceBaseline({ targetRepoRoot, ref });
-        await detectInProgressHandEdit({
-            targetRepoRoot,
-            ref,
-            sourceHash: baseline.sourceHash,
-            sourceFields: baseline.sourceFields,
-        });
+        // File exists — ref is already in in-progress/. Guard against hand-edits.
+        await detectInProgressHandEdit({ targetRepoRoot, ref });
     }
     catch (err) {
         const code = err?.code;
@@ -97,8 +98,8 @@ export async function claimStory(opts) {
             // File does not exist in in-progress/ — proceed with normal claim from to-do/.
         }
         else {
-            // Propagate InProgressHandEditError, ManifestNotFoundError from
-            // detectInProgressHandEdit, or any other error from deriveSourceBaseline.
+            // Propagate InProgressHandEditError or ManifestNotFoundError from
+            // detectInProgressHandEdit, or any other error.
             throw err;
         }
     }
@@ -168,5 +169,11 @@ export async function claimStory(opts) {
         targetRepoRoot,
         mcpToolContext: { toolName: "claimStory", role },
     });
+    // Step 6: Sidecar snapshot (Story 5.29).
+    // Capture the claim-time baseline as a sidecar at `.crew/state/in-progress/<ref>.snapshot.yaml`.
+    // detectInProgressHandEdit reads this sidecar to detect operator hand-edits to
+    // the in-progress manifest. The snapshot mirrors the manifest's operator-editable
+    // fields + source_hash at claim time; it is removed on transition out of in-progress/.
+    await writeInProgressSnapshot({ targetRepoRoot, ref, manifest: reparsed });
     return { ref, absPath: absInProgressPath };
 }

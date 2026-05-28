@@ -37,6 +37,7 @@ import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { processReviewerTranscript } from "../process-reviewer-transcript.js";
 import { ReviewerFirstCallSkippedError } from "../../errors.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
+import { writeInProgressSnapshot } from "../../state/manifest-state-machine.js";
 import type { ExecutionManifest } from "../../schemas/execution-manifest.js";
 import type { ReviewerResultFileShape } from "../run-reviewer-session.js";
 
@@ -109,6 +110,15 @@ beforeEach(async () => {
   await fs.mkdir(path.join(tmpRoot, ".crew", "state", "done"), { recursive: true });
   manifestPath = path.join(tmpRoot, ".crew", "state", "in-progress", `${STORY_REF}.yaml`);
   await atomicWriteFile(manifestPath, makeManifestYaml(STORY_REF, SESSION_ULID));
+
+  // Story 5.29: seed the claim-time sidecar so completeStory's hand-edit guard
+  // has a baseline to compare against.
+  {
+    const raw = await fs.readFile(manifestPath, "utf8");
+    const parsed = yamlParse(raw) as Record<string, unknown>;
+    const manifest = parseExecutionManifest(parsed, { absPath: manifestPath });
+    await writeInProgressSnapshot({ targetRepoRoot: tmpRoot, ref: STORY_REF, manifest });
+  }
 
   // Session directory (where reviewer-result.json would be written)
   sessionDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID);

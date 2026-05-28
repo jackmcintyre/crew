@@ -92,7 +92,7 @@ development_status:
   5-26-reviewer-session-artifact-check-against-pr-branch: done
   5-27-reviewer-vitest-workspace-aware-cwd: done
   5-28-build-watch-normaliser-chaining: done
-  5-29-hand-edit-check-manifest-only-baseline: ready-for-dev
+  5-29-hand-edit-check-manifest-only-baseline: done
   5-30-mcp-cascade-halt-seam-and-lifecycle-diagnostics: done
   5-31-d2-feasibility-spike: ready-for-dev
   epic-5-retrospective: optional

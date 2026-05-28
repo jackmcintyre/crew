@@ -29,6 +29,7 @@ import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processReviewerTranscript } from "../process-reviewer-transcript.js";
 import { ReviewerFirstCallSkippedError, ReviewerResultFileMalformedError } from "../../errors.js";
+import { writeInProgressSnapshot } from "../../state/manifest-state-machine.js";
 // ---------------------------------------------------------------------------
 // Mock deriveSourceBaseline so completeStory's hand-edit guard passes.
 // ---------------------------------------------------------------------------
@@ -82,6 +83,9 @@ let sessionDir;
 let resultFilePath;
 async function seedManifest(manifest) {
     await atomicWriteFile(manifestPath, yamlStringify(manifest, { lineWidth: 0 }));
+    // Story 5.29: seed the claim-time sidecar so completeStory's hand-edit guard
+    // has a baseline to compare against.
+    await writeInProgressSnapshot({ targetRepoRoot: tmpRoot, ref: manifest.ref, manifest });
 }
 async function seedResultFile(content) {
     await fs.mkdir(sessionDir, { recursive: true });

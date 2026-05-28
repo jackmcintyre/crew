@@ -30,7 +30,10 @@ import {
 } from "../../errors.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { claimStory } from "../claim-story.js";
-import type { OperatorEditableFields } from "../../state/manifest-state-machine.js";
+import {
+  writeInProgressSnapshot,
+  type OperatorEditableFields,
+} from "../../state/manifest-state-machine.js";
 
 // ---------------------------------------------------------------------------
 // Module mock for deriveSourceBaseline
@@ -304,9 +307,16 @@ describe("claimStory (c) — hand-edit refusal on re-entry", () => {
       claimed_by: "01HZOTHER00000000000000001",
     });
 
+    // Story 5.29: write the claim-time sidecar BEFORE the hand-edit so the
+    // baseline reflects the original (pre-edit) state.
+    {
+      const raw = await fs.readFile(inProgressPath, "utf8");
+      const parsed = yamlParse(raw) as Record<string, unknown>;
+      const manifest = parseExecutionManifest(parsed, { absPath: inProgressPath });
+      await writeInProgressSnapshot({ targetRepoRoot: root, ref: REF, manifest });
+    }
+
     // Simulate an operator hand-edit by changing the title on disk.
-    // The mock deriveSourceBaseline returns SOURCE_FIELDS with title "Claim test story",
-    // but we change the on-disk title to something different.
     const raw = await fs.readFile(inProgressPath, "utf8");
     const obj = yamlParse(raw) as Record<string, unknown>;
     obj["title"] = "HAND-EDITED TITLE";

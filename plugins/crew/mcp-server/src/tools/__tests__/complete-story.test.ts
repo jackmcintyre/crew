@@ -27,10 +27,15 @@ import {
 } from "../../errors.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { completeStory } from "../complete-story.js";
-import type { OperatorEditableFields } from "../../state/manifest-state-machine.js";
+import {
+  writeInProgressSnapshot,
+  type OperatorEditableFields,
+} from "../../state/manifest-state-machine.js";
 
 // ---------------------------------------------------------------------------
-// Module mock for deriveSourceBaseline
+// Module mock for deriveSourceBaseline (Story 5.29: no longer used by the guard
+// but retained as an inert default for backwards-compatibility with any future
+// caller).
 // ---------------------------------------------------------------------------
 
 vi.mock("../../state/derive-source-baseline.js", () => ({
@@ -103,11 +108,23 @@ async function seedInProgressManifest(
   ref: string,
   claimedBy: string | undefined,
   opts?: { source_hash?: string; title?: string },
+  sidecarOpts?: { skip?: boolean },
 ): Promise<string> {
   const dir = path.join(stateRoot, "in-progress");
   await fs.mkdir(dir, { recursive: true });
   const absPath = path.join(dir, `${ref}.yaml`);
   await atomicWriteFile(absPath, makeInProgressManifestYaml(ref, claimedBy, opts));
+
+  // Story 5.29: seed the claim-time sidecar so detectInProgressHandEdit has a
+  // baseline to compare against. The sidecar mirrors what claimStory would
+  // write — the operator-editable fields + source_hash at claim time.
+  if (!sidecarOpts?.skip) {
+    const raw = await fs.readFile(absPath, "utf8");
+    const parsed = yamlParse(raw) as Record<string, unknown>;
+    const manifest = parseExecutionManifest(parsed, { absPath });
+    const targetRepoRoot = path.dirname(path.dirname(stateRoot)); // strip .crew/state
+    await writeInProgressSnapshot({ targetRepoRoot, ref, manifest });
+  }
   return absPath;
 }
 

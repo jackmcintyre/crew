@@ -1,6 +1,6 @@
-import { rename, mkdir, stat, readFile } from "node:fs/promises";
+import { rename, mkdir, stat, readFile, unlink } from "node:fs/promises";
 import * as path from "node:path";
-import { parse as yamlParse } from "yaml";
+import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import {
   CrossFilesystemMoveError,
   InProgressHandEditError,
@@ -9,6 +9,7 @@ import {
 } from "../errors.js";
 import type { ExecutionManifest } from "../schemas/execution-manifest.js";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
+import { atomicWriteFile } from "../lib/managed-fs.js";
 
 /**
  * The canonical state-machine directory names. A manifest at
@@ -193,33 +194,151 @@ function operatorFieldsEqual(a: OperatorEditableFields, b: OperatorEditableField
 }
 
 /**
+ * Sidecar baseline shape — the operator-editable fields plus `source_hash`,
+ * snapshotted at claim time. Written by `writeInProgressSnapshot` (called from
+ * `claimStory`), read by `detectInProgressHandEdit`, removed by
+ * `removeInProgressSnapshot` on transition out of `in-progress/`.
+ */
+export interface InProgressSnapshot {
+  source_hash: string;
+  title: string;
+  narrative: string;
+  acceptance_criteria: OperatorEditableFields["acceptance_criteria"];
+  implementation_notes: string | undefined;
+  depends_on: readonly string[];
+  withdrawn: boolean;
+}
+
+/**
+ * Absolute path to the sidecar snapshot file for a given ref.
+ */
+function snapshotPath(targetRepoRoot: string, ref: string): string {
+  return path.join(targetRepoRoot, ".crew", "state", "in-progress", `${ref}.snapshot.yaml`);
+}
+
+/**
+ * Write the claim-time baseline sidecar for a ref into `.crew/state/in-progress/<ref>.snapshot.yaml`.
+ *
+ * Called by `claimStory` after the manifest has been moved to `in-progress/`,
+ * capturing the source-hash and operator-editable-field values that the manifest
+ * was claimed with. `detectInProgressHandEdit` reads this sidecar as the baseline
+ * to compare the on-disk manifest against.
+ *
+ * The sidecar is written via `atomicWriteFile` (POSIX rename(2)) so readers never
+ * see a partial file. The path falls under the canonical `.crew/state/**` glob.
+ *
+ * Story 5.29.
+ */
+export async function writeInProgressSnapshot(opts: {
+  targetRepoRoot: string;
+  ref: string;
+  manifest: ExecutionManifest;
+}): Promise<{ absPath: string }> {
+  const { targetRepoRoot, ref, manifest } = opts;
+  const absPath = snapshotPath(targetRepoRoot, ref);
+  const snapshot: InProgressSnapshot = {
+    source_hash: manifest.source_hash,
+    title: manifest.title,
+    narrative: manifest.narrative,
+    acceptance_criteria: manifest.acceptance_criteria,
+    implementation_notes: manifest.implementation_notes,
+    depends_on: manifest.depends_on,
+    withdrawn: manifest.withdrawn,
+  };
+  const yamlText = yamlStringify(snapshot, { lineWidth: 0 });
+  await atomicWriteFile(absPath, yamlText);
+  return { absPath };
+}
+
+/**
+ * Best-effort removal of the sidecar snapshot. Used when a manifest leaves
+ * `in-progress/` (to `done/` or back to `to-do/`). A missing sidecar is not
+ * an error — the manifest move is the authoritative state transition.
+ *
+ * Story 5.29.
+ */
+export async function removeInProgressSnapshot(opts: {
+  targetRepoRoot: string;
+  ref: string;
+}): Promise<void> {
+  const { targetRepoRoot, ref } = opts;
+  const absPath = snapshotPath(targetRepoRoot, ref);
+  try {
+    await unlink(absPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") return; // best-effort — already gone
+    throw err;
+  }
+}
+
+/**
+ * Load the claim-time baseline snapshot for a ref. Returns `null` if the
+ * sidecar does not exist — callers decide whether absence is a hand-edit signal
+ * or a legitimate "not yet claimed" state.
+ *
+ * Story 5.29.
+ */
+async function readInProgressSnapshot(opts: {
+  targetRepoRoot: string;
+  ref: string;
+}): Promise<InProgressSnapshot | null> {
+  const { targetRepoRoot, ref } = opts;
+  const absPath = snapshotPath(targetRepoRoot, ref);
+  try {
+    const raw = await readFile(absPath, "utf8");
+    const parsed = yamlParse(raw) as InProgressSnapshot;
+    return parsed;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+/**
  * Detects whether an `in-progress/` manifest has been hand-edited since it
  * was claimed by the dev loop.
  *
- * **Guard contract (Story 3.7, FR14 second half):**
- * - Returns `{ ok: true }` when the on-disk manifest's `source_hash` matches
- *   `opts.sourceHash` AND all operator-editable fields match `opts.sourceFields`.
- * - Throws `InProgressHandEditError` (with the list of changed fields) when any
- *   field has been mutated. The list includes `"source_hash"` if that field drifted.
+ * **New contract (Story 5.29):** compares the on-disk in-progress manifest
+ * against the claim-time manifest snapshot persisted as a sidecar file at
+ * `.crew/state/in-progress/<ref>.snapshot.yaml`. **Does not consult the
+ * source story file.** Source-hash drift between the manifest and the live
+ * source story is no longer a hand-edit signal — that legitimate dev
+ * workflow (filling `## Implementation Notes` in the source story) used to
+ * trip every close-out before Story 5.29. Source-story tamper detection,
+ * if ever needed, is a separate concern (`scan-sources` already handles
+ * source-hash drift at the `to-do/` layer).
+ *
+ * **Guard contract:**
+ * - Returns `{ ok: true }` when the on-disk manifest's `source_hash` and all
+ *   operator-editable fields match the sidecar snapshot exactly.
+ * - Throws `InProgressHandEditError` (with the list of changed fields) when
+ *   any field has been mutated. The list includes `"source_hash"` if that
+ *   field drifted between manifest and snapshot.
+ * - Throws `InProgressHandEditError` with `changedFields: ["_snapshot_missing"]`
+ *   when the sidecar is absent. A claimed manifest without its snapshot is a
+ *   corrupted state (the operator removed the sidecar; `claimStory` would
+ *   never have left it that way). Treating this as a hand-edit signal is
+ *   defensible: the operator has interfered with state-machine bookkeeping.
  * - Propagates `MalformedExecutionManifestError` unchanged when the on-disk
  *   manifest is structurally invalid — a malformed manifest is a worse problem
  *   than a hand-edit and must surface via existing FR13 handling.
  * - Propagates `ManifestNotFoundError` when the manifest does not exist at the
- *   expected path — callers route based on state and should not invoke this guard
- *   for refs that are not in `in-progress/`.
+ *   expected path — callers route based on state and should not invoke this
+ *   guard for refs that are not in `in-progress/`.
  *
  * **Caller contract:**
- * Epic 4/5 callers MUST invoke this guard on entry for any ref they would operate
- * on in the `in-progress/` layer. The guard is NOT called defensively on every
- * skill invocation — only for refs the tool would otherwise act on. (Story 3.7)
+ * Epic 4/5 callers MUST invoke this guard on entry for any ref they would
+ * operate on in the `in-progress/` layer. The guard is NOT called defensively
+ * on every skill invocation — only for refs the tool would otherwise act on.
+ * (Story 5.29 supersedes Story 3.7's `{ sourceHash, sourceFields }` baseline
+ * argument with sidecar-driven baseline loading.)
  *
  * **Pure with respect to writes:** never modifies the manifest, never moves it.
  *
  * @param opts.targetRepoRoot - Absolute path to the target repository root.
  * @param opts.ref - Manifest ref (e.g. `"native:01HZ..."`).
- * @param opts.sourceHash - The `source_hash` value at the time the manifest was
- *   last written by `scan-sources` (i.e. the canonical value).
- * @param opts.sourceFields - The operator-editable field values at scan-time.
  *
  * @throws {InProgressHandEditError} When a hand-edit is detected.
  * @throws {MalformedExecutionManifestError} When the manifest is structurally invalid.
@@ -228,10 +347,8 @@ function operatorFieldsEqual(a: OperatorEditableFields, b: OperatorEditableField
 export async function detectInProgressHandEdit(opts: {
   targetRepoRoot: string;
   ref: string;
-  sourceHash: string;
-  sourceFields: OperatorEditableFields;
 }): Promise<{ ok: true }> {
-  const { targetRepoRoot, ref, sourceHash, sourceFields } = opts;
+  const { targetRepoRoot, ref } = opts;
 
   const absPath = path.join(targetRepoRoot, ".crew", "state", "in-progress", ref + ".yaml");
 
@@ -255,12 +372,32 @@ export async function detectInProgressHandEdit(opts: {
   const parsed = yamlParse(rawText) as unknown;
   const manifest = parseExecutionManifest(parsed, { absPath });
 
-  // Detect changed fields.
+  // Load the claim-time sidecar snapshot.
+  const snapshot = await readInProgressSnapshot({ targetRepoRoot, ref });
+
+  if (snapshot === null) {
+    throw new InProgressHandEditError({
+      ref,
+      changedFields: ["_snapshot_missing"],
+      absPath,
+    });
+  }
+
+  // Detect changed fields by comparing manifest against snapshot.
   const changedFields: string[] = [];
 
-  if (manifest.source_hash !== sourceHash) {
+  if (manifest.source_hash !== snapshot.source_hash) {
     changedFields.push("source_hash");
   }
+
+  const snapshotFields: OperatorEditableFields = {
+    title: snapshot.title,
+    narrative: snapshot.narrative,
+    acceptance_criteria: snapshot.acceptance_criteria,
+    implementation_notes: snapshot.implementation_notes,
+    depends_on: [...snapshot.depends_on],
+    withdrawn: snapshot.withdrawn,
+  };
 
   const diskFields: OperatorEditableFields = {
     title: manifest.title,
@@ -271,17 +408,15 @@ export async function detectInProgressHandEdit(opts: {
     withdrawn: manifest.withdrawn,
   };
 
-  if (!operatorFieldsEqual(diskFields, sourceFields)) {
-    // Identify which specific fields changed.
-    if (diskFields.title !== sourceFields.title) changedFields.push("title");
-    if (diskFields.narrative !== sourceFields.narrative) changedFields.push("narrative");
-    if (diskFields.implementation_notes !== sourceFields.implementation_notes)
+  if (!operatorFieldsEqual(diskFields, snapshotFields)) {
+    if (diskFields.title !== snapshotFields.title) changedFields.push("title");
+    if (diskFields.narrative !== snapshotFields.narrative) changedFields.push("narrative");
+    if (diskFields.implementation_notes !== snapshotFields.implementation_notes)
       changedFields.push("implementation_notes");
-    if (diskFields.withdrawn !== sourceFields.withdrawn) changedFields.push("withdrawn");
+    if (diskFields.withdrawn !== snapshotFields.withdrawn) changedFields.push("withdrawn");
 
-    // acceptance_criteria — check individually.
     const acA = diskFields.acceptance_criteria;
-    const acB = sourceFields.acceptance_criteria;
+    const acB = snapshotFields.acceptance_criteria;
     let acDiffers = acA.length !== acB.length;
     if (!acDiffers) {
       for (let i = 0; i < acA.length; i++) {
@@ -293,9 +428,8 @@ export async function detectInProgressHandEdit(opts: {
     }
     if (acDiffers) changedFields.push("acceptance_criteria");
 
-    // depends_on — check individually.
     const doA = diskFields.depends_on;
-    const doB = sourceFields.depends_on;
+    const doB = snapshotFields.depends_on;
     let doDiffers = doA.length !== doB.length;
     if (!doDiffers) {
       for (let i = 0; i < doA.length; i++) {

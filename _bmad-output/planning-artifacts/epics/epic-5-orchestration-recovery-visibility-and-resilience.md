@@ -598,6 +598,35 @@ vitest: plugins/crew/mcp-server/tests/build-watch-determinism.test.ts
 **AC4:** Root cause and design choice documented in the story's Dev Notes. The note names (a) why the bare `tsc --watch` path bypassed the 5.24 fix, (b) why the chosen seam (wrapper script vs. tsc programmatic API vs. fs.watch on `dist/`) was picked, and (c) what edge cases were considered (orphan child processes, debouncing rapid edits, normaliser concurrency with mid-emit tsc writes). Technical specifics required — one paragraph minimum.
 artifact: _bmad-output/implementation-artifacts/5-28-build-watch-normaliser-chaining.md
 
+## Story 5.29: Hand-edit check uses manifest-only baseline (not live source story)
+
+> Added 2026-05-28 as follow-up to PR #176 close-out. `processReviewerTranscript` refused READY FOR MERGE because `deriveSourceBaseline` re-reads the live source story, which the dev legitimately edited (`implementation_notes`). Every Epic 6a close-out repeats this until fixed.
+> Source: `_bmad-output/implementation-artifacts/5-29-hand-edit-check-manifest-only-baseline.md`.
+
+As a dev/reviewer agent and the operator orchestrating them,
+I want the in-progress hand-edit check to compare the on-disk in-progress manifest against a baseline captured at claim time, not against the current source story file,
+So that the legitimate dev workflow of filling `## Implementation Notes` in the source story stops tripping `InProgressHandEditError` and blocking every successful close-out.
+
+**Context:** `detectInProgressHandEdit`'s baseline is currently derived from the live source story (via `deriveSourceBaseline` → `activeAdapter.readSourceStory`). When the dev edits the source story's Implementation Notes section during a story — which the placeholder text instructs them to do — the next `claimStory`/`completeStory` call sees `source_hash` and `implementation_notes` drift between the captured manifest and the recomputed source baseline, throws `InProgressHandEditError`, and refuses to advance. The fix narrows the check to manifest-only fields: snapshot the manifest at claim time (sidecar `in-progress/<ref>.snapshot.yaml`), compare manifest-to-sidecar at completion. Source-story tamper detection by re-reading the live source is removed from the in-progress guard. PR #176 (bmad:6.1) hit this defect on close-out and had to be operator-overridden.
+
+**Acceptance Criteria:**
+
+**AC1:** `detectInProgressHandEdit` compares the on-disk in-progress manifest against a baseline that was snapshotted at claim time (sidecar file or persisted on the manifest) and no longer re-reads the source story file to rebuild the baseline. `deriveSourceBaseline` is either removed at the in-progress check call sites (`claimStory` re-entry path, `completeStory`) or its return value is replaced by a manifest-snapshot loader. Source-hash drift between the in-progress manifest and the current source story is no longer a hand-edit signal.
+artifact: plugins/crew/mcp-server/src/state/manifest-state-machine.ts
+artifact: plugins/crew/mcp-server/src/tools/complete-story.ts
+artifact: plugins/crew/mcp-server/src/tools/claim-story.ts
+
+**AC2 (integration — regression):** A vitest test exercises the end-to-end dev-fills-implementation_notes path: claimed manifest in `in-progress/` with `implementation_notes` captured at claim time, then simulate the dev's edit by rewriting the source story file's `## Implementation Notes` section. Call `completeStory` (or `processReviewerTranscript` → `completeStory`). Assert the call succeeds (no `InProgressHandEditError`), the manifest moves from `in-progress/` to `done/`, and no source-file drift is reported. This is the regression guard for PR #176's defect.
+vitest: plugins/crew/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
+
+**AC3 (integration — no false negatives):** A vitest test confirms operator manifest-tampering is still detected after the narrowing. Hand-edit the in-progress manifest file directly (flip `withdrawn`, reorder `acceptance_criteria`, change `title`) while leaving the source story file untouched. Call `claimStory` re-entry or `completeStory`. Assert `InProgressHandEditError` is thrown with the correct `changedFields` array. Existing c1–c3 hand-edit cases (`title`, `acceptance_criteria`, `withdrawn`) each remain detected.
+vitest: plugins/crew/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
+
+**AC4:** `detectInProgressHandEdit` JSDoc is updated to reflect the new contract ("compares the on-disk in-progress manifest against the claim-time manifest snapshot; does not consult the source story file"). The Story 3.7 caller contract reference is updated to point at this story. `deriveSourceBaseline` either has its JSDoc updated to note it is no longer used by the in-progress guard (if retained for other reasons) or is removed entirely if no remaining call sites exist. The c4 case in the existing test file (`source hash drift detected`) is updated or removed so the test name no longer implies source-file drift detection from the in-progress guard.
+artifact: plugins/crew/mcp-server/src/state/manifest-state-machine.ts
+artifact: plugins/crew/mcp-server/src/state/derive-source-baseline.ts
+artifact: plugins/crew/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
+
 ## Story 5.30: MCP cascade halt seam in `/crew:start` + lifecycle-log diagnostic fields
 
 > Added 2026-05-28 after RCA confirmed Claude Code's `Task`-return SIGTERM cascade kills the parent MCP child paired with the subagent's child (8/8 paired SIGTERMs across 4 incidents in `~/.crew/mcp-lifecycle.log`).
