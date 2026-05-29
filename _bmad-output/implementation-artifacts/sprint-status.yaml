@@ -133,5 +133,5 @@ development_status:
   8-6-bootstrap-story-and-dogfood-run: done
   8-7-summarise-drain-result: done
   8-8-native-scan-classify-unmatched-files: done
-  8-9-document-provisional-trust-flag: ready-for-dev
+  8-9-document-provisional-trust-flag: done
   epic-8-retrospective: optional
