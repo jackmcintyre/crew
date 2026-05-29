@@ -665,23 +665,23 @@ So that **the next reliability investment is grounded in concrete evidence (mani
 
 **Acceptance Criteria:**
 
-**AC1 (spike notes file exists with all five answers):** A notes file at `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` exists and answers all five investigation questions below, each with concrete evidence (a URL with quoted excerpt, a runnable repro snippet with observed output, or a quoted fragment of an existing source file). The notes file's top section names the spike's verdict in one of three forms: `proceed-with-d2`, `pivot-to-path-b`, or `blocked-escalate-to-jack` with the named blocker.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+**AC1 (spike notes file exists with all five answers):** A notes file at `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` exists and answers all five investigation questions below, each with concrete evidence (a URL with quoted excerpt, a runnable repro snippet with observed output, or a quoted fragment of an existing source file). The notes file's top section names the spike's verdict in one of three forms: `proceed-with-d2`, `pivot-to-path-b`, or `blocked-escalate-to-jack` with the named blocker.
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 **AC2 (manifest support — Q1):** The notes file answers: does Claude Code's plugin manifest at `plugins/crew/.claude-plugin/plugin.json` support pointing `mcpServers.*.command` at an arbitrary stdio shim (e.g., a one-line bash script that `exec`s the real server) and have the host treat the shim as the MCP child? Evidence: either (a) a quoted excerpt from Claude Code's MCP docs (https://code.claude.com/docs/en/mcp.md) confirming the manifest treats `command` as an arbitrary executable path, OR (b) a runnable repro outside this repo (a tiny test plugin with a shell shim) showing MCP tools list correctly through the shim. The notes record the verdict as `manifest-supports-shim: yes | no | unclear-with-caveats`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 **AC3 (OS-level detachment — Q2):** The notes file answers: does `spawn(..., { detached: true, stdio: 'ignore' })` from a Node child actually survive a SIGTERM to its grandparent's process group on darwin? Evidence: a 20–40 line standalone Node repro outside this repo (not in `plugins/crew/`) that (a) spawns a "real server" child with `detached: true` + `stdio: 'ignore'`, (b) sends `SIGTERM` to the parent's process group via `process.kill(-pgid, 'SIGTERM')`, and (c) observes the detached child's pid is still alive 2s later (`process.kill(pid, 0)` returns truthy). The notes include the repro source verbatim and the observed terminal output. Records verdict as `detached-survives-sigterm: yes | no | partial-with-caveats`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 **AC4 (JSON-RPC framing — Q3):** The notes file answers: what's the cleanest framing for the shim's stdio→unix-socket bridge? The shim must forward JSON-RPC frames between Claude Code (stdio) and the daemon (unix socket). The notes identify any framing gotchas (chunked frames across socket reads, large payloads >64KB exceeding default buffer sizes, partial reads requiring buffering, line-delimited vs Content-Length framing) and recommend one framing approach with rationale. Evidence: either (a) a quoted reference to the MCP SDK's transport framing (`@modelcontextprotocol/sdk` source or docs via Context7), OR (b) a quoted note from the spike's investigation of the existing `plugins/crew/mcp-server/src/index.ts` stdio transport setup. Records verdict as `framing-approach: <named approach>` (e.g., `line-delimited-json`, `content-length-prefixed`).
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 **AC5 (lockfile + stale-daemon detection — Q4):** The notes file answers: what's the right pattern for "is a daemon already running, or do I need to spawn one"? The notes evaluate at minimum two patterns — (a) PID file + `kill(pid, 0)` check, and (b) optimistic socket-connect probe — and recommend one with rationale covering: stale-PID handling on crash, race condition on first two concurrent shim spawns, cross-session correctness when multiple Claude Code instances run. Evidence: either a quoted reference from a well-known daemon's source (sshd, pgsql, redis), or a short pseudocode sketch validated against the four edge cases above. Records verdict as `daemon-liveness-pattern: <pidfile-with-kill-zero | socket-connect-probe | hybrid>`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 **AC6 (auth / multi-user safety — Q5):** The notes file answers: does the unix socket need a per-connection token, or is filesystem permission (`0600` on the socket path under `~/.crew/`) sufficient for the darwin reference platform? The notes identify the threat model (other unprivileged processes on the same machine; not a network adversary — unix sockets are local-only), evaluate filesystem-permission-only vs token-handshake-on-connect, and recommend one with rationale. Evidence: either a quoted reference from unix-socket auth best-practices (e.g., man 2 socket section on `SO_PEERCRED` / macOS equivalents) or a quoted note on equivalent patterns in adjacent local-IPC daemons. Records verdict as `socket-auth: <filesystem-permission-only | token-handshake | other>`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 ## Story 5.32: Path D2 build — detached proxy + parent-owned MCP daemon
 

@@ -6,7 +6,7 @@ Status: ready-for-dev
 
 <!--
 Authored 2026-05-28 as the v1.1 reliability build. Story 5.31's half-day spike
-de-risked D2 (notes file at `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md`;
+de-risked D2 (notes file at `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md`;
 verdict `proceed-with-d2`). This story implements the five patterns the spike locked in.
 
 Risk tier is medium per the brief: this changes the boot path of the entire MCP
@@ -441,7 +441,7 @@ Q5's project scoping: darwin is the reference platform for v1.1. The Q2 spike re
 - `plugins/crew/permissions/**` — NOT touched. No new permission allowlist entries; the proxy is internal infrastructure.
 - `plugins/crew/example/**` — NOT touched.
 - `plugins/crew/catalogue/**` — NOT touched.
-- `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` — NOT touched. Read-only reference for spike's Q1–Q5 verdicts.
+- `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` — NOT touched. Read-only reference for spike's Q1–Q5 verdicts.
 - Top-level README, PRD non-functional-requirements, and other planning docs — NOT touched by this story. Documentation follow-up is a separate story once D2 is validated in steady state.
 
 ### Declared-locked-file changes (explicit exceptions)
@@ -490,7 +490,7 @@ Q5's project scoping: darwin is the reference platform for v1.1. The Q2 spike re
 
 ### Files this story reads (read-only context)
 
-- `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` — Q1–Q5 verdicts. The build's design contract.
+- `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` — Q1–Q5 verdicts. The build's design contract.
 - `plugins/crew/mcp-server/src/index.ts` (before edit) — reference for what lifecycle/signal/keepalive code must be preserved across the transport swap.
 - `node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js` — quoted in Q3; ReadBuffer/serializeMessage are the framing primitives the socket transport reuses.
 - `node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js` — reference for the Transport contract that SocketServerTransport must implement.
@@ -533,12 +533,12 @@ The integration test (AC3) plus the smoke at Task 12.5 are the floor. The review
 ### References
 
 - [Source: `_bmad-output/planning-artifacts/epics/epic-5-orchestration-recovery-visibility-and-resilience.md § Story 5.32`] — this story's epic block.
-- [Source: `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` § Verdict] — `proceed-with-d2` with rationale.
-- [Source: `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` § Q1] — `manifest-supports-shim: yes`. Docs URL + Claude-Code-as-MCP example.
-- [Source: `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` § Q2] — `detached-survives-sigterm: yes`. Repro source + observed terminal output (parent pid 48576, child pid 48578, ppid transition 48576→1).
-- [Source: `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` § Q3] — `framing-approach: line-delimited-json`. SDK `ReadBuffer` source quoted; `serializeMessage` appends `\n`.
-- [Source: `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` § Q4] — `daemon-liveness-pattern: hybrid`. Edge-case matrix + redis source reference (createPidFile + EADDRINUSE on bind).
-- [Source: `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` § Q5] — `socket-auth: filesystem-permission-only`. ssh-agent / gpg-agent / docker precedent; LOCAL_PEEREUID API reference.
+- [Source: `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` § Verdict] — `proceed-with-d2` with rationale.
+- [Source: `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` § Q1] — `manifest-supports-shim: yes`. Docs URL + Claude-Code-as-MCP example.
+- [Source: `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` § Q2] — `detached-survives-sigterm: yes`. Repro source + observed terminal output (parent pid 48576, child pid 48578, ppid transition 48576→1).
+- [Source: `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` § Q3] — `framing-approach: line-delimited-json`. SDK `ReadBuffer` source quoted; `serializeMessage` appends `\n`.
+- [Source: `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` § Q4] — `daemon-liveness-pattern: hybrid`. Edge-case matrix + redis source reference (createPidFile + EADDRINUSE on bind).
+- [Source: `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` § Q5] — `socket-auth: filesystem-permission-only`. ssh-agent / gpg-agent / docker precedent; LOCAL_PEEREUID API reference.
 - [Source: `~/.claude/plans/linked-knitting-stardust.md` § "D2 — Detached proxy + parent-owned daemon"] — the original design doc.
 - [Source: `_bmad-output/implementation-artifacts/5-30-mcp-cascade-halt-seam-and-lifecycle-diagnostics.md`] — Story 5.30, the halt seam that stays after D2 ships.
 - [Source: `_bmad-output/implementation-artifacts/5-31-d2-feasibility-spike.md`] — Story 5.31, the spike that informed this build.

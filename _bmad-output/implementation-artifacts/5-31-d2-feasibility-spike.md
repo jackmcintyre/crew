@@ -20,7 +20,7 @@ So that **the next reliability investment is grounded in concrete evidence (mani
 
 ### What this story is, in one paragraph
 
-Story 5.30 (sibling) ships Path A: accept the cascade, halt cleanly, document. Path A is a UX patch — every story interrupted by the cascade costs one Claude Code restart. The RCA memo names Path D2 as the right v1.1 investment: 2–3 days of engineering for the same outcome as Path B (HTTP daemon, 4–7 days) without B's first-install ergonomic regression. This story is **not** the build. It is the half-day spike that investigates the five questions which, if any answer is hostile, would invalidate the entire D2 approach before the build is scheduled. The spike's only deliverable is a notes file at `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` with concrete evidence per question.
+Story 5.30 (sibling) ships Path A: accept the cascade, halt cleanly, document. Path A is a UX patch — every story interrupted by the cascade costs one Claude Code restart. The RCA memo names Path D2 as the right v1.1 investment: 2–3 days of engineering for the same outcome as Path B (HTTP daemon, 4–7 days) without B's first-install ergonomic regression. This story is **not** the build. It is the half-day spike that investigates the five questions which, if any answer is hostile, would invalidate the entire D2 approach before the build is scheduled. The spike's only deliverable is a notes file at `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` with concrete evidence per question.
 
 ### Why this story is the right shape (research spike, not build)
 
@@ -60,8 +60,8 @@ The spike's value is **the answers**, not artefacts. A notes file is grep-able b
 > ACs are reproduced from this story's epic block (`epic-5 § Story 5.31`) with per-AC implementation detail added below each one. AC markers (`artifact:`) use plain unbacked-tick form per memory `project_reviewer_toolchain_gaps` (entry 1). Each AC references a section of the same notes file — the spike author writes one section per AC under the headings called out in the implementation comments below. The file's existence and the verdict line satisfy AC1; the per-question sections satisfy AC2–AC6.
 
 **AC1 (spike notes file exists with all five answers):**
-A notes file at `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` exists and answers all five investigation questions below, each with concrete evidence (a URL with quoted excerpt, a runnable repro snippet with observed output, or a quoted fragment of an existing source file). The notes file's top section names the spike's verdict in one of three forms: `proceed-with-d2`, `pivot-to-path-b`, or `blocked-escalate-to-jack` with the named blocker.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+A notes file at `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` exists and answers all five investigation questions below, each with concrete evidence (a URL with quoted excerpt, a runnable repro snippet with observed output, or a quoted fragment of an existing source file). The notes file's top section names the spike's verdict in one of three forms: `proceed-with-d2`, `pivot-to-path-b`, or `blocked-escalate-to-jack` with the named blocker.
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 <!--
 Implementation: the notes file's structure is the spike author's choice but the reviewer
@@ -99,7 +99,7 @@ exist — `mkdir -p` it as part of the first write.
 
 **AC2 (manifest support — Q1):**
 The notes file answers: does Claude Code's plugin manifest at `plugins/crew/.claude-plugin/plugin.json` support pointing `mcpServers.*.command` at an arbitrary stdio shim (e.g., a one-line bash script that `exec`s the real server) and have the host treat the shim as the MCP child? Evidence: either (a) a quoted excerpt from Claude Code's MCP docs (https://code.claude.com/docs/en/mcp.md) confirming the manifest treats `command` as an arbitrary executable path, OR (b) a runnable repro outside this repo (a tiny test plugin with a shell shim) showing MCP tools list correctly through the shim. The notes record the verdict as `manifest-supports-shim: yes | no | unclear-with-caveats`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 <!--
 Implementation: cheapest path is the docs lookup via Context7 or a direct WebFetch of
@@ -117,7 +117,7 @@ if it clarifies the contract.
 
 **AC3 (OS-level detachment — Q2):**
 The notes file answers: does `spawn(..., { detached: true, stdio: 'ignore' })` from a Node child actually survive a SIGTERM to its grandparent's process group on darwin? Evidence: a 20–40 line standalone Node repro outside this repo (not in `plugins/crew/`) that (a) spawns a "real server" child with `detached: true` + `stdio: 'ignore'`, (b) sends `SIGTERM` to the parent's process group via `process.kill(-pgid, 'SIGTERM')`, and (c) observes the detached child's pid is still alive 2s later (`process.kill(pid, 0)` returns truthy). The notes include the repro source verbatim and the observed terminal output. Records verdict as `detached-survives-sigterm: yes | no | partial-with-caveats`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 <!--
 Implementation: this is the critical question. The repro must mirror the real topology:
@@ -144,7 +144,7 @@ The repro is portable but the spike scopes to darwin (project reference platform
 
 **AC4 (JSON-RPC framing — Q3):**
 The notes file answers: what's the cleanest framing for the shim's stdio→unix-socket bridge? The shim must forward JSON-RPC frames between Claude Code (stdio) and the daemon (unix socket). The notes identify any framing gotchas (chunked frames across socket reads, large payloads >64KB exceeding default buffer sizes, partial reads requiring buffering, line-delimited vs Content-Length framing) and recommend one framing approach with rationale. Evidence: either (a) a quoted reference to the MCP SDK's transport framing (`@modelcontextprotocol/sdk` source or docs via Context7), OR (b) a quoted note from the spike's investigation of the existing `plugins/crew/mcp-server/src/index.ts` stdio transport setup. Records verdict as `framing-approach: <named approach>` (e.g., `line-delimited-json`, `content-length-prefixed`).
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 <!--
 Implementation: the MCP SDK's stdio transport is the canonical reference for what the
@@ -165,7 +165,7 @@ it's line-delimited (one JSON-RPC frame per newline) vs Content-Length-prefixed
 
 **AC5 (lockfile + stale-daemon detection — Q4):**
 The notes file answers: what's the right pattern for "is a daemon already running, or do I need to spawn one"? The notes evaluate at minimum two patterns — (a) PID file + `kill(pid, 0)` check, and (b) optimistic socket-connect probe — and recommend one with rationale covering: stale-PID handling on crash, race condition on first two concurrent shim spawns, cross-session correctness when multiple Claude Code instances run. Evidence: either a quoted reference from a well-known daemon's source (sshd, pgsql, redis), or a short pseudocode sketch validated against the four edge cases above. Records verdict as `daemon-liveness-pattern: <pidfile-with-kill-zero | socket-connect-probe | hybrid>`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 <!--
 Implementation: this is a design decision, not a feasibility check. The notes evaluate
@@ -202,7 +202,7 @@ connect-probe; the hybrid pattern is the production norm.
 
 **AC6 (auth / multi-user safety — Q5):**
 The notes file answers: does the unix socket need a per-connection token, or is filesystem permission (`0600` on the socket path under `~/.crew/`) sufficient for the darwin reference platform? The notes identify the threat model (other unprivileged processes on the same machine; not a network adversary — unix sockets are local-only), evaluate filesystem-permission-only vs token-handshake-on-connect, and recommend one with rationale. Evidence: either a quoted reference from unix-socket auth best-practices (e.g., man 2 socket section on `SO_PEERCRED` / macOS equivalents) or a quoted note on equivalent patterns in adjacent local-IPC daemons. Records verdict as `socket-auth: <filesystem-permission-only | token-handshake | other>`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 <!--
 Implementation: threat model is "another unprivileged user on the same machine, or
@@ -231,7 +231,7 @@ Implementation order is research-then-write. The spike author can answer Q1, Q3,
 
 - [ ] **Task 1: Create the spikes directory and notes file skeleton** (AC: #1)
   - [ ] 1.1 `mkdir -p _bmad-output/implementation-artifacts/spikes/`
-  - [ ] 1.2 Create `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` with the section skeleton (Verdict + Q1–Q5 sections per the AC1 implementation comment). Leave each section's verdict as `<pending>` until that question is answered.
+  - [ ] 1.2 Create `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` with the section skeleton (Verdict + Q1–Q5 sections per the AC1 implementation comment). Leave each section's verdict as `<pending>` until that question is answered.
 
 - [ ] **Task 2: Investigate Q2 — OS-level detachment** (AC: #3)
   - [ ] 2.1 Create a temp directory outside this repo (e.g., `/tmp/d2-detach-repro/`). Write `parent.mjs`, `child.mjs`, and `run.sh` per the AC3 implementation comment.
@@ -264,8 +264,8 @@ Implementation order is research-then-write. The spike author can answer Q1, Q3,
   - [ ] 7.2 Add a one-paragraph rationale under the verdict line explaining why the verdict follows from the Q1–Q5 answers.
 
 - [ ] **Task 8: Verify the notes file passes AC checks** (AC: all)
-  - [ ] 8.1 `grep -E "manifest-supports-shim:|detached-survives-sigterm:|framing-approach:|daemon-liveness-pattern:|socket-auth:" _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` — confirm five verdict lines are present.
-  - [ ] 8.2 `grep -E "^## Verdict$" _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` — confirm the top verdict section exists.
+  - [ ] 8.1 `grep -E "manifest-supports-shim:|detached-survives-sigterm:|framing-approach:|daemon-liveness-pattern:|socket-auth:" _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` — confirm five verdict lines are present.
+  - [ ] 8.2 `grep -E "^## Verdict$" _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` — confirm the top verdict section exists.
   - [ ] 8.3 Manually scan each Q section to confirm it has concrete evidence (URL+quote, runnable snippet+output, or source-file quote) — not assertion alone.
 
 ---
@@ -313,7 +313,7 @@ The project's reference platform is darwin. macOS's local-IPC threat model and p
 
 ### Declared-locked-file changes (explicit exceptions)
 
-- `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` (new file) — Task 1 creates it; Tasks 2–7 fill it. This is the spike's only deliverable.
+- `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` (new file) — Task 1 creates it; Tasks 2–7 fill it. This is the spike's only deliverable.
 - `_bmad-output/implementation-artifacts/spikes/` (new directory) — created by Task 1.1.
 
 ---
@@ -322,7 +322,7 @@ The project's reference platform is darwin. macOS's local-IPC threat model and p
 
 ### Files this story will create
 
-- `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` (Task 1.2) — the spike's only deliverable. Sectioned per AC1's implementation comment. Verdict + Q1–Q5 sections, each with concrete evidence.
+- `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` (Task 1.2) — the spike's only deliverable. Sectioned per AC1's implementation comment. Verdict + Q1–Q5 sections, each with concrete evidence.
 - `_bmad-output/implementation-artifacts/spikes/` (Task 1.1) — new directory for spike notes; future spikes land here too.
 
 ### Files this story will NOT modify

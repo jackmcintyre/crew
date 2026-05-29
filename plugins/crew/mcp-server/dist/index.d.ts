@@ -32,7 +32,7 @@
  *
  * References:
  *   - Story spec:  _bmad-output/implementation-artifacts/5-32-d2-build-detached-proxy-and-parent-owned-daemon.md
- *   - Spike:       _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+ *   - Spike:       _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
  *   - Postmortem:  _bmad-output/postmortems/2026-05-25-dogfood-rollback.md § L1 defect #1
  *   - Memory:      project_mcp_server_silent_disconnect
  */
