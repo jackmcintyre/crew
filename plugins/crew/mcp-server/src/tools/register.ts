@@ -7,6 +7,7 @@ import { claimStory } from "./claim-story.js";
 import { completeStory } from "./complete-story.js";
 import { recordStoryRetro } from "./record-story-retro.js";
 import { writeRetroProposal } from "./write-retro-proposal.js";
+import { gatherRetroInputs } from "./gather-retro-inputs.js";
 import { listClaimableTodos } from "./list-claimable-todos.js";
 import { mintSessionUlid } from "./mint-session-ulid.js";
 import { getStatus, renderStatus } from "./get-status.js";
@@ -649,6 +650,54 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           })
           .parse(args);
         const result = await writeRetroProposal(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 6.2 — gatherRetroInputs: assemble the deterministic input bundle the
+  // /crew:retro skill hands to the retro-analyst subagent. Pure read across the
+  // cycle's done manifests, telemetry, prior proposals, and (when present) the
+  // rule registry. No writes, no network. FR56.
+  server.registerTool({
+    name: "gatherRetroInputs",
+    description:
+      "Assemble the deterministic retro input bundle for the /crew:retro skill " +
+      "(Story 6.2, FR56). Returns { doneManifests, telemetrySummary, priorProposals, " +
+      "ruleRegistry }: every done/ manifest (alphabetical, parseExecutionManifest-validated; " +
+      "MalformedExecutionManifestError propagates), every telemetry event for the current " +
+      "cycle window (malformed lines skipped + counted as telemetrySummary.skipped_count), " +
+      "prior retro-proposal paths { path, iso_timestamp } sorted ascending (contents NOT " +
+      "loaded), and the parsed docs/discipline-rules.yaml registry (or null when absent — " +
+      "absence is not an error). Pure read; no writes, no network.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+      },
+      required: ["targetRepoRoot"],
+    },
+    handler: async (args) => {
+      try {
+        const parsed = z
+          .object({ targetRepoRoot: z.string().min(1) })
+          .parse(args);
+        const result = await gatherRetroInputs(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

@@ -1,8 +1,9 @@
 role: retro-analyst
 tools_allow:
-  - readSourceStory
-  - lookupStandards
-  - recordYield
+  - Read
+  - gatherRetroInputs
+  - writeRetroProposal
+  - Task
   - heartbeat
 gh_allow:
   - pr-view
