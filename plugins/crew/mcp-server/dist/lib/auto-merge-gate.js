@@ -60,7 +60,9 @@ export function decideAutoMerge(input) {
     // Branch: low risk, insufficient data
     if (agreement_metric === null) {
         // Cold-start provisional trust (Stage-2): with the flag on, bootstrap by
-        // auto-merging the lowest-risk change before any agreement history exists.
+        // auto-merging the lowest-risk change while the agreement window is still
+        // filling (metric === null). Intended to relax across the whole ramp, not
+        // just the empty-history moment, so history can accrue.
         if (provisional_trust) {
             return { decision: "auto-merge", reason: "low-risk-provisional-trust" };
         }

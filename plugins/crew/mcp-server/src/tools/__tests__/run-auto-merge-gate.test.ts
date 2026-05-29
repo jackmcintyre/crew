@@ -383,10 +383,15 @@ function baseOpts(
 // Stage-2: cold-start provisional trust + tier-from-reviewer-result fallback
 // ---------------------------------------------------------------------------
 
-/** Minimal reviewer-result reader seam carrying just the riskTier the gate uses. */
-function makeReviewerResultWithTier(tier: "low" | "medium" | "high") {
+/** Minimal reviewer-result reader seam carrying the fields the gate reads. */
+function makeReviewerResultWithTier(
+  tier: "low" | "medium" | "high",
+  overrides: { ref?: string; recommendedVerdict?: string } = {},
+) {
   return async (): Promise<ReviewerResultFileShape | null> =>
     ({
+      ref: overrides.ref ?? REF,
+      recommendedVerdict: overrides.recommendedVerdict ?? "READY FOR MERGE",
       riskTier: {
         tier,
         matched_rule: "test-rule",
@@ -450,6 +455,48 @@ describe("Stage-2 — provisional trust + reviewer-result tier fallback", () => 
     expect(result.risk_tier).toBe("medium");
     expect(result.decision).toBe("pause-needs-human");
     expect(result.reason).toBe("medium-risk");
+    expect(result.merged).toBe(false);
+  });
+
+  it("fallback IGNORES tier when reviewer-result verdict is not green → pauses (no-tier-no-signal)", async () => {
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+    const { impl: fakeExeca } = makePauseExeca();
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(null),
+      // tier says low, but the verdict is NOT green — the gate must not trust it.
+      readReviewerResultImpl: makeReviewerResultWithTier("low", {
+        recommendedVerdict: "NEEDS CHANGES",
+      }),
+      provisionalTrustOverride: true,
+    }));
+
+    expect(result.risk_tier).toBeNull();
+    expect(result.decision).toBe("pause-needs-human");
+    expect(result.reason).toBe("no-tier-no-signal");
+    expect(result.merged).toBe(false);
+  });
+
+  it("fallback IGNORES tier when reviewer-result ref does not match the gated ref → pauses", async () => {
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+    const { impl: fakeExeca } = makePauseExeca();
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(null),
+      // A stale/cross-story result lingering in the session dir for a different ref.
+      readReviewerResultImpl: makeReviewerResultWithTier("low", {
+        ref: "native:01HZSOMEOTHERSTORY000000000",
+      }),
+      provisionalTrustOverride: true,
+    }));
+
+    expect(result.risk_tier).toBeNull();
+    expect(result.decision).toBe("pause-needs-human");
+    expect(result.reason).toBe("no-tier-no-signal");
     expect(result.merged).toBe(false);
   });
 

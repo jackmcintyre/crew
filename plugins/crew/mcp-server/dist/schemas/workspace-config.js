@@ -12,11 +12,13 @@ export const PluginSettingsSchema = z
     orchestration_interval_seconds: z.number().int().positive().default(120),
     /**
      * Cold-start provisional trust (Stage-2). When `true`, the auto-merge gate
-     * may merge a `low`-risk PR even with no agreement history yet — bootstrapping
-     * trust on the safest changes until real agreement data accrues. Default
-     * `false`: the gate pauses for a human until the threshold gate has signal.
-     * Only ever relaxes the `low` + insufficient-data branch; medium/high/untiered
-     * always pause regardless.
+     * may merge a `low`-risk PR while agreement history is still accruing (the
+     * agreement window has not yet filled) — bootstrapping trust on the safest
+     * changes until the threshold gate has enough signal. Default `false`: the
+     * gate pauses for a human. Only ever relaxes the `low` + insufficient-data
+     * branch; medium/high/untiered always pause regardless. Operator-controlled
+     * with NO auto-expiry in v1 — turn it off once the agreement window fills
+     * so the real threshold gate takes over.
      */
     provisional_trust: z.boolean().default(false),
 })

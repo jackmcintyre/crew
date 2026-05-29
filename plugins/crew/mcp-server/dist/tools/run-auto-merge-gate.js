@@ -192,7 +192,18 @@ export async function runAutoMergeGate(opts) {
     let risk_tier = manifest.risk_tier;
     if (risk_tier === undefined) {
         const reviewerResult = await readReviewerResultFn(opts.targetRepoRoot, opts.sessionUlid);
-        risk_tier = reviewerResult?.riskTier?.tier;
+        // Trust the reviewer-computed tier ONLY when the result is the authoritative,
+        // GREEN verdict for THIS ref. This makes the safety binding deterministic
+        // rather than relying on the caller invoking the gate only on a green verdict
+        // (a prose mandate, not load-bearing). A non-green verdict, a ref mismatch
+        // (e.g. a stale result lingering in a reused session dir), or an absent
+        // result leaves risk_tier `undefined` → the gate pauses (`no-tier-no-signal`),
+        // the fail-safe outcome.
+        if (reviewerResult !== null &&
+            reviewerResult.ref === opts.ref &&
+            reviewerResult.recommendedVerdict === "READY FOR MERGE") {
+            risk_tier = reviewerResult.riskTier?.tier;
+        }
     }
     // ------------------------------------------------------------------
     // Step 4: Compute agreement metric

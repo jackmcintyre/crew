@@ -60,9 +60,13 @@ export interface DecideAutoMergeInput {
   /** Resolved threshold (0 <= n <= 1). Comparison is `>=` (FR40). */
   threshold: number;
   /**
-   * Cold-start provisional trust (Stage-2). When `true`, a `low`-risk PR with
-   * NO agreement history (insufficient data) auto-merges instead of pausing.
-   * Default (undefined / false) preserves the original pause-for-human behaviour.
+   * Cold-start provisional trust (Stage-2). When `true`, a `low`-risk PR auto-
+   * merges while the agreement metric is still `null` — i.e. the agreement
+   * window has not yet filled (fewer than the window's worth of resolved
+   * verdict pairs), which spans the whole ramp from zero history up to the
+   * window size, not only the empty-history moment. This is the intended
+   * bootstrap: low-risk merges must flow during the ramp so agreement history
+   * can accrue. Default (undefined / false) preserves pause-for-human.
    * This flag ONLY affects the `low` + insufficient-data branch — medium, high,
    * and untiered always pause regardless of its value.
    */
@@ -110,7 +114,9 @@ export function decideAutoMerge(input: DecideAutoMergeInput): DecideAutoMergeOut
   // Branch: low risk, insufficient data
   if (agreement_metric === null) {
     // Cold-start provisional trust (Stage-2): with the flag on, bootstrap by
-    // auto-merging the lowest-risk change before any agreement history exists.
+    // auto-merging the lowest-risk change while the agreement window is still
+    // filling (metric === null). Intended to relax across the whole ramp, not
+    // just the empty-history moment, so history can accrue.
     if (provisional_trust) {
       return { decision: "auto-merge", reason: "low-risk-provisional-trust" };
     }
