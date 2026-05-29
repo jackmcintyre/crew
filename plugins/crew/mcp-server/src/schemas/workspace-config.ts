@@ -11,8 +11,21 @@ export const PluginSettingsSchema = z
   .object({
     agreement_threshold: z.number().min(0).max(1).default(0.8),
     orchestration_interval_seconds: z.number().int().positive().default(120),
+    /**
+     * Cold-start provisional trust (Stage-2). When `true`, the auto-merge gate
+     * may merge a `low`-risk PR even with no agreement history yet — bootstrapping
+     * trust on the safest changes until real agreement data accrues. Default
+     * `false`: the gate pauses for a human until the threshold gate has signal.
+     * Only ever relaxes the `low` + insufficient-data branch; medium/high/untiered
+     * always pause regardless.
+     */
+    provisional_trust: z.boolean().default(false),
   })
-  .default(() => ({ agreement_threshold: 0.8, orchestration_interval_seconds: 120 }));
+  .default(() => ({
+    agreement_threshold: 0.8,
+    orchestration_interval_seconds: 120,
+    provisional_trust: false,
+  }));
 
 export const WorkspaceConfigSchema = z.object({
   adapter: z.string().min(1),

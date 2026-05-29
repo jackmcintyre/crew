@@ -4,16 +4,20 @@
  * Maps `(risk_tier, agreement_metric, threshold)` to a deterministic
  * `("auto-merge" | "pause-needs-human", reason)` outcome.
  *
- * Six-branch decision table (FR40 / FR41 / FR42):
+ * Decision table (FR40 / FR41 / FR42; Stage-2 adds the provisional-trust row):
  *
- * | risk_tier | agreement_metric     | ratio vs threshold | decision          | reason                     |
- * |-----------|----------------------|--------------------|-------------------|----------------------------|
- * | "low"     | non-null             | >= threshold       | auto-merge        | low-risk-met-threshold     |
- * | "low"     | non-null             | < threshold        | pause-needs-human | low-risk-sub-threshold     |
- * | "low"     | null                 | — insufficient —   | pause-needs-human | low-risk-insufficient-data |
- * | "medium"  | any                  | any                | pause-needs-human | medium-risk                |
- * | "high"    | any                  | any                | pause-needs-human | high-risk                  |
- * | undefined | any                  | any                | pause-needs-human | no-tier-no-signal          |
+ * | risk_tier | agreement_metric     | provisional_trust | decision          | reason                       |
+ * |-----------|----------------------|-------------------|-------------------|------------------------------|
+ * | "low"     | non-null >= threshold| any               | auto-merge        | low-risk-met-threshold       |
+ * | "low"     | non-null < threshold | any               | pause-needs-human | low-risk-sub-threshold       |
+ * | "low"     | null (insufficient)  | false             | pause-needs-human | low-risk-insufficient-data   |
+ * | "low"     | null (insufficient)  | true              | auto-merge        | low-risk-provisional-trust   |
+ * | "medium"  | any                  | any               | pause-needs-human | medium-risk                  |
+ * | "high"    | any                  | any               | pause-needs-human | high-risk                    |
+ * | undefined | any                  | any               | pause-needs-human | no-tier-no-signal            |
+ *
+ * provisional_trust ONLY relaxes the `low` + insufficient-data row. Medium, high,
+ * and untiered PRs always pause regardless of the flag.
  *
  * This function is pure — no I/O, no async. It is the single source of truth
  * for the gate decision; downstream consumers (MCP tool, Epic 6 retro stats,
@@ -43,6 +47,7 @@ export type AutoMergeGateReason =
   | "low-risk-met-threshold"
   | "low-risk-sub-threshold"
   | "low-risk-insufficient-data"
+  | "low-risk-provisional-trust"
   | "medium-risk"
   | "high-risk"
   | "no-tier-no-signal";
@@ -54,6 +59,14 @@ export interface DecideAutoMergeInput {
   agreement_metric: AgreementMetricResult | null;
   /** Resolved threshold (0 <= n <= 1). Comparison is `>=` (FR40). */
   threshold: number;
+  /**
+   * Cold-start provisional trust (Stage-2). When `true`, a `low`-risk PR with
+   * NO agreement history (insufficient data) auto-merges instead of pausing.
+   * Default (undefined / false) preserves the original pause-for-human behaviour.
+   * This flag ONLY affects the `low` + insufficient-data branch — medium, high,
+   * and untiered always pause regardless of its value.
+   */
+  provisional_trust?: boolean;
 }
 
 export interface DecideAutoMergeOutput {
@@ -75,13 +88,16 @@ export interface DecideAutoMergeOutput {
  */
 export function decideAutoMerge(input: DecideAutoMergeInput): DecideAutoMergeOutput {
   const { risk_tier, agreement_metric, threshold } = input;
+  const provisional_trust = input.provisional_trust ?? false;
 
   // Branch: no risk_tier on manifest (legacy / classifier-skipped)
   if (risk_tier === undefined) {
     return { decision: "pause-needs-human", reason: "no-tier-no-signal" };
   }
 
-  // Branch: medium or high tier — always pause regardless of agreement
+  // Branch: medium or high tier — always pause regardless of agreement.
+  // provisional_trust deliberately does NOT relax these — it only ever bootstraps
+  // trust on `low`-risk changes.
   if (risk_tier === "medium") {
     return { decision: "pause-needs-human", reason: "medium-risk" };
   }
@@ -93,6 +109,11 @@ export function decideAutoMerge(input: DecideAutoMergeInput): DecideAutoMergeOut
 
   // Branch: low risk, insufficient data
   if (agreement_metric === null) {
+    // Cold-start provisional trust (Stage-2): with the flag on, bootstrap by
+    // auto-merging the lowest-risk change before any agreement history exists.
+    if (provisional_trust) {
+      return { decision: "auto-merge", reason: "low-risk-provisional-trust" };
+    }
     return { decision: "pause-needs-human", reason: "low-risk-insufficient-data" };
   }
 

@@ -9,6 +9,7 @@ import { z } from "zod";
 export declare const PluginSettingsSchema: z.ZodDefault<z.ZodObject<{
     agreement_threshold: z.ZodDefault<z.ZodNumber>;
     orchestration_interval_seconds: z.ZodDefault<z.ZodNumber>;
+    provisional_trust: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strip>>;
 export declare const WorkspaceConfigSchema: z.ZodObject<{
     adapter: z.ZodString;
@@ -16,6 +17,7 @@ export declare const WorkspaceConfigSchema: z.ZodObject<{
     plugin: z.ZodDefault<z.ZodObject<{
         agreement_threshold: z.ZodDefault<z.ZodNumber>;
         orchestration_interval_seconds: z.ZodDefault<z.ZodNumber>;
+        provisional_trust: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;

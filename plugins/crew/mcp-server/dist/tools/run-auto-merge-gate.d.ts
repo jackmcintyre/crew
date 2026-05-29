@@ -28,6 +28,7 @@
 import { z } from "zod";
 import { execa as defaultExeca } from "execa";
 import type { AgreementMetricResult, ComputeAgreementOptions } from "./compute-agreement.js";
+import type { ReviewerResultFileShape } from "../lib/read-reviewer-result-file.js";
 import type { ExecutionManifest } from "../schemas/execution-manifest.js";
 import type { PluginSettings } from "../schemas/workspace-config.js";
 import type { AutoMergeGateReason } from "../lib/auto-merge-gate.js";
@@ -48,6 +49,7 @@ export declare const AutoMergeGateResultSchema: z.ZodObject<{
         "high-risk": "high-risk";
         "low-risk-insufficient-data": "low-risk-insufficient-data";
         "low-risk-met-threshold": "low-risk-met-threshold";
+        "low-risk-provisional-trust": "low-risk-provisional-trust";
         "low-risk-sub-threshold": "low-risk-sub-threshold";
         "medium-risk": "medium-risk";
         "no-tier-no-signal": "no-tier-no-signal";
@@ -105,6 +107,13 @@ export interface RunAutoMergeGateOptions {
     readManifestImpl?: (absPath: string) => Promise<ExecutionManifest>;
     /** Test seam: inject a custom workspace-config loader. */
     loadWorkspaceConfigImpl?: (targetRepoRoot: string) => Promise<PluginSettings>;
+    /**
+     * Test seam: bypass the workspace-config read for the provisional-trust flag
+     * (Stage-2). Production callers pass `undefined` (resolved from config).
+     */
+    provisionalTrustOverride?: boolean;
+    /** Test seam: inject a custom reviewer-result reader (Stage-2 tier fallback). */
+    readReviewerResultImpl?: (targetRepoRoot: string, sessionUlid: string) => Promise<ReviewerResultFileShape | null>;
     /** Plugin root override — test seam for loadRolePermissions and gh-error-map. */
     pluginRootOverride?: string;
     /** Role name for gh permission lookup (default: "generalist-dev"). */

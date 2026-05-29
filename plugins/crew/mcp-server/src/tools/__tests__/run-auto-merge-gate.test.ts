@@ -40,6 +40,7 @@ import { GhRecoverableError, GhSubcommandDeniedError, AutoMergeGateThresholdInva
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 import type { RolePermissions } from "../../schemas/role-permissions.js";
+import type { ReviewerResultFileShape } from "../../lib/read-reviewer-result-file.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -377,6 +378,103 @@ function baseOpts(
     ...override,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Stage-2: cold-start provisional trust + tier-from-reviewer-result fallback
+// ---------------------------------------------------------------------------
+
+/** Minimal reviewer-result reader seam carrying just the riskTier the gate uses. */
+function makeReviewerResultWithTier(tier: "low" | "medium" | "high") {
+  return async (): Promise<ReviewerResultFileShape | null> =>
+    ({
+      riskTier: {
+        tier,
+        matched_rule: "test-rule",
+        evidence: { paths: [], change_types: [], diff_size: 10 },
+      },
+    }) as unknown as ReviewerResultFileShape;
+}
+
+describe("Stage-2 — provisional trust + reviewer-result tier fallback", () => {
+  it("manifest lacks risk_tier + reviewer-result says low + provisional_trust → auto-merges", async () => {
+    // No risk_tier on the manifest — the gate must fall back to reviewer-result.
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+    const { impl: fakeExeca, calls } = makeMergeExeca();
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(null), // cold start, no history
+      readReviewerResultImpl: makeReviewerResultWithTier("low"),
+      provisionalTrustOverride: true,
+    }));
+
+    expect(result.risk_tier).toBe("low");
+    expect(result.decision).toBe("auto-merge");
+    expect(result.reason).toBe("low-risk-provisional-trust");
+    expect(result.merged).toBe(true);
+    const mergeCalls = calls.filter(c => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "merge");
+    expect(mergeCalls).toHaveLength(1);
+  });
+
+  it("low tier (via fallback) + null history + provisional_trust OFF → pauses (insufficient-data)", async () => {
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+    const { impl: fakeExeca } = makePauseExeca();
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(null),
+      readReviewerResultImpl: makeReviewerResultWithTier("low"),
+      provisionalTrustOverride: false,
+    }));
+
+    expect(result.risk_tier).toBe("low");
+    expect(result.decision).toBe("pause-needs-human");
+    expect(result.reason).toBe("low-risk-insufficient-data");
+    expect(result.merged).toBe(false);
+  });
+
+  it("reviewer-result says medium + provisional_trust ON → STILL pauses (flag never relaxes medium)", async () => {
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+    const { impl: fakeExeca } = makePauseExeca();
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(null),
+      readReviewerResultImpl: makeReviewerResultWithTier("medium"),
+      provisionalTrustOverride: true,
+    }));
+
+    expect(result.risk_tier).toBe("medium");
+    expect(result.decision).toBe("pause-needs-human");
+    expect(result.reason).toBe("medium-risk");
+    expect(result.merged).toBe(false);
+  });
+
+  it("manifest risk_tier wins over reviewer-result (manifest low, fallback not consulted)", async () => {
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    const { impl: fakeExeca } = makeMergeExeca();
+    let fallbackConsulted = false;
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(null),
+      readReviewerResultImpl: async () => {
+        fallbackConsulted = true;
+        return null;
+      },
+      provisionalTrustOverride: true,
+    }));
+
+    expect(result.risk_tier).toBe("low");
+    expect(result.decision).toBe("auto-merge");
+    expect(result.reason).toBe("low-risk-provisional-trust");
+    expect(fallbackConsulted).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // (5d) (a) Auto-merge fires
@@ -896,6 +994,7 @@ describe("threshold_used is stamped in result", () => {
       loadWorkspaceConfigImpl: async () => ({
         agreement_threshold: 0.9,
         orchestration_interval_seconds: 120,
+        provisional_trust: false,
       }),
     }));
 
