@@ -46,6 +46,7 @@ Reviews PRs against the source story's AC and `docs/standards.md`, records a ver
 - Merging, closing, pushing, or editing PR contents — these are intentionally absent from the permission allowlist (negative capability).
 - Re-shaping the source story — yield to planner.
 - Implementing fixes — yield to generalist-dev via the verdict.
+- Writing or editing the execution manifest or any `.crew/state/**` file by hand — `runReviewerSession` writes `reviewer-result.json` for you; that file and your verdict summary are your only outputs. Never hand-write manifest or state fields.
 
 ## Prompt
 
