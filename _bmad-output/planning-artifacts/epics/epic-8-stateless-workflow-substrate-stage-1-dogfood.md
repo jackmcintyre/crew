@@ -33,3 +33,7 @@ Scope: `plugins/crew/workflows/drain.workflow.js` (net-new) — the serial state
 ## Story 8.6: Bootstrap story + dogfood run
 
 Scope: author a real low-risk bootstrap story (via `bmad-create-story`), prime it via `scanSources`, clear the pre-existing `bmad:6.2` orphan, run `drain.workflow.js` (`maxStories:1`), and verify the green PR **and** that `reviewer-result.json` `acResults` is non-empty and all-pass (proves real AC verification, not a false green). The proof-point. (Proposal M5.)
+
+## Story 8.8: Native scan arms loudly on unmatched story files
+
+Scope: `plugins/crew/mcp-server/src/adapters/native/index.ts` — `listNativeStoryFiles` silently drops every `.md` whose name doesn't match the ULID pattern, so a misnamed story vanishes and a directory of only-misnamed files scans to zero with no signal (the `nothingMatched` gap). Surface the unmatched basenames so the scan can report them loudly instead of returning a silent all-zero. Pure, additive, unit-testable. Second Stage-1 dogfood story — re-validates the autonomous loop + CI after the base-branch fix (#191).
