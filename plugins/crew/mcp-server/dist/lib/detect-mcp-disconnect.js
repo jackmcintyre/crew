@@ -10,6 +10,10 @@
  * cost; the trade-off is a deterministic, searchable seam without a hard
  * SDK-internals dependency.
  *
+ * Stories 5.32 + 5.33 closed the original cascade-SIGTERM cause specifically;
+ * this detector still applies to residual disconnect causes (OOM, manual kill,
+ * crash, reboot).
+ *
  * References:
  *   - Story 5.30 spec: _bmad-output/implementation-artifacts/5-30-mcp-cascade-halt-seam-and-lifecycle-diagnostics.md
  *   - Project memory: project_mcp_cascade_sigterm

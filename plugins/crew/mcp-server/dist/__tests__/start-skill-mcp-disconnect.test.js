@@ -1,5 +1,6 @@
 /**
- * Integration test for the MCP cascade halt seam — Story 5.30 AC4.
+ * Integration test for the MCP disconnect halt seam — Story 5.30 AC4
+ * (reframed cause-agnostic in Story 5.33).
  *
  * Asserts:
  *   (a) the verbatim halt line is present in the start SKILL.md file
@@ -19,7 +20,7 @@ import { McpDisconnectedError } from "../errors.js";
 import { isMcpDisconnectError } from "../lib/detect-mcp-disconnect.js";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_MD_PATH = path.resolve(HERE, "..", "..", "..", "skills", "start", "SKILL.md");
-const HALT_LINE = `[mcp-cascade-halted] MCP child killed by subagent Task termination — ` +
+const HALT_LINE = `[mcp-disconnected] MCP daemon disconnected mid-cycle — ` +
     `restart Claude Code and re-run /crew:start. The in-progress manifest will ` +
     `surface as an orphan; choose "reattach" to resume without losing work.`;
 // ---------------------------------------------------------------------------

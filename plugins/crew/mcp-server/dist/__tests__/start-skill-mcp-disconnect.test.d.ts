@@ -1,5 +1,6 @@
 /**
- * Integration test for the MCP cascade halt seam — Story 5.30 AC4.
+ * Integration test for the MCP disconnect halt seam — Story 5.30 AC4
+ * (reframed cause-agnostic in Story 5.33).
  *
  * Asserts:
  *   (a) the verbatim halt line is present in the start SKILL.md file
