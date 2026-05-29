@@ -97,6 +97,7 @@ development_status:
   5-30-mcp-cascade-halt-seam-and-lifecycle-diagnostics: done
   5-31-d2-feasibility-spike: done
   5-32-d2-build-detached-proxy-and-parent-owned-daemon: ready-for-dev
+  5-34-auto-merge-gate-gh-allowlist-repo-view-api: backlog
   epic-5-retrospective: optional
   epic-6: in-progress
   6-1-story-level-retro-entries-via-record-story-retro: ready-for-dev

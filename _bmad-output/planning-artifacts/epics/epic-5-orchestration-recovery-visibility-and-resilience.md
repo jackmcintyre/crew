@@ -714,4 +714,26 @@ artifact: plugins/crew/mcp-proxy/bin/mcp-proxy.js
 **AC6 (unix socket bound at mode 0600 under ~/.crew/):** A vitest unit test asserts the daemon's socket-binding path. When the daemon starts, it (a) creates `~/.crew/` with mode `0700` if missing, (b) binds the unix socket at `~/.crew/mcp-daemon.sock`, (c) `fs.statSync(socketPath).mode & 0o777` equals `0o600`. The test uses a temp `HOME` env override (`process.env.HOME = tmpdir`) so the real `~/.crew/` is not touched. Per Q5's verdict (`socket-auth: filesystem-permission-only`), no token-handshake is implemented; the daemon optionally verifies peer EUID via `getsockopt(LOCAL_PEEREUID)` as defence-in-depth (covered by the same test asserting the verify hook is wired, even if the verify call is a no-op on platforms without the API).
 vitest: plugins/crew/mcp-server/src/__tests__/daemon-socket-mode.test.ts
 
+## Story 5.34: Auto-merge gate: grant generalist-dev the repo-view + api gh subcommands
+
+> Added 2026-05-29 after the bmad:6.3 close-out failure: the reattached orphan reviewed READY FOR MERGE, then `runAutoMergeGate` died on a `repo-view` denial; story 6.3 still landed in `done/` and PR #180 was merged manually.
+> Source: `_bmad-output/implementation-artifacts/5-34-auto-merge-gate-gh-allowlist-repo-view-api.md`.
+
+As the operator orchestrating `/crew:start` and the generalist-dev agent that runs the auto-merge gate,
+I want `generalist-dev`'s gh allowlist to include the `repo-view` and `api` subcommands that `runAutoMergeGate` actually invokes,
+So that the auto-merge gate stops throwing `GhSubcommandDeniedError (NFR17)` on its `pause-needs-human` branch and can complete the merge/label decision it was built to make, instead of dying silently after a clean review on every story.
+
+**Context:** `runAutoMergeGate` (`plugins/crew/mcp-server/src/tools/run-auto-merge-gate.ts`) defaults to role `generalist-dev` (`const role = opts.role ?? "generalist-dev"`) and loads that role's permissions via the production `loadRolePermissions` path. On its `auto-merge` branch it calls `gh pr merge` (subcommand `pr-merge`). On its `pause-needs-human` branch it first calls `gh repo view --json owner,name` (subcommand `repo-view`) to resolve owner/repo, then `gh api POST /repos/<owner>/<repo>/issues/<prNumber>/labels` (subcommand `api`) to apply the `needs-human` label. But `plugins/crew/permissions/generalist-dev.yaml` has `gh_allow: [pr-create, pr-view, pr-comment, pr-merge]` — it is missing both `repo-view` and `api`. So the gate throws `GhSubcommandDeniedError` and is blocked for every story. (`generalist-reviewer.yaml` has `[pr-diff, pr-view, api, repo-view]`, which is why reviewer-side tools like `postReviewerComments`/`applyReviewerLabels` work — they run as the reviewer role.) The defect was latent since the auto-merge gate shipped (PR #154) and was masked because the gate's vitest tests mock the gh layer AND their in-test permission fixtures include `repo-view`, so the real-allowlist gap never surfaced. It was discovered 2026-05-29 draining story bmad:6.3. The fix adds `repo-view` and `api` to the real `generalist-dev.yaml` allowlist (keeping the existing four) and adds regression coverage that exercises the REAL loaded role allowlist — not a mock fixture — so the mock-masking gap that hid this cannot recur.
+
+**Acceptance Criteria:**
+
+**AC1:** `plugins/crew/permissions/generalist-dev.yaml`'s `gh_allow` list contains both `repo-view` and `api`, in addition to the existing `pr-create`, `pr-view`, `pr-comment`, and `pr-merge` entries. No existing entry is removed and no other field of the file is changed. This is a deterministic content-structure check against the production permission file.
+artifact: plugins/crew/permissions/generalist-dev.yaml
+
+**AC2 (integration — regression):** A vitest test drives `runAutoMergeGate` down BOTH the `pause-needs-human` branch and the `auto-merge` branch, loading the REAL `generalist-dev` role permissions via the production `loadRolePermissions` path (NOT a hand-built or mock `gh_allow` array), with the gh shell-out itself faked or run in dry-run. It asserts that neither path throws `GhSubcommandDeniedError` for `repo-view`, `api`, or `pr-merge`. This is the regression guard for the 2026-05-29 bmad:6.3 close-out failure.
+vitest: plugins/crew/mcp-server/src/tools/__tests__/run-auto-merge-gate.test.ts
+
+**AC3 (regression):** A vitest test loads the real `generalist-dev.yaml` via `loadRolePermissions({ role: "generalist-dev" })` and asserts its `gh_allow` is a superset of every gh subcommand `runAutoMergeGate` can invoke (`pr-merge`, `repo-view`, `api`). The test reads the PRODUCTION permission file, not a fixture, so the mock-masking gap that hid this defect cannot recur.
+vitest: plugins/crew/mcp-server/src/state/__tests__/load-role-permissions.test.ts
+
 

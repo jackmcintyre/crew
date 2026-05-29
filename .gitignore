@@ -36,3 +36,4 @@ _bmad-output/planning-artifacts/archive/
 .claude/skills/ship-story/.runs/
 .worktrees/
 .claude/worktrees/
+.claude/workflows/
