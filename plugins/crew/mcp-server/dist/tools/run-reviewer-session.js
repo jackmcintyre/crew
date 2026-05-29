@@ -272,6 +272,26 @@ function computeDiffSize(diff) {
     }
     return count;
 }
+/**
+ * True iff a unified diff is additive-only: every changed file is a brand-new
+ * file addition. Modified, deleted, and renamed files are all non-additive.
+ *
+ * Each file section in `git diff` starts with `diff --git ...`; an added file
+ * declares `new file mode ...`. A section without that marker is a modify
+ * (or a delete/rename, which carry their own markers) — any such section makes
+ * the whole diff non-additive. An empty/unparseable diff is conservatively
+ * non-additive (returns `false`).
+ *
+ * Stage-2 part C — feeds the `additive_only` risk-tier signal.
+ *
+ * @internal
+ */
+function isAdditiveOnlyDiff(diff) {
+    const sections = diff.split(/^diff --git /m).slice(1);
+    if (sections.length === 0)
+        return false;
+    return sections.every((section) => /^new file mode /m.test(section));
+}
 export async function runReviewerSession(opts) {
     const { targetRepoRoot, sessionUlid, ref, prNumber, role = "generalist-reviewer", pluginRootOverride, } = opts;
     const execaImpl = opts.execaImpl ?? defaultExeca;
@@ -403,6 +423,7 @@ export async function runReviewerSession(opts) {
                 changedPaths,
                 commitMessages,
                 diffSize,
+                additiveOnly: isAdditiveOnlyDiff(prDiff),
             });
             // Attach to result file as riskTier block (drop story_id — file already has ref)
             const { story_id: _dropped, ...block } = classificationResult;

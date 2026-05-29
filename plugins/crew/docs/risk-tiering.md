@@ -1,5 +1,5 @@
 ---
-version: "1.0.0"
+version: "1.1.0"
 fallback_tier: medium
 tiers:
   low:
@@ -7,6 +7,10 @@ tiers:
       path_patterns:
         - "docs/**"
         - "**/*.md"
+    - id: low.additive-only
+      additive_only: true
+      diff_size_thresholds:
+        max_lines_changed: 300
   high:
     - id: high.schema-or-migration
       change_types:
@@ -26,12 +30,20 @@ and returns the first matching tier. If no rule matches, the `fallback_tier`
 
 ### Low
 
-A **low**-risk PR is safe to auto-merge without additional human review. It
-touches only documentation, comments, or other files whose content cannot
-cause a runtime regression. Examples: updating a README, fixing a typo in an
-inline comment, adding or editing a `.md` file. The v1 rule (`low.docs-only`)
-matches any PR whose changed files all fall under `docs/**` or match
-`**/*.md`.
+A **low**-risk PR is safe to auto-merge without additional human review. Two
+rules classify `low`:
+
+- `low.docs-only` — every changed file falls under `docs/**` or matches
+  `**/*.md`. Documentation and Markdown content cannot cause a runtime
+  regression. Example: updating a README, adding a `.md` file.
+- `low.additive-only` — every changed file is a **brand-new file addition**
+  (nothing existing modified, deleted, or renamed) AND the diff is ≤ 300 lines.
+  Purely-additive code cannot alter an existing code path: wiring the new code
+  in would require editing an existing file, which makes the PR no longer
+  additive-only (→ `medium`). So additive-only code is inert until a later,
+  non-low PR wires it. The size cap bounds the blast radius of any single
+  unattended merge. High rules (migrations/schema) are evaluated first, so a
+  new migration file is still `high`, not `low`.
 
 ### Medium
 

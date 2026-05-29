@@ -11,6 +11,8 @@
  * - `diff_size_thresholds`: if present, `diffSize` satisfies the bounds
  *   (`min_lines_changed ≤ diffSize ≤ max_lines_changed`, with absent bounds
  *   treated as -∞ and +∞ respectively).
+ * - `additive_only`: if `true`, the PR's diff must be additive-only (every
+ *   changed file is a new-file addition — `ctx.additiveOnly`).
  *
  * Absent signal fields are "not declared" and do NOT constrain the match.
  * Story 4.9's schema guarantees every rule declares at least one signal, so
@@ -22,6 +24,13 @@ export interface MatchRuleContext {
     changedPaths: string[];
     detectedChangeTypes: ChangeType[];
     diffSize: number;
+    /**
+     * True iff every changed file in the PR is a brand-new file addition — no
+     * existing file modified, deleted, or renamed (Stage-2 part C). Consulted
+     * only by rules that declare `additive_only: true`. Absent/undefined reads
+     * as "not additive" (conservative: such a rule won't match without proof).
+     */
+    additiveOnly?: boolean;
 }
 export interface MatchRuleResult {
     matched: boolean;

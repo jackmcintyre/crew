@@ -11,6 +11,8 @@
  * - `diff_size_thresholds`: if present, `diffSize` satisfies the bounds
  *   (`min_lines_changed ≤ diffSize ≤ max_lines_changed`, with absent bounds
  *   treated as -∞ and +∞ respectively).
+ * - `additive_only`: if `true`, the PR's diff must be additive-only (every
+ *   changed file is a new-file addition — `ctx.additiveOnly`).
  *
  * Absent signal fields are "not declared" and do NOT constrain the match.
  * Story 4.9's schema guarantees every rule declares at least one signal, so
@@ -58,6 +60,10 @@ export function matchRule(rule, ctx) {
         if (max_lines_changed !== undefined && ctx.diffSize > max_lines_changed) {
             return { matched: false, matchedPaths: [] };
         }
+    }
+    // --- additive_only signal ---
+    if (rule.additive_only === true && !ctx.additiveOnly) {
+        return { matched: false, matchedPaths: [] };
     }
     return { matched: true, matchedPaths };
 }

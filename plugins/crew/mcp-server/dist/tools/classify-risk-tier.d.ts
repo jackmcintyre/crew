@@ -82,6 +82,12 @@ export interface ClassifyRiskTierOptions {
     commitMessages: string[];
     /** Total lines added + removed across the PR */
     diffSize: number;
+    /**
+     * True iff every changed file in the PR is a brand-new file addition — no
+     * existing file modified/deleted/renamed (Stage-2 part C). Defaults to
+     * `false` when omitted (callers that cannot compute it stay conservative).
+     */
+    additiveOnly?: boolean;
 }
 /**
  * For a given set of detected `ChangeType` values, return the subset of

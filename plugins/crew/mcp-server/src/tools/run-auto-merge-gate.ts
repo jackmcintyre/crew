@@ -47,6 +47,7 @@ import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
 import type { ReviewerResultFileShape } from "../lib/read-reviewer-result-file.js";
 import type { ExecutionManifest } from "../schemas/execution-manifest.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
+import type { RolePermissions } from "../schemas/role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { gh } from "../lib/gh.js";
 import { GhApiResponseShapeError } from "../errors.js";
@@ -69,6 +70,7 @@ const AutoMergeGateReasonSchema = z.enum([
   "medium-risk",
   "high-risk",
   "no-tier-no-signal",
+  "ci-not-green",
 ]);
 
 /**
@@ -139,6 +141,17 @@ export interface RunAutoMergeGateOptions {
     targetRepoRoot: string,
     sessionUlid: string,
   ) => Promise<ReviewerResultFileShape | null>;
+  /**
+   * Test seam: bypass the real CI poll (Stage-2 CI-gating). Production callers
+   * omit this; the gate polls GitHub checks. Tests inject the desired outcome.
+   */
+  ciGateImpl?: (opts: {
+    prNumber: number;
+    role: string;
+    permissions: RolePermissions;
+    execaImpl: typeof defaultExeca;
+    pluginRoot: string;
+  }) => Promise<CiGateState>;
   /** Plugin root override — test seam for loadRolePermissions and gh-error-map. */
   pluginRootOverride?: string;
   /** Role name for gh permission lookup (default: "generalist-dev"). */
@@ -182,6 +195,101 @@ export async function loadWorkspaceConfig(targetRepoRoot: string): Promise<Plugi
 }
 
 // ---------------------------------------------------------------------------
+// CI gate (Stage-2): never auto-merge a PR whose CI is not green
+// ---------------------------------------------------------------------------
+
+/** Outcome of the CI gate poll. */
+export type CiGateState = "green" | "failed" | "pending-timeout";
+
+const CI_GATE_TIMEOUT_MS = 300_000; // 5 min — covers the ~90s build with headroom
+const CI_GATE_POLL_INTERVAL_MS = 15_000;
+
+const CI_FAIL_CONCLUSIONS = new Set([
+  "FAILURE",
+  "CANCELLED",
+  "TIMED_OUT",
+  "ACTION_REQUIRED",
+  "STARTUP_FAILURE",
+  "STALE",
+]);
+const CI_FAIL_STATES = new Set(["FAILURE", "ERROR"]);
+
+/**
+ * Classify a `gh pr view --json statusCheckRollup` array into a coarse state.
+ * Handles both CheckRun items (`status`/`conclusion`) and StatusContext items
+ * (`state`). Any failing item ⇒ "failed". Else any not-yet-complete item ⇒
+ * "pending". All complete-and-passing (and ≥1 item) ⇒ "green". An empty rollup
+ * is "pending" (checks not registered yet) — conservatively NOT green.
+ *
+ * @internal — exported for unit tests.
+ */
+export function classifyCiRollup(rollup: Array<Record<string, unknown>>): "green" | "failed" | "pending" {
+  if (rollup.length === 0) return "pending";
+  let anyPending = false;
+  for (const item of rollup) {
+    const status = typeof item["status"] === "string" ? (item["status"] as string) : undefined;
+    const conclusion = typeof item["conclusion"] === "string" ? (item["conclusion"] as string) : undefined;
+    const state = typeof item["state"] === "string" ? (item["state"] as string) : undefined;
+
+    if ((conclusion && CI_FAIL_CONCLUSIONS.has(conclusion)) || (state && CI_FAIL_STATES.has(state))) {
+      return "failed";
+    }
+    // CheckRun not COMPLETED, or StatusContext PENDING/EXPECTED, or a completed
+    // CheckRun with no conclusion yet → pending.
+    if (status !== undefined && status !== "COMPLETED") anyPending = true;
+    if (state === "PENDING" || state === "EXPECTED") anyPending = true;
+    if (status === "COMPLETED" && conclusion === undefined && state === undefined) anyPending = true;
+  }
+  return anyPending ? "pending" : "green";
+}
+
+/**
+ * Poll `gh pr view <pr> --json statusCheckRollup` until CI is green or failed,
+ * or the timeout elapses. Transient gh errors are treated as pending (retry).
+ * Returns "pending-timeout" if still pending at the deadline — the caller
+ * downgrades to pause-needs-human (fail-safe).
+ */
+async function waitForCiGreen(opts: {
+  prNumber: number;
+  role: string;
+  permissions: RolePermissions;
+  execaImpl: typeof defaultExeca;
+  pluginRoot: string;
+}): Promise<CiGateState> {
+  const start = Date.now();
+  for (;;) {
+    let stdout = "";
+    try {
+      const r = await gh({
+        role: opts.role,
+        permissions: opts.permissions,
+        subcommand: "pr-view",
+        args: [String(opts.prNumber), "--json", "statusCheckRollup"],
+        execaImpl: opts.execaImpl,
+        pluginRootOverride: opts.pluginRoot,
+      });
+      stdout = r.stdout;
+    } catch {
+      // transient — treat as pending and retry until the deadline
+    }
+    let rollup: Array<Record<string, unknown>> = [];
+    try {
+      const parsed = JSON.parse(stdout) as { statusCheckRollup?: unknown };
+      if (Array.isArray(parsed.statusCheckRollup)) {
+        rollup = parsed.statusCheckRollup as Array<Record<string, unknown>>;
+      }
+    } catch {
+      rollup = [];
+    }
+    const state = classifyCiRollup(rollup);
+    if (state === "green") return "green";
+    if (state === "failed") return "failed";
+    if (Date.now() - start >= CI_GATE_TIMEOUT_MS) return "pending-timeout";
+    await new Promise((resolve) => setTimeout(resolve, CI_GATE_POLL_INTERVAL_MS));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main entry
 // ---------------------------------------------------------------------------
 
@@ -218,6 +326,7 @@ export async function runAutoMergeGate(
   const readManifestFn = opts.readManifestImpl ?? readManifest;
   const loadWorkspaceConfigFn = opts.loadWorkspaceConfigImpl ?? loadWorkspaceConfig;
   const readReviewerResultFn = opts.readReviewerResultImpl ?? readReviewerResultFile;
+  const ciGateFn = opts.ciGateImpl ?? waitForCiGreen;
   const dryRun = opts.dryRun ?? false;
 
   // ------------------------------------------------------------------
@@ -310,7 +419,7 @@ export async function runAutoMergeGate(
   // ------------------------------------------------------------------
   // Step 5: Make the gate decision
   // ------------------------------------------------------------------
-  const { decision, reason } = decideAutoMerge({
+  let { decision, reason } = decideAutoMerge({
     risk_tier,
     agreement_metric,
     threshold: threshold_used,
@@ -318,18 +427,17 @@ export async function runAutoMergeGate(
   });
 
   // ------------------------------------------------------------------
-  // Step 6: Compose chat-log line
+  // Step 6: chat-log line helper (recomputed after the CI gate may downgrade)
   // ------------------------------------------------------------------
   const ratioStr = agreement_metric !== null ? String(agreement_metric.ratio) : "null";
-  let chatLine: string;
-  if (decision === "auto-merge") {
-    chatLine = `auto-merge fired — PR #${opts.prNumber} merged (risk_tier: ${risk_tier ?? "undefined"}, agreement: ${ratioStr}, threshold: ${threshold_used})`;
-  } else {
-    chatLine = `auto-merge gate paused — PR #${opts.prNumber} labelled needs-human (reason: ${reason}, risk_tier: ${risk_tier ?? "undefined"}, agreement: ${ratioStr}, threshold: ${threshold_used})`;
-  }
+  const composeChatLine = (d: typeof decision, r: typeof reason): string =>
+    d === "auto-merge"
+      ? `auto-merge fired — PR #${opts.prNumber} merged (risk_tier: ${risk_tier ?? "undefined"}, agreement: ${ratioStr}, threshold: ${threshold_used})`
+      : `auto-merge gate paused — PR #${opts.prNumber} labelled needs-human (reason: ${r}, risk_tier: ${risk_tier ?? "undefined"}, agreement: ${ratioStr}, threshold: ${threshold_used})`;
 
   // ------------------------------------------------------------------
-  // Step 7: dryRun shortcut
+  // Step 7: dryRun shortcut — previews the RISK decision (the CI gate performs
+  // gh calls, so it only applies on real execution).
   // ------------------------------------------------------------------
   if (dryRun) {
     return AutoMergeGateResultSchema.parse({
@@ -342,15 +450,43 @@ export async function runAutoMergeGate(
       labelsApplied: [],
       dryRun: true,
       prNumber: opts.prNumber,
-      chatLog: [chatLine],
+      chatLog: [composeChatLine(decision, reason)],
     });
   }
 
   // ------------------------------------------------------------------
-  // Step 8 / 9: Execute side-effect based on decision
+  // Step 8: Load permissions (needed for all gh calls below).
   // ------------------------------------------------------------------
   const permissions = await loadRolePermissions({ role, pluginRoot });
 
+  // ------------------------------------------------------------------
+  // Step 8a: CI gate (Stage-2). Never auto-merge a PR whose CI is not green.
+  // Only runs when the risk gate said auto-merge; polls GitHub checks and, on
+  // failure or timeout, downgrades to pause-needs-human (reason ci-not-green) —
+  // fail-safe. The risk decision is preserved through dryRun (above); this gate
+  // is a hard precondition on the real merge.
+  // ------------------------------------------------------------------
+  const ciLog: string[] = [];
+  if (decision === "auto-merge") {
+    const ciState = await ciGateFn({
+      prNumber: opts.prNumber,
+      role,
+      permissions,
+      execaImpl,
+      pluginRoot,
+    });
+    ciLog.push(`ci gate: ${ciState}`);
+    if (ciState !== "green") {
+      decision = "pause-needs-human";
+      reason = "ci-not-green";
+    }
+  }
+
+  const chatLine = composeChatLine(decision, reason);
+
+  // ------------------------------------------------------------------
+  // Step 9: Execute side-effect based on the (CI-gated) decision
+  // ------------------------------------------------------------------
   if (decision === "auto-merge") {
     // Step 8: gh pr merge <prNumber> --squash --delete-branch
     await gh({
@@ -372,7 +508,7 @@ export async function runAutoMergeGate(
       labelsApplied: [],
       dryRun: false,
       prNumber: opts.prNumber,
-      chatLog: [chatLine],
+      chatLog: [...ciLog, chatLine],
     });
   } else {
     // Step 9: Resolve owner/repo then apply needs-human label
@@ -435,7 +571,7 @@ export async function runAutoMergeGate(
       labelsApplied: ["needs-human"],
       dryRun: false,
       prNumber: opts.prNumber,
-      chatLog: [chatLine],
+      chatLog: [...ciLog, chatLine],
     });
   }
 }
