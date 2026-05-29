@@ -6,6 +6,7 @@ import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { claimStory } from "./claim-story.js";
 import { completeStory } from "./complete-story.js";
 import { recordStoryRetro } from "./record-story-retro.js";
+import { writeRetroProposal } from "./write-retro-proposal.js";
 import { listClaimableTodos } from "./list-claimable-todos.js";
 import { mintSessionUlid } from "./mint-session-ulid.js";
 import { getStatus, renderStatus } from "./get-status.js";
@@ -580,6 +581,74 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           })
           .parse(args);
         const result = await recordStoryRetro(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 6.3 — writeRetroProposal: emit a single immutable retro-proposal
+  // markdown file at <target-repo>/.crew/retro-proposals/<isoTimestamp>.md.
+  // Carries a YAML frontmatter block (source of truth for apply-time
+  // re-validation in Epic 6b) plus an operator-readable rendered body.
+  // Refuses collisions — proposals are immutable artifacts keyed by ISO
+  // timestamp. FR58, FR59.
+  server.registerTool({
+    name: "writeRetroProposal",
+    description:
+      "Write a single immutable retro-proposal markdown file under " +
+      "<target-repo>/.crew/retro-proposals/<isoTimestamp>.md. The file carries a YAML " +
+      "frontmatter block (validated via RetroProposalFileSchema; source of truth for " +
+      "Epic 6b apply-time re-validation) plus a rendered Markdown body with one H2 per " +
+      "proposal. Refuses collisions with RetroProposalAlreadyExistsError (proposals are " +
+      "immutable). Refuses malformed payloads with MalformedRetroProposalError — closed " +
+      "discriminated union over seven types (rule, rule-retirement, skill-create, " +
+      "skill-revise, skill-supersede, skill-retire, team-change). Story 6.3 (FR58, FR59).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        isoTimestamp: { type: "string" },
+        proposals: { type: "array" },
+        cycleWindow: {
+          // null or { from, to } — surfaced as plain object so the JSON-schema
+          // hint isn't too tight; Zod inside the handler is the real gate.
+          type: ["object", "null"],
+        },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "isoTimestamp", "proposals"],
+    },
+    handler: async (args) => {
+      try {
+        const parsed = z
+          .object({
+            targetRepoRoot: z.string().min(1),
+            isoTimestamp: z.string().min(1),
+            proposals: z.array(z.unknown()),
+            cycleWindow: z
+              .object({ from: z.string(), to: z.string() })
+              .strict()
+              .nullable()
+              .optional(),
+            role: z.string().optional(),
+          })
+          .parse(args);
+        const result = await writeRetroProposal(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

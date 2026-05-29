@@ -1054,3 +1054,45 @@ export declare class McpDisconnectedError extends DomainError {
         ref?: string;
     });
 }
+/**
+ * A retro proposal (or the file-level wrapper) failed Zod schema validation —
+ * unknown discriminator literal, missing required field for a variant, path
+ * traversal in a `skill-create`/`skill-revise` `proposed_path`, malformed ULID
+ * `id`, non-UTC `created_at`, etc.
+ *
+ * Mirrors `MalformedExecutionManifestError`'s shape. Named so the MCP boundary
+ * maps Zod failures to a typed envelope downstream tooling (Epic 6b's apply
+ * paths) can pattern-match against.
+ *
+ * Thrown by `parseRetroProposalFile` in `schemas/retro-proposal.ts` — every
+ * caller MUST go through that helper.
+ *
+ * (Story 6.3 AC2 / FR59)
+ */
+export declare class MalformedRetroProposalError extends DomainError {
+    readonly yamlPath: string;
+    readonly zodMessage: string;
+    readonly schemaModule: string;
+    constructor(opts: {
+        yamlPath: string;
+        zodMessage: string;
+        schemaModule: string;
+    });
+}
+/**
+ * `writeRetroProposal` refused to overwrite an existing proposal file —
+ * proposals are immutable artifacts keyed by their ISO-8601 timestamp.
+ * A collision means the caller (the retro-analyst subagent) re-used a
+ * timestamp from a prior cycle, which is a bug in the caller, not a
+ * legitimate retry surface.
+ *
+ * (Story 6.3 AC1 / FR58)
+ */
+export declare class RetroProposalAlreadyExistsError extends DomainError {
+    readonly absPath: string;
+    readonly isoTimestamp: string;
+    constructor(opts: {
+        absPath: string;
+        isoTimestamp: string;
+    });
+}
