@@ -64,8 +64,10 @@ describe("Story 8.5 — drain workflow integrity", () => {
     }
   });
 
-  it("uses haiku couriers for seams and isolates the dev in its own worktree", () => {
+  it("uses haiku couriers for seams; v1 dev runs in targetRepoRoot (no isolated worktree)", () => {
     expect(SRC).toContain("model: 'haiku'");
-    expect(SRC).toContain("isolation: 'worktree'");
+    // v1 is single-story serial: the dev runs directly in targetRepoRoot so
+    // runDevTerminalAction's cwd aligns (an isolated worktree mismatches — first-run fix).
+    expect(SRC).not.toContain("isolation: 'worktree'");
   });
 });
