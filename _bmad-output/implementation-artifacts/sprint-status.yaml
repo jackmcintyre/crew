@@ -127,8 +127,8 @@ development_status:
   epic-8: in-progress
   8-1-commit-scope-regex-real-refs: done
   8-2-reviewer-ac-heading-regex-alignment: done
-  8-3-agent-discipline-evidence-only: backlog
-  8-4-cli-shim-productionise-and-wire: backlog
+  8-3-agent-discipline-evidence-only: done
+  8-4-cli-shim-productionise-and-wire: done
   8-5-drain-workflow-stateless: backlog
   8-6-bootstrap-story-and-dogfood-run: backlog
   epic-8-retrospective: optional
