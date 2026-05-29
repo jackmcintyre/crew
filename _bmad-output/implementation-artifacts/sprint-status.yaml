@@ -124,3 +124,11 @@ development_status:
   7-6-telemetry-summary-doc-generator: backlog
   7-7-maya-archetype-validation-paper-test: backlog
   epic-7-retrospective: optional
+  epic-8: in-progress
+  8-1-commit-scope-regex-real-refs: backlog
+  8-2-reviewer-ac-heading-regex-alignment: backlog
+  8-3-agent-discipline-evidence-only: backlog
+  8-4-cli-shim-productionise-and-wire: backlog
+  8-5-drain-workflow-stateless: backlog
+  8-6-bootstrap-story-and-dogfood-run: backlog
+  epic-8-retrospective: optional
