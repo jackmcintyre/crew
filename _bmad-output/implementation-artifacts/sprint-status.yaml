@@ -131,4 +131,5 @@ development_status:
   8-4-cli-shim-productionise-and-wire: done
   8-5-drain-workflow-stateless: done
   8-6-bootstrap-story-and-dogfood-run: backlog
+  8-7-summarise-drain-result: ready-for-dev
   epic-8-retrospective: optional
