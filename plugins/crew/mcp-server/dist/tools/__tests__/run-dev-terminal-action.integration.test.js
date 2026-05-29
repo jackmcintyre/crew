@@ -228,6 +228,47 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
         expect(result.prUrl).toBe(customUrl);
     });
 });
+describe("runDevTerminalAction — PR base branch", () => {
+    /** Helper: pull the value following `--base` out of the stubbed gh call. */
+    function baseArgFromSpy(spy) {
+        const ghCall = spy.mock.calls.find(([cmd]) => cmd === "gh");
+        expect(ghCall).toBeDefined();
+        const ghArgs = ghCall[1];
+        const baseIdx = ghArgs.indexOf("--base");
+        return baseIdx === -1 ? undefined : ghArgs[baseIdx + 1];
+    }
+    it("defaults the PR base to `dev` when no base is supplied", async () => {
+        const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+        await runDevTerminalAction({
+            targetRepoRoot: ctx.repoRoot,
+            ref: REF,
+            title: TITLE,
+            type: TYPE,
+            body: BODY,
+            summary: SUMMARY,
+            manifestPath: ctx.manifestPath,
+            sessionUlid: SESSION_ULID,
+            execaImpl: spy,
+        });
+        expect(baseArgFromSpy(spy)).toBe("dev");
+    });
+    it("honours an explicit base branch override", async () => {
+        const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+        await runDevTerminalAction({
+            targetRepoRoot: ctx.repoRoot,
+            ref: REF,
+            title: TITLE,
+            type: TYPE,
+            body: BODY,
+            summary: SUMMARY,
+            manifestPath: ctx.manifestPath,
+            sessionUlid: SESSION_ULID,
+            base: "main",
+            execaImpl: spy,
+        });
+        expect(baseArgFromSpy(spy)).toBe("main");
+    });
+});
 describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
     it("(3b) title with punctuation collapses to kebab", async () => {
         const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });

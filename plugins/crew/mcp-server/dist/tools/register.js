@@ -984,6 +984,7 @@ export function registerAllTools(server) {
                 summary: { type: "string" },
                 manifestPath: { type: "string" },
                 sessionUlid: { type: "string" },
+                base: { type: "string" },
             },
             required: [
                 "targetRepoRoot",
@@ -1007,6 +1008,7 @@ export function registerAllTools(server) {
                 summary: z.string(),
                 manifestPath: z.string().min(1),
                 sessionUlid: z.string().min(1),
+                base: z.string().min(1).optional(),
             })
                 .parse(args);
             try {

@@ -1020,6 +1020,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         summary: { type: "string" },
         manifestPath: { type: "string" },
         sessionUlid: { type: "string" },
+        base: { type: "string" },
       },
       required: [
         "targetRepoRoot",
@@ -1043,6 +1044,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           summary: z.string(),
           manifestPath: z.string().min(1),
           sessionUlid: z.string().min(1),
+          base: z.string().min(1).optional(),
         })
         .parse(args);
       try {
