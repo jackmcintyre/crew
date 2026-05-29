@@ -440,6 +440,33 @@ describe("classifyCiRollup", () => {
         expect(classifyCiRollup([{ state: "FAILURE", context: "ci" }])).toBe("failed");
         expect(classifyCiRollup([{ state: "PENDING", context: "ci" }])).toBe("pending");
     });
+    // Allowlist guards (code-review): non-success non-failure states must NOT green-wash.
+    it("SKIPPED / NEUTRAL completed checks count as pass → green", () => {
+        expect(classifyCiRollup([
+            { status: "COMPLETED", conclusion: "SUCCESS", name: "build" },
+            { status: "COMPLETED", conclusion: "SKIPPED", name: "optional" },
+            { status: "COMPLETED", conclusion: "NEUTRAL", name: "advisory" },
+        ])).toBe("green");
+    });
+    it("COMPLETED check with UNKNOWN conclusion → pending (not green)", () => {
+        expect(classifyCiRollup([
+            { status: "COMPLETED", conclusion: "SOME_FUTURE_VALUE", name: "x" },
+        ])).toBe("pending");
+    });
+    it("COMPLETED check with no conclusion → pending (not green)", () => {
+        expect(classifyCiRollup([{ status: "COMPLETED", name: "x" }])).toBe("pending");
+    });
+    it("sparse / unrecognized-shape item → pending, and never green-washes a sibling", () => {
+        expect(classifyCiRollup([{ __typename: "Unknown" }])).toBe("pending");
+        // a passing check + a sparse item must NOT be green (the sparse item is unproven)
+        expect(classifyCiRollup([
+            { status: "COMPLETED", conclusion: "SUCCESS" },
+            { __typename: "Unknown" },
+        ])).toBe("pending");
+    });
+    it("lowercase/odd failure value is NOT treated as failure but is NOT green either (pending)", () => {
+        expect(classifyCiRollup([{ status: "COMPLETED", conclusion: "failure" }])).toBe("pending");
+    });
 });
 describe("Stage-2 CI gate — non-green CI blocks the auto-merge", () => {
     it("risk says auto-merge but CI failed → pause-needs-human (ci-not-green), label applied, NOT merged", async () => {

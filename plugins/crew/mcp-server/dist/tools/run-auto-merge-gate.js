@@ -107,6 +107,7 @@ export async function loadWorkspaceConfig(targetRepoRoot) {
 }
 const CI_GATE_TIMEOUT_MS = 300_000; // 5 min — covers the ~90s build with headroom
 const CI_GATE_POLL_INTERVAL_MS = 15_000;
+// Explicit failure signals.
 const CI_FAIL_CONCLUSIONS = new Set([
     "FAILURE",
     "CANCELLED",
@@ -116,36 +117,48 @@ const CI_FAIL_CONCLUSIONS = new Set([
     "STALE",
 ]);
 const CI_FAIL_STATES = new Set(["FAILURE", "ERROR"]);
+// Explicit pass signals. SKIPPED/NEUTRAL are legitimate non-failures for a
+// completed check (e.g. a conditional job that no-ops), so they count as pass.
+const CI_PASS_CONCLUSIONS = new Set(["SUCCESS", "SKIPPED", "NEUTRAL"]);
 /**
- * Classify a `gh pr view --json statusCheckRollup` array into a coarse state.
- * Handles both CheckRun items (`status`/`conclusion`) and StatusContext items
- * (`state`). Any failing item ⇒ "failed". Else any not-yet-complete item ⇒
- * "pending". All complete-and-passing (and ≥1 item) ⇒ "green". An empty rollup
- * is "pending" (checks not registered yet) — conservatively NOT green.
+ * Classify a `gh pr view --json statusCheckRollup` array into a coarse state,
+ * as an ALLOWLIST — "green" requires every item to be *explicitly passing*.
+ * Handles CheckRun items (`status`/`conclusion`) and StatusContext items
+ * (`state`).
+ *
+ * Per item: an explicit failure ⇒ the whole rollup is "failed". A COMPLETED
+ * CheckRun with a pass conclusion, or a StatusContext `state: SUCCESS`, is a
+ * pass. ANYTHING ELSE — not-yet-complete, a completed check with an
+ * unrecognized/absent conclusion, or a sparse/unknown-shape item — is treated
+ * as NOT-yet-passing (pending), never silently green. Aggregation: any failure
+ * ⇒ "failed"; else all items pass (and ≥1) ⇒ "green"; else ⇒ "pending". An
+ * empty rollup is "pending" (checks not registered yet).
+ *
+ * Conservative by construction: a green verdict cannot arise from an item the
+ * classifier does not positively recognize as passing.
  *
  * @internal — exported for unit tests.
  */
 export function classifyCiRollup(rollup) {
     if (rollup.length === 0)
         return "pending";
-    let anyPending = false;
+    let allPass = true;
     for (const item of rollup) {
         const status = typeof item["status"] === "string" ? item["status"] : undefined;
         const conclusion = typeof item["conclusion"] === "string" ? item["conclusion"] : undefined;
         const state = typeof item["state"] === "string" ? item["state"] : undefined;
+        // Explicit failure short-circuits the whole rollup.
         if ((conclusion && CI_FAIL_CONCLUSIONS.has(conclusion)) || (state && CI_FAIL_STATES.has(state))) {
             return "failed";
         }
-        // CheckRun not COMPLETED, or StatusContext PENDING/EXPECTED, or a completed
-        // CheckRun with no conclusion yet → pending.
-        if (status !== undefined && status !== "COMPLETED")
-            anyPending = true;
-        if (state === "PENDING" || state === "EXPECTED")
-            anyPending = true;
-        if (status === "COMPLETED" && conclusion === undefined && state === undefined)
-            anyPending = true;
+        // Explicit pass: a completed CheckRun with a pass conclusion, or a
+        // StatusContext reporting SUCCESS. Everything else is not-yet-passing.
+        const isPass = (status === "COMPLETED" && conclusion !== undefined && CI_PASS_CONCLUSIONS.has(conclusion)) ||
+            state === "SUCCESS";
+        if (!isPass)
+            allPass = false;
     }
-    return anyPending ? "pending" : "green";
+    return allPass ? "green" : "pending";
 }
 /**
  * Poll `gh pr view <pr> --json statusCheckRollup` until CI is green or failed,

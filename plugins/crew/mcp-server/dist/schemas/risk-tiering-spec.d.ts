@@ -36,6 +36,7 @@ export declare const RuleSchema: z.ZodObject<{
         min_lines_changed: z.ZodOptional<z.ZodNumber>;
         max_lines_changed: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strict>>;
+    path_excludes: z.ZodOptional<z.ZodArray<z.ZodString>>;
     additive_only: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strict>;
 export declare const RiskTieringSpecSchema: z.ZodObject<{
@@ -55,6 +56,7 @@ export declare const RiskTieringSpecSchema: z.ZodObject<{
                 min_lines_changed: z.ZodOptional<z.ZodNumber>;
                 max_lines_changed: z.ZodOptional<z.ZodNumber>;
             }, z.core.$strict>>;
+            path_excludes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             additive_only: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strict>>>;
         medium: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -70,6 +72,7 @@ export declare const RiskTieringSpecSchema: z.ZodObject<{
                 min_lines_changed: z.ZodOptional<z.ZodNumber>;
                 max_lines_changed: z.ZodOptional<z.ZodNumber>;
             }, z.core.$strict>>;
+            path_excludes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             additive_only: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strict>>>;
         high: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -85,6 +88,7 @@ export declare const RiskTieringSpecSchema: z.ZodObject<{
                 min_lines_changed: z.ZodOptional<z.ZodNumber>;
                 max_lines_changed: z.ZodOptional<z.ZodNumber>;
             }, z.core.$strict>>;
+            path_excludes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             additive_only: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strict>>>;
     }, z.core.$strict>;

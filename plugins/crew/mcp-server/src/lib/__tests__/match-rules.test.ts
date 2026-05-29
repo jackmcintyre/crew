@@ -234,3 +234,48 @@ describe("matchRule — additive_only", () => {
     ).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// path_excludes guard (subtractive)
+// ---------------------------------------------------------------------------
+
+describe("matchRule — path_excludes", () => {
+  const rule: Rule = {
+    id: "low.additive-only",
+    additive_only: true,
+    path_excludes: [".github/**", "**/package.json"],
+  };
+
+  it("does NOT match when a changed path hits an exclude, even if additive", () => {
+    expect(
+      matchRule(rule, {
+        changedPaths: [".github/workflows/release.yml"],
+        detectedChangeTypes: [],
+        diffSize: 10,
+        additiveOnly: true,
+      }).matched,
+    ).toBe(false);
+  });
+
+  it("does NOT match when ANY of several paths is excluded", () => {
+    expect(
+      matchRule(rule, {
+        changedPaths: ["src/safe.ts", "tools/foo/package.json"],
+        detectedChangeTypes: [],
+        diffSize: 10,
+        additiveOnly: true,
+      }).matched,
+    ).toBe(false);
+  });
+
+  it("matches when no changed path is excluded", () => {
+    expect(
+      matchRule(rule, {
+        changedPaths: ["src/new-helper.ts", "src/new-helper.test.ts"],
+        detectedChangeTypes: [],
+        diffSize: 10,
+        additiveOnly: true,
+      }).matched,
+    ).toBe(true);
+  });
+});

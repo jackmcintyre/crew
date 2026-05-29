@@ -30,6 +30,15 @@ export const RuleSchema = z
     change_types: z.array(ChangeTypeSchema).min(1).optional(),
     diff_size_thresholds: DiffSizeThresholdsSchema.optional(),
     /**
+     * Subtractive guard: if ANY changed file matches any of these globs, the
+     * rule does NOT match — regardless of its other (positive) signals. Used to
+     * keep convention-wired / high-blast-radius additions (CI workflows,
+     * dependency manifests, config overrides, scripts) out of a `low` tier even
+     * when they are purely additive. Not a standalone signal — a rule must also
+     * declare at least one positive signal.
+     */
+    path_excludes: z.array(z.string().min(1)).min(1).optional(),
+    /**
      * Additive-only signal (Stage-2 part C). When `true`, the rule matches only
      * if EVERY changed file in the PR is a brand-new file addition — no existing
      * file is modified, deleted, or renamed. Purely-additive code cannot alter

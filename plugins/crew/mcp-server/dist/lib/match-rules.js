@@ -13,6 +13,8 @@
  *   treated as -∞ and +∞ respectively).
  * - `additive_only`: if `true`, the PR's diff must be additive-only (every
  *   changed file is a new-file addition — `ctx.additiveOnly`).
+ * - `path_excludes`: subtractive guard — if ANY changed file matches any of
+ *   these globs, the rule does NOT match, regardless of its positive signals.
  *
  * Absent signal fields are "not declared" and do NOT constrain the match.
  * Story 4.9's schema guarantees every rule declares at least one signal, so
@@ -31,6 +33,13 @@ import picomatch from "picomatch";
  *          when `path_patterns` was present and matched.
  */
 export function matchRule(rule, ctx) {
+    // --- path_excludes guard (subtractive) — any excluded path disqualifies ---
+    if (rule.path_excludes !== undefined) {
+        const isExcluded = picomatch(rule.path_excludes);
+        if (ctx.changedPaths.some((p) => isExcluded(p))) {
+            return { matched: false, matchedPaths: [] };
+        }
+    }
     // --- path_patterns signal ---
     let pathSignalSatisfied = rule.path_patterns === undefined; // absent ⇒ satisfied
     let matchedPaths = [];

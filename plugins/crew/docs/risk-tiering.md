@@ -1,5 +1,5 @@
 ---
-version: "1.1.0"
+version: "1.2.0"
 fallback_tier: medium
 tiers:
   low:
@@ -7,10 +7,42 @@ tiers:
       path_patterns:
         - "docs/**"
         - "**/*.md"
+      path_excludes:
+        - ".github/**"
+        - "**/package.json"
+        - "**/package-lock.json"
+        - "**/pnpm-lock.yaml"
+        - "**/yarn.lock"
+        - "**/.npmrc"
+        - "**/tsconfig*.json"
+        - "**/*.config.js"
+        - "**/*.config.ts"
+        - "**/*.config.mjs"
+        - "**/*.config.cjs"
+        - "**/Dockerfile"
+        - "**/Dockerfile.*"
+        - "**/.env*"
+        - "**/*.sh"
     - id: low.additive-only
       additive_only: true
       diff_size_thresholds:
         max_lines_changed: 300
+      path_excludes:
+        - ".github/**"
+        - "**/package.json"
+        - "**/package-lock.json"
+        - "**/pnpm-lock.yaml"
+        - "**/yarn.lock"
+        - "**/.npmrc"
+        - "**/tsconfig*.json"
+        - "**/*.config.js"
+        - "**/*.config.ts"
+        - "**/*.config.mjs"
+        - "**/*.config.cjs"
+        - "**/Dockerfile"
+        - "**/Dockerfile.*"
+        - "**/.env*"
+        - "**/*.sh"
   high:
     - id: high.schema-or-migration
       change_types:
@@ -37,13 +69,16 @@ rules classify `low`:
   `**/*.md`. Documentation and Markdown content cannot cause a runtime
   regression. Example: updating a README, adding a `.md` file.
 - `low.additive-only` — every changed file is a **brand-new file addition**
-  (nothing existing modified, deleted, or renamed) AND the diff is ≤ 300 lines.
-  Purely-additive code cannot alter an existing code path: wiring the new code
-  in would require editing an existing file, which makes the PR no longer
-  additive-only (→ `medium`). So additive-only code is inert until a later,
-  non-low PR wires it. The size cap bounds the blast radius of any single
-  unattended merge. High rules (migrations/schema) are evaluated first, so a
-  new migration file is still `high`, not `low`.
+  (nothing existing modified, deleted, or renamed), the diff is ≤ 300 lines,
+  **and** no changed file matches the `path_excludes` guard. *Import-wired*
+  additive code is inert until a later, non-low PR edits an existing file to
+  wire it in — so it can't change existing behavior. The exception is
+  *convention-wired* files that run by path/convention rather than by import
+  (CI workflows, dependency manifests, build/test config, Dockerfiles, env
+  files, shell scripts); those CAN change behavior on their own, so the
+  `path_excludes` list keeps them out of `low` even when purely additive. The
+  size cap bounds blast radius; high rules (migrations/schema) are evaluated
+  first. (Both low rules carry the same `path_excludes` guard.)
 
 ### Medium
 

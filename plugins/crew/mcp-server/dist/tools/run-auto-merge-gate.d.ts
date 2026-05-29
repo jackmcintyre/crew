@@ -143,11 +143,21 @@ export declare function loadWorkspaceConfig(targetRepoRoot: string): Promise<Plu
 /** Outcome of the CI gate poll. */
 export type CiGateState = "green" | "failed" | "pending-timeout";
 /**
- * Classify a `gh pr view --json statusCheckRollup` array into a coarse state.
- * Handles both CheckRun items (`status`/`conclusion`) and StatusContext items
- * (`state`). Any failing item ⇒ "failed". Else any not-yet-complete item ⇒
- * "pending". All complete-and-passing (and ≥1 item) ⇒ "green". An empty rollup
- * is "pending" (checks not registered yet) — conservatively NOT green.
+ * Classify a `gh pr view --json statusCheckRollup` array into a coarse state,
+ * as an ALLOWLIST — "green" requires every item to be *explicitly passing*.
+ * Handles CheckRun items (`status`/`conclusion`) and StatusContext items
+ * (`state`).
+ *
+ * Per item: an explicit failure ⇒ the whole rollup is "failed". A COMPLETED
+ * CheckRun with a pass conclusion, or a StatusContext `state: SUCCESS`, is a
+ * pass. ANYTHING ELSE — not-yet-complete, a completed check with an
+ * unrecognized/absent conclusion, or a sparse/unknown-shape item — is treated
+ * as NOT-yet-passing (pending), never silently green. Aggregation: any failure
+ * ⇒ "failed"; else all items pass (and ≥1) ⇒ "green"; else ⇒ "pending". An
+ * empty rollup is "pending" (checks not registered yet).
+ *
+ * Conservative by construction: a green verdict cannot arise from an item the
+ * classifier does not positively recognize as passing.
  *
  * @internal — exported for unit tests.
  */

@@ -13,6 +13,8 @@
  *   treated as -∞ and +∞ respectively).
  * - `additive_only`: if `true`, the PR's diff must be additive-only (every
  *   changed file is a new-file addition — `ctx.additiveOnly`).
+ * - `path_excludes`: subtractive guard — if ANY changed file matches any of
+ *   these globs, the rule does NOT match, regardless of its positive signals.
  *
  * Absent signal fields are "not declared" and do NOT constrain the match.
  * Story 4.9's schema guarantees every rule declares at least one signal, so
