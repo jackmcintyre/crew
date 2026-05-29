@@ -67,6 +67,11 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // (injected) by passing real node:fs callables through to the acquire-daemon
   // factory's mocked-out write path. Test file only; no production writes.
   path.join(SRC_DIR, "__tests__", "proxy-spawn.test.ts"),
+  // Story 6.2: retro-skill tests seed a fixture cycle (done/ manifest YAML,
+  // telemetry JSONL, prior-proposal markdown, discipline-rules.yaml) directly
+  // to tmpdir via raw fs.writeFile/mkdir. Test file only; gatherRetroInputs is
+  // a read-only consumer with no production writes.
+  path.join(SRC_DIR, "tools", "__tests__", "retro-skill.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [
