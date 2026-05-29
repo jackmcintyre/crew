@@ -2,6 +2,7 @@
  * Daemon entrypoint — spawned by the mcp-proxy shim (NOT by Claude Code directly).
  *
  * Story 5.32 — Path D2 detached-proxy build.
+ * Story 5.33 — per-connection Server so sequential proxy reconnects work.
  *
  * Until 5.32 the manifest pointed `mcpServers.crew.command` at this file via
  * `node`. The host SIGTERMed the daemon's process group whenever any subagent
@@ -23,17 +24,27 @@
  *     operator explicitly kills the daemon (e.g., `kill $(cat ~/.crew/mcp-daemon.pid)`).
  *   • Server-initiated keepalive ping (now per-connection — see main()).
  *
- * What changes:
+ * What 5.32 changed:
  *   • StdioServerTransport → SocketServerTransport (per connection).
  *   • Stdin.end/close handlers removed: the daemon is detached, stdio is
  *     `'ignore'` in the proxy's spawn opts; there is no stdin to listen on.
  *   • PID file written to `~/.crew/mcp-daemon.pid` after socket bind so
  *     subsequent proxy shims can detect the running daemon (Q4 hybrid pattern).
  *
+ * What 5.33 changed:
+ *   • Server instance is now per-connection (not a module-scope singleton).
+ *     The MCP SDK's Protocol is single-transport by design — calling
+ *     `Server.connect()` twice on the same instance throws "Already connected
+ *     to a transport". Pre-5.33 the daemon shared one Server across every
+ *     accepted socket, so the second Claude Code session always failed to
+ *     connect. See `onConnection` in main() and upstream typescript-sdk
+ *     issue #1405 for the canonical per-session pattern.
+ *
  * References:
  *   - Story spec:  _bmad-output/implementation-artifacts/5-32-d2-build-detached-proxy-and-parent-owned-daemon.md
  *   - Spike:       _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
  *   - Postmortem:  _bmad-output/postmortems/2026-05-25-dogfood-rollback.md § L1 defect #1
  *   - Memory:      project_mcp_server_silent_disconnect
+ *   - Upstream:    https://github.com/modelcontextprotocol/typescript-sdk/issues/1405
  */
 export {};

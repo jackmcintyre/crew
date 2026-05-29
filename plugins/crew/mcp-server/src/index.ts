@@ -2,6 +2,7 @@
  * Daemon entrypoint — spawned by the mcp-proxy shim (NOT by Claude Code directly).
  *
  * Story 5.32 — Path D2 detached-proxy build.
+ * Story 5.33 — per-connection Server so sequential proxy reconnects work.
  *
  * Until 5.32 the manifest pointed `mcpServers.crew.command` at this file via
  * `node`. The host SIGTERMed the daemon's process group whenever any subagent
@@ -23,18 +24,28 @@
  *     operator explicitly kills the daemon (e.g., `kill $(cat ~/.crew/mcp-daemon.pid)`).
  *   • Server-initiated keepalive ping (now per-connection — see main()).
  *
- * What changes:
+ * What 5.32 changed:
  *   • StdioServerTransport → SocketServerTransport (per connection).
  *   • Stdin.end/close handlers removed: the daemon is detached, stdio is
  *     `'ignore'` in the proxy's spawn opts; there is no stdin to listen on.
  *   • PID file written to `~/.crew/mcp-daemon.pid` after socket bind so
  *     subsequent proxy shims can detect the running daemon (Q4 hybrid pattern).
  *
+ * What 5.33 changed:
+ *   • Server instance is now per-connection (not a module-scope singleton).
+ *     The MCP SDK's Protocol is single-transport by design — calling
+ *     `Server.connect()` twice on the same instance throws "Already connected
+ *     to a transport". Pre-5.33 the daemon shared one Server across every
+ *     accepted socket, so the second Claude Code session always failed to
+ *     connect. See `onConnection` in main() and upstream typescript-sdk
+ *     issue #1405 for the canonical per-session pattern.
+ *
  * References:
  *   - Story spec:  _bmad-output/implementation-artifacts/5-32-d2-build-detached-proxy-and-parent-owned-daemon.md
  *   - Spike:       _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
  *   - Postmortem:  _bmad-output/postmortems/2026-05-25-dogfood-rollback.md § L1 defect #1
  *   - Memory:      project_mcp_server_silent_disconnect
+ *   - Upstream:    https://github.com/modelcontextprotocol/typescript-sdk/issues/1405
  */
 
 import * as fs from "node:fs";
@@ -132,56 +143,69 @@ process.on("exit", (code: number) => {
 // main: boot, bind socket, wire per-connection transport + keepalive.
 // ---------------------------------------------------------------------------
 
+let connectionCount = 0;
+
 async function main(): Promise<void> {
   lifecycle.log("boot", {
     version: getPluginVersion(),
     nodeVersion: process.version,
   });
 
-  const server = createServer();
-  registerAllTools(server);
-
   const intervalMs = Number(process.env["CREW_MCP_KEEPALIVE_MS"] ?? 300_000);
 
   const { sockPath } = await startSocketServer({
     onConnection: (socket) => {
+      const connectionId = ++connectionCount;
       const transport = new SocketServerTransport(socket);
-      transport.onclose = () => {
-        lifecycle.log("transport.onclose");
-      };
-      // Connect server to this transport. Note: SDK Server is single-transport
-      // by design; the v1.1 deployment expects at most one active proxy
-      // connection at a time (one Claude Code session per user). A second
-      // concurrent connection would conflict — acceptable for v1.1 since
-      // `~/.crew/` is per-user.
-      server.connect(transport).catch((err: Error) => {
-        lifecycle.log("transport.connect.error", { message: err.message });
-      });
-      lifecycle.log("transport.connected");
+      let pingTimer: NodeJS.Timeout | undefined;
 
-      // Keepalive — runs while this transport is active.
+      // Set transport.onclose BEFORE server.connect() so the SDK chains it
+      // (Protocol.connect captures the caller's handler and calls it before
+      // its own _onclose() runs — see @modelcontextprotocol/sdk
+      // shared/protocol.js connect()). A handler installed AFTER
+      // server.connect() would OVERWRITE the SDK's chained handler,
+      // preventing _transport from being cleared and breaking sequential
+      // reconnect. Upstream footgun: typescript-sdk issue #1405.
+      transport.onclose = () => {
+        if (pingTimer) clearInterval(pingTimer);
+        lifecycle.log("transport.onclose", { connectionId });
+      };
+
+      // Per-connection Server (canonical pattern per typescript-sdk#1405).
+      // The SDK Server wraps a Protocol whose _transport is single-use; the
+      // factory is designed to be called repeatedly (see server.ts header).
+      const server = createServer();
+      registerAllTools(server);
+      server.connect(transport).catch((err: Error) => {
+        lifecycle.log("transport.connect.error", {
+          connectionId,
+          message: err.message,
+        });
+      });
+      lifecycle.log("transport.connected", { connectionId });
+
       if (intervalMs > 0) {
-        const pingTimer = setInterval(() => {
+        pingTimer = setInterval(() => {
           void (async () => {
-            lifecycle.log("keepalive.sent", { intervalMs });
+            lifecycle.log("keepalive.sent", { connectionId, intervalMs });
             const t0 = Date.now();
             try {
               await server.ping();
-              lifecycle.log("keepalive.response", { latencyMs: Date.now() - t0 });
+              lifecycle.log("keepalive.response", {
+                connectionId,
+                latencyMs: Date.now() - t0,
+              });
             } catch (err) {
               lifecycle.log("keepalive.error", {
+                connectionId,
                 message: err instanceof Error ? err.message : String(err),
               });
             }
           })();
         }, intervalMs);
         pingTimer.unref();
-        transport.onclose = () => {
-          clearInterval(pingTimer);
-          lifecycle.log("transport.onclose");
-        };
       } else {
-        lifecycle.log("keepalive.disabled", { intervalMs });
+        lifecycle.log("keepalive.disabled", { connectionId, intervalMs });
       }
     },
   });
