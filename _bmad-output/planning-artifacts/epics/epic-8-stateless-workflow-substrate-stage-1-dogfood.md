@@ -37,3 +37,7 @@ Scope: author a real low-risk bootstrap story (via `bmad-create-story`), prime i
 ## Story 8.8: Native scan arms loudly on unmatched story files
 
 Scope: `plugins/crew/mcp-server/src/adapters/native/index.ts` — `listNativeStoryFiles` silently drops every `.md` whose name doesn't match the ULID pattern, so a misnamed story vanishes and a directory of only-misnamed files scans to zero with no signal (the `nothingMatched` gap). Surface the unmatched basenames so the scan can report them loudly instead of returning a silent all-zero. Pure, additive, unit-testable. Second Stage-1 dogfood story — re-validates the autonomous loop + CI after the base-branch fix (#191).
+
+## Story 8.9: Document the provisional-trust auto-merge flag
+
+Scope: a new docs-only file `plugins/crew/docs/provisional-trust.md` documenting the Stage-2 `plugin.provisional_trust` flag (what it does, the default, the low-risk-only constraint, how to enable/disable). Docs-only → classifies `low`; ACs verified by `artifact:` presence. The **Stage-2 guinea pig**: the first story the autonomous loop merges with zero human intervention (provisional-trust auto-merge on the safest possible change). Purely additive, no code, no tests.
