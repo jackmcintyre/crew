@@ -36,7 +36,11 @@ export const CONVENTIONAL_COMMIT_TYPES = [
     "style",
     "revert",
 ];
-const CONVENTIONAL_COMMIT_SUBJECT_REGEX = /^(feat|fix|refactor|test|docs|chore|build|ci|perf|style|revert)\([a-z0-9-]+\): [^\s].+$/;
+const CONVENTIONAL_COMMIT_SUBJECT_REGEX = 
+// Scope is the story ref `<adapter>:<id>` (e.g. `native:<ULID>`, `bmad:1.1`):
+// colon, uppercase (Crockford ULID), and dot are all valid in real refs. The
+// prior `[a-z0-9-]+` scope rejected every real ref (Story 8.1 / spike 2026-05-29).
+/^(feat|fix|refactor|test|docs|chore|build|ci|perf|style|revert)\([A-Za-z0-9._:-]+\): [^\s].+$/;
 /**
  * Branch name pattern: `story/<kebab-alphanumeric>`. The slug-builder
  * in `pr-body.ts` always produces conforming names; this is a
