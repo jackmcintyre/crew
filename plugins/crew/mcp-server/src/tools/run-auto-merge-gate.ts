@@ -43,6 +43,8 @@ import type {
   ComputeAgreementOptions,
 } from "./compute-agreement.js";
 import { readManifest } from "../lib/manifest-io.js";
+import { readReviewerResultFile } from "../lib/read-reviewer-result-file.js";
+import type { ReviewerResultFileShape } from "../lib/read-reviewer-result-file.js";
 import type { ExecutionManifest } from "../schemas/execution-manifest.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
@@ -63,6 +65,7 @@ const AutoMergeGateReasonSchema = z.enum([
   "low-risk-met-threshold",
   "low-risk-sub-threshold",
   "low-risk-insufficient-data",
+  "low-risk-provisional-trust",
   "medium-risk",
   "high-risk",
   "no-tier-no-signal",
@@ -126,6 +129,16 @@ export interface RunAutoMergeGateOptions {
   readManifestImpl?: (absPath: string) => Promise<ExecutionManifest>;
   /** Test seam: inject a custom workspace-config loader. */
   loadWorkspaceConfigImpl?: (targetRepoRoot: string) => Promise<PluginSettings>;
+  /**
+   * Test seam: bypass the workspace-config read for the provisional-trust flag
+   * (Stage-2). Production callers pass `undefined` (resolved from config).
+   */
+  provisionalTrustOverride?: boolean;
+  /** Test seam: inject a custom reviewer-result reader (Stage-2 tier fallback). */
+  readReviewerResultImpl?: (
+    targetRepoRoot: string,
+    sessionUlid: string,
+  ) => Promise<ReviewerResultFileShape | null>;
   /** Plugin root override — test seam for loadRolePermissions and gh-error-map. */
   pluginRootOverride?: string;
   /** Role name for gh permission lookup (default: "generalist-dev"). */
@@ -204,6 +217,7 @@ export async function runAutoMergeGate(
   const computeAgreementFn = opts.computeAgreementImpl ?? computeAgreement;
   const readManifestFn = opts.readManifestImpl ?? readManifest;
   const loadWorkspaceConfigFn = opts.loadWorkspaceConfigImpl ?? loadWorkspaceConfig;
+  const readReviewerResultFn = opts.readReviewerResultImpl ?? readReviewerResultFile;
   const dryRun = opts.dryRun ?? false;
 
   // ------------------------------------------------------------------
@@ -226,18 +240,34 @@ export async function runAutoMergeGate(
   }
 
   // ------------------------------------------------------------------
-  // Step 2: Resolve threshold_used
+  // Step 2: Resolve threshold_used and provisional_trust from config.
+  // Overrides (test seams) win; otherwise read .crew/config.yaml once.
+  // The threshold path is unchanged (no config read when overridden); the
+  // config is only loaded when a real value is needed.
   // ------------------------------------------------------------------
   let threshold_used: number;
+  let pluginSettings: PluginSettings | undefined;
   if (opts.thresholdOverride !== undefined) {
     threshold_used = opts.thresholdOverride;
   } else {
-    const pluginSettings = await loadWorkspaceConfigFn(opts.targetRepoRoot);
+    pluginSettings = await loadWorkspaceConfigFn(opts.targetRepoRoot);
     threshold_used = pluginSettings.agreement_threshold;
   }
 
+  let provisional_trust: boolean;
+  if (opts.provisionalTrustOverride !== undefined) {
+    provisional_trust = opts.provisionalTrustOverride;
+  } else {
+    pluginSettings = pluginSettings ?? (await loadWorkspaceConfigFn(opts.targetRepoRoot));
+    provisional_trust = pluginSettings.provisional_trust;
+  }
+
   // ------------------------------------------------------------------
-  // Step 3: Read done/<ref>.yaml manifest and extract risk_tier
+  // Step 3: Resolve risk_tier. Prefer the done/<ref>.yaml manifest field;
+  // fall back to the tier the reviewer computed from the actual PR diff and
+  // recorded in reviewer-result.json (the authoritative source — the manifest
+  // is not always stamped). Without this fallback the gate sees `undefined`
+  // and always pauses (`no-tier-no-signal`).
   // ------------------------------------------------------------------
   const manifestPath = path.join(
     opts.targetRepoRoot,
@@ -247,7 +277,27 @@ export async function runAutoMergeGate(
     `${opts.ref}.yaml`,
   );
   const manifest = await readManifestFn(manifestPath);
-  const risk_tier = (manifest as { risk_tier?: "low" | "medium" | "high" }).risk_tier;
+  let risk_tier = (manifest as { risk_tier?: "low" | "medium" | "high" }).risk_tier;
+  if (risk_tier === undefined) {
+    const reviewerResult = await readReviewerResultFn(
+      opts.targetRepoRoot,
+      opts.sessionUlid,
+    );
+    // Trust the reviewer-computed tier ONLY when the result is the authoritative,
+    // GREEN verdict for THIS ref. This makes the safety binding deterministic
+    // rather than relying on the caller invoking the gate only on a green verdict
+    // (a prose mandate, not load-bearing). A non-green verdict, a ref mismatch
+    // (e.g. a stale result lingering in a reused session dir), or an absent
+    // result leaves risk_tier `undefined` → the gate pauses (`no-tier-no-signal`),
+    // the fail-safe outcome.
+    if (
+      reviewerResult !== null &&
+      reviewerResult.ref === opts.ref &&
+      reviewerResult.recommendedVerdict === "READY FOR MERGE"
+    ) {
+      risk_tier = reviewerResult.riskTier?.tier;
+    }
+  }
 
   // ------------------------------------------------------------------
   // Step 4: Compute agreement metric
@@ -264,6 +314,7 @@ export async function runAutoMergeGate(
     risk_tier,
     agreement_metric,
     threshold: threshold_used,
+    provisional_trust,
   });
 
   // ------------------------------------------------------------------

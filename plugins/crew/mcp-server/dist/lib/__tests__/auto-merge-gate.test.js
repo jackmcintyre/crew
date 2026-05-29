@@ -209,3 +209,77 @@ describe("Boundary — ratio exactly equals threshold uses >= (not >)", () => {
         expect(result.reason).toBe("low-risk-met-threshold");
     });
 });
+// ---------------------------------------------------------------------------
+// Stage-2: cold-start provisional trust
+// ---------------------------------------------------------------------------
+describe("Stage-2 — provisional_trust relaxes ONLY low + insufficient-data", () => {
+    it("low + null metric + provisional_trust → auto-merge with low-risk-provisional-trust", () => {
+        const result = decideAutoMerge({
+            risk_tier: "low",
+            agreement_metric: null,
+            threshold: DEFAULT_THRESHOLD,
+            provisional_trust: true,
+        });
+        expect(result.decision).toBe("auto-merge");
+        expect(result.reason).toBe("low-risk-provisional-trust");
+    });
+    it("low + null metric + provisional_trust:false → pauses (insufficient-data)", () => {
+        const result = decideAutoMerge({
+            risk_tier: "low",
+            agreement_metric: null,
+            threshold: DEFAULT_THRESHOLD,
+            provisional_trust: false,
+        });
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("low-risk-insufficient-data");
+    });
+    it("low + null metric + provisional_trust omitted → defaults to pause", () => {
+        const result = decideAutoMerge({
+            risk_tier: "low",
+            agreement_metric: null,
+            threshold: DEFAULT_THRESHOLD,
+        });
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("low-risk-insufficient-data");
+    });
+    it("medium + provisional_trust → STILL pauses (flag never relaxes medium)", () => {
+        const result = decideAutoMerge({
+            risk_tier: "medium",
+            agreement_metric: null,
+            threshold: DEFAULT_THRESHOLD,
+            provisional_trust: true,
+        });
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("medium-risk");
+    });
+    it("high + provisional_trust → STILL pauses (flag never relaxes high)", () => {
+        const result = decideAutoMerge({
+            risk_tier: "high",
+            agreement_metric: null,
+            threshold: DEFAULT_THRESHOLD,
+            provisional_trust: true,
+        });
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("high-risk");
+    });
+    it("undefined tier + provisional_trust → STILL pauses (no-tier-no-signal)", () => {
+        const result = decideAutoMerge({
+            risk_tier: undefined,
+            agreement_metric: null,
+            threshold: DEFAULT_THRESHOLD,
+            provisional_trust: true,
+        });
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("no-tier-no-signal");
+    });
+    it("low + sufficient history (met threshold) + provisional_trust → normal met-threshold path", () => {
+        const result = decideAutoMerge({
+            risk_tier: "low",
+            agreement_metric: makeMetric(0.9),
+            threshold: DEFAULT_THRESHOLD,
+            provisional_trust: true,
+        });
+        expect(result.decision).toBe("auto-merge");
+        expect(result.reason).toBe("low-risk-met-threshold");
+    });
+});
