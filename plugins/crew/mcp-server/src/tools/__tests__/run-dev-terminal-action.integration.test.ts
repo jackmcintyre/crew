@@ -313,6 +313,56 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
   });
 });
 
+describe("runDevTerminalAction — PR base branch", () => {
+  /** Helper: pull the value following `--base` out of the stubbed gh call. */
+  function baseArgFromSpy(spy: ReturnType<typeof vi.fn>): string | undefined {
+    const ghCall = (spy.mock.calls as [string, string[]][]).find(
+      ([cmd]) => cmd === "gh",
+    );
+    expect(ghCall).toBeDefined();
+    const ghArgs = ghCall![1];
+    const baseIdx = ghArgs.indexOf("--base");
+    return baseIdx === -1 ? undefined : ghArgs[baseIdx + 1];
+  }
+
+  it("defaults the PR base to `dev` when no base is supplied", async () => {
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    expect(baseArgFromSpy(spy)).toBe("dev");
+  });
+
+  it("honours an explicit base branch override", async () => {
+    const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+
+    await runDevTerminalAction({
+      targetRepoRoot: ctx.repoRoot,
+      ref: REF,
+      title: TITLE,
+      type: TYPE,
+      body: BODY,
+      summary: SUMMARY,
+      manifestPath: ctx.manifestPath,
+      sessionUlid: SESSION_ULID,
+      base: "main",
+      execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
+    });
+
+    expect(baseArgFromSpy(spy)).toBe("main");
+  });
+});
+
 describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
   it("(3b) title with punctuation collapses to kebab", async () => {
     const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });

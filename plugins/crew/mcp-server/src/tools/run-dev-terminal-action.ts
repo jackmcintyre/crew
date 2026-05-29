@@ -68,6 +68,12 @@ const ROLE = "generalist-dev";
  * @param opts.summary         Free-form PR summary (appended after machine block).
  * @param opts.manifestPath    Absolute path to the in-progress manifest YAML.
  * @param opts.sessionUlid     ULID of the calling session (for context).
+ * @param opts.base            PR base branch. Defaults to `dev` — crew's working
+ *                             trunk — so autonomous PRs target the trunk rather
+ *                             than the GitHub default branch (`main`). Callers
+ *                             targeting a repo whose trunk is not `dev` must pass
+ *                             this explicitly (a productization follow-up will
+ *                             source it from adapter config).
  * @param opts.execaImpl       Optional test seam (production callers omit this).
  */
 export async function runDevTerminalAction(opts: {
@@ -79,6 +85,7 @@ export async function runDevTerminalAction(opts: {
   summary: string;
   manifestPath: string;
   sessionUlid: string;
+  base?: string;
   execaImpl?: typeof defaultExeca;
 }): Promise<DevTerminalActionResult> {
   const {
@@ -91,6 +98,7 @@ export async function runDevTerminalAction(opts: {
     manifestPath,
     sessionUlid,
   } = opts;
+  const base = opts.base ?? "dev";
   const execaImpl = opts.execaImpl;
 
   // (i) Validate conventional-commits type BEFORE any subprocess spawn.
@@ -165,7 +173,7 @@ export async function runDevTerminalAction(opts: {
     role: ROLE,
     permissions,
     subcommand: "pr-create",
-    args: ["--title", subject, "--body", prBody],
+    args: ["--title", subject, "--body", prBody, "--base", base],
     ...(execaImpl ? { execaImpl } : {}),
   });
 
