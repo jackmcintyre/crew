@@ -99,9 +99,9 @@ development_status:
   5-34-auto-merge-gate-gh-allowlist-repo-view-api: done
   epic-5-retrospective: optional
   epic-6: in-progress
-  6-1-story-level-retro-entries-via-record-story-retro: ready-for-dev
-  6-2-retro-skill-and-retro-analyst-subagent: ready-for-dev
-  6-3-retro-proposal-markdown-with-seven-proposal-types: ready-for-dev
+  6-1-story-level-retro-entries-via-record-story-retro: done
+  6-2-retro-skill-and-retro-analyst-subagent: done
+  6-3-retro-proposal-markdown-with-seven-proposal-types: done
   6-4-accept-proposal-id-skill-diff-then-confirm-gate: backlog
   6-5-rule-registry-parser-and-apply-rule-proposal: backlog
   6-5b-regenerate-standards-version-bump-and-10-cap-re-enforcement: backlog
@@ -125,8 +125,8 @@ development_status:
   7-7-maya-archetype-validation-paper-test: backlog
   epic-7-retrospective: optional
   epic-8: in-progress
-  8-1-commit-scope-regex-real-refs: backlog
-  8-2-reviewer-ac-heading-regex-alignment: backlog
+  8-1-commit-scope-regex-real-refs: done
+  8-2-reviewer-ac-heading-regex-alignment: done
   8-3-agent-discipline-evidence-only: backlog
   8-4-cli-shim-productionise-and-wire: backlog
   8-5-drain-workflow-stateless: backlog
