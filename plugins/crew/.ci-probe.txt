@@ -1,0 +1,2 @@
+CI trigger probe — throwaway. Tests whether a small PR against `main` fires CI.
+This branch and PR will be deleted immediately after observation.
