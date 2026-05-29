@@ -251,3 +251,49 @@ describe("scanOrphanedInProgress — absent claimed_by skipped silently", () => 
     expect(result.orphans[0]!.ref).toBe(refOrphan);
   });
 });
+
+// ---------------------------------------------------------------------------
+// (h) Claim-time `<ref>.snapshot.yaml` sidecar is skipped, not parsed
+// ---------------------------------------------------------------------------
+
+describe("scanOrphanedInProgress — claim-time snapshot sidecar skipped", () => {
+  // Test seam: avoid a real `gh pr list` call for the orphan's hasOpenPR probe.
+  const noOpenPrExeca = (async () => ({ stdout: "[]" })) as unknown as typeof import("execa").execa;
+
+  // The sidecar mirrors only the operator-editable fields (no ref/status/adapter),
+  // matching what claim-story.ts writes at `<ref>.snapshot.yaml` (Story 5.29).
+  function makeSnapshotYaml(): string {
+    return yamlStringify(
+      {
+        source_hash: SOURCE_HASH,
+        title: "Test story",
+        narrative: "As a dev, I want to test orphan scan.",
+        acceptance_criteria: [
+          { text: "Given AC, when done, then works.", kind: "integration" },
+        ],
+      },
+      { lineWidth: 0 },
+    );
+  }
+
+  it("skips the sidecar and still returns the real orphan (does not throw)", async () => {
+    const ref = "native:01JVWX2STALE0000000000003";
+    await seedInProgressManifest(stateRoot, ref, { claimed_by: STALE_ULID_A });
+    // Seed the sidecar baseline next to the live manifest.
+    await fs.writeFile(
+      path.join(stateRoot, "in-progress", `${ref}.snapshot.yaml`),
+      makeSnapshotYaml(),
+      "utf8",
+    );
+
+    const result = await scanOrphanedInProgress({
+      targetRepoRoot: tmpDir,
+      sessionUlid: CURRENT_SESSION_ULID,
+      execaImpl: noOpenPrExeca,
+    });
+
+    expect(result.orphans).toHaveLength(1);
+    expect(result.orphans[0]!.ref).toBe(ref);
+    expect(result.orphans[0]!.staleUlid).toBe(STALE_ULID_A);
+  });
+});

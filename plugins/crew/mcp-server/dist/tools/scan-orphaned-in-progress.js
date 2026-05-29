@@ -51,8 +51,15 @@ export async function scanOrphanedInProgress(opts) {
         }
         throw err;
     }
-    // Filter to .yaml files and sort alphabetically.
-    const yamlEntries = entries.filter((f) => f.endsWith(".yaml")).sort();
+    // Filter to manifest .yaml files and sort alphabetically. Exclude the
+    // claim-time sidecar baselines written by claim-story.ts at
+    // `<ref>.snapshot.yaml` (Story 5.29) — those mirror only the operator-editable
+    // fields and are NOT full execution manifests, so feeding them to
+    // parseExecutionManifest throws MalformedExecutionManifestError and blocks the
+    // entire orphan-recovery path.
+    const yamlEntries = entries
+        .filter((f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml"))
+        .sort();
     const orphans = [];
     for (const entry of yamlEntries) {
         const absPath = path.join(inProgressDir, entry);
