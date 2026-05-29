@@ -170,4 +170,37 @@ artifact: trap.txt
         expect(ac1.body.some(l => l.includes("artifact: trap.txt"))).toBe(false);
         expect(ac1.body.some(l => l.includes("trap.txt"))).toBe(false);
     });
+    // ---------------------------------------------------------------------------
+    // Story 8.2: em-dash descriptive AC headings (the "reviewer verifies nothing"
+    // regression). Before the fix the extractor's regex lacked the em-dash arm,
+    // so a spec whose headings all use `**ACn — title:**` yielded ZERO ACs while
+    // the BMad scanner parsed them fine. The regex is now byte-identical to the
+    // BMad parser's (parse-bmad-story.ts).
+    // ---------------------------------------------------------------------------
+    it("Story 8.2: extracts em-dash descriptive headings (was zero before the fix)", async () => {
+        const spec = `## Acceptance Criteria
+
+**AC1 — Install and build pass cleanly:**
+Given a fresh clone,
+When you build,
+Then it passes.
+
+**AC2 — Vitest smoke suite passes (integration):**
+vitest covers the smoke path.
+
+**AC3 — Server starts with zero tools:**
+The MCP server boots.
+`;
+        const specPath = await writeTmp(spec);
+        const acs = await extractAcsFromSpec(specPath);
+        // All three em-dash headings found (the regression: previously 0).
+        expect(acs.map((a) => a.index)).toEqual([1, 2, 3]);
+        // Em-dash descriptive token discarded; tag still captured from the parens.
+        expect(acs[0].tag).toBeNull();
+        expect(acs[1].tag).toBe("integration");
+        expect(acs[2].tag).toBeNull();
+        // Body still collected correctly under an em-dash heading.
+        expect(acs[0].firstLine).toBe("Given a fresh clone,");
+        expect(acs[1].firstLine).toBe("vitest covers the smoke path.");
+    });
 });

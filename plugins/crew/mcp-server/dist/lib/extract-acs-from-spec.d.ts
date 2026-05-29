@@ -28,8 +28,8 @@ export interface AcEntry {
  * the pattern `**AC<N>...:` (where `N` is one or more digits), and return
  * an array of `{ index, firstLine }` objects in numeric order.
  *
- * The regex matches:
- *   `**AC1:**`, `**AC2 (user-surface):**`, `**AC3 (integration):**`
+ * The regex matches (byte-identical to the BMad adapter, Story 8.2):
+ *   `**AC1:**`, `**AC2 (user-surface):**`, `**AC3 — descriptive title:**`
  *
  * The `firstLine` is the first non-blank line of the AC's body (the text
  * that follows the `**ACN...**` heading line), truncated to 120 characters.
