@@ -12,6 +12,8 @@ gh_allow:
   - pr-view
   - pr-comment
   - pr-merge
+  - repo-view
+  - api
 locked_phrases:
   handoff: "Handoff to reviewer — story <story-id> ready for review."
   yield: "This sits in <domain>'s domain — handing off."

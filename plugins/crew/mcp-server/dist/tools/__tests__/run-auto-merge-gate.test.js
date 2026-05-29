@@ -707,3 +707,60 @@ describe("threshold_used is stamped in result", () => {
         expect(result.decision).toBe("pause-needs-human");
     });
 });
+// ---------------------------------------------------------------------------
+// Story 5.34 — AC2: regression guard against mock-masking gap.
+//
+// These tests load the REAL generalist-dev.yaml via the production
+// loadRolePermissions path (pluginRootOverride points at the live
+// plugins/crew/ directory, not a hand-built temp fixture).  The gh
+// shell-out is still faked so no real `gh` subprocess runs.
+//
+// Drives BOTH gate branches to confirm neither throws GhSubcommandDeniedError
+// for repo-view, api, or pr-merge after the AC1 allowlist fix.
+// ---------------------------------------------------------------------------
+const REAL_PLUGIN_ROOT = path.resolve(HERE, "..", "..", "..", "..");
+describe("Story 5.34 — AC2: real generalist-dev permissions, both gate branches", () => {
+    it("pause-needs-human branch — repo-view and api are allowed (no GhSubcommandDeniedError)", async () => {
+        await seedDoneManifest(targetRepoRoot, {
+            ref: REF,
+            sessionUlid: SESSION_ULID,
+            risk_tier: "medium", // medium → always pause-needs-human
+        });
+        const { impl: fakeExeca } = makePauseExeca();
+        // Must not throw GhSubcommandDeniedError for repo-view or api
+        const result = await runAutoMergeGate({
+            targetRepoRoot,
+            prNumber: PR_NUMBER,
+            ref: REF,
+            sessionUlid: SESSION_ULID,
+            pluginRootOverride: REAL_PLUGIN_ROOT, // ← production permissions, not a fixture
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(makeMetric(1.0)),
+        });
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.merged).toBe(false);
+        expect(result.labelsApplied).toEqual(["needs-human"]);
+    });
+    it("auto-merge branch — pr-merge is allowed (no GhSubcommandDeniedError)", async () => {
+        await seedDoneManifest(targetRepoRoot, {
+            ref: REF,
+            sessionUlid: SESSION_ULID,
+            risk_tier: "low", // low + met threshold → auto-merge
+        });
+        const { impl: fakeExeca } = makeMergeExeca();
+        // Must not throw GhSubcommandDeniedError for pr-merge
+        const result = await runAutoMergeGate({
+            targetRepoRoot,
+            prNumber: PR_NUMBER,
+            ref: REF,
+            sessionUlid: SESSION_ULID,
+            pluginRootOverride: REAL_PLUGIN_ROOT, // ← production permissions, not a fixture
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(makeMetric(0.9)), // above default 0.8 threshold
+        });
+        expect(result.decision).toBe("auto-merge");
+        expect(result.merged).toBe(true);
+    });
+});
