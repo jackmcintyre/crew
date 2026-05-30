@@ -19,7 +19,7 @@ This is an Epic 8 dogfood story for the multi-story unattended drain: a docs-onl
 
 **AC1 — a runbook exists covering how to queue and launch an unattended drain:**
 
-A new Markdown file exists at `plugins/crew/docs/unattended-drain-runbook.md`. It explains the end-to-end operator flow: (1) author or confirm low-risk stories and run `/crew:scan` so they land as claimable manifests in the to-do queue; (2) launch the `crew-drain` workflow (`plugins/crew/workflows/drain.workflow.js`) via the Workflow tool, passing `targetRepoRoot`, `cli` (the absolute path to `plugins/crew/mcp-server/dist/cli.js`), and the optional `maxStories`. It states explicitly that the workflow `scriptPath` MUST be absolute (a relative path resolves against the plugin dir and doubles the prefix).
+A new Markdown file exists at `plugins/crew/docs/unattended-drain-runbook.md`. It explains the end-to-end operator flow: (1) author or confirm low-risk stories and run `/crew:scan` so they enter the claimable to-do queue; (2) launch the `crew-drain` workflow (`plugins/crew/workflows/drain.workflow.js`) via the Workflow tool, passing `targetRepoRoot`, `cli` (the absolute path to the plugin's compiled CLI entrypoint), and the optional `maxStories`. It states explicitly that the workflow `scriptPath` MUST be absolute (a relative path resolves against the plugin dir and doubles the prefix).
 artifact: plugins/crew/docs/unattended-drain-runbook.md
 
 **AC2 — the runbook explains drain-until-empty and the optional `maxStories` safety cap:**
@@ -29,7 +29,7 @@ artifact: plugins/crew/docs/unattended-drain-runbook.md
 
 **AC3 — the runbook explains how to reconcile after a run:**
 
-The same file includes an "After the run" section: the drain runs the dev directly in `targetRepoRoot` (not an isolated worktree), so the local checkout is left on the last story's branch. The operator should `git checkout dev && git pull`, then flip the drained stories to `done` in `_bmad-output/implementation-artifacts/sprint-status.yaml` and commit.
+The same file includes an "After the run" section: the drain runs the dev directly in `targetRepoRoot` (not an isolated worktree), so the local checkout is left on the last story's branch. The operator should `git checkout dev && git pull`, then mark the drained stories `done` in the sprint-status tracker and commit.
 artifact: plugins/crew/docs/unattended-drain-runbook.md
 
 ## Notes
