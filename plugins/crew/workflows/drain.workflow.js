@@ -14,13 +14,17 @@ export const meta = {
 //                    (the stateless seam transport; lives in the PLUGIN, not the target)
 //   sessionUlid    : (optional) launcher-minted id — pass it for journal-stable resume;
 //                    omitted → minted in-script for a standalone run
-//   maxStories     : story-count budget (clocks unavailable; we count stories). Default 1 (v1).
+//   maxStories     : OPTIONAL safety cap on stories claimed this run. Omitted →
+//                    drain until the queue is empty (the headline). Provided → stop after N.
 //   maxRework      : per-story NEEDS-CHANGES rework cap. Default 2.
 // ---------------------------------------------------------------------------
 const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
 const REPO = A.targetRepoRoot || A.repo
 const CLI = A.cli
-const MAX = A.maxStories || 1
+// Optional safety cap. Omitted (or non-positive/garbage) → unbounded drain: the
+// queue strictly shrinks (claimNextStory atomically moves to-do→in-progress), so
+// the loop always terminates on queue-drained. A positive integer caps the run.
+const MAX = Number.isInteger(A.maxStories) && A.maxStories > 0 ? A.maxStories : Infinity
 const MAX_REWORK = A.maxRework || 2
 
 const HANDOFF = (ref) => `Handoff to reviewer — story ${ref} ready for review.`
@@ -51,17 +55,23 @@ if (!REPO || !CLI) return { error: 'missing-args', need: ['targetRepoRoot', 'cli
 // resume); fall back to minting one via the CLI for a standalone run.
 const SU = A.sessionUlid || (await seam(`node ${CLI} mintSessionUlid`, 'mint')).sessionUlid
 if (!SU) return { error: 'no-session-ulid' }
-log(`drain session=${SU} repo=${REPO} maxStories=${MAX} maxRework=${MAX_REWORK}`)
+log(`drain session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' : MAX} maxRework=${MAX_REWORK}`)
 
 // Persona system prompts — these carry the evidence-only discipline (Story 8.3):
 // agents produce code / a PR / a transcript; the TOOLS own the backlog ledger.
 const devPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-dev' })}'`, 'persona:dev'))?.systemPrompt || ''
 
 const completed = [], merged = [], pausedForHuman = [], blocked = []
-let drainedReason = 'budget-exhausted'
+// Set the moment the loop exits; every break path below overwrites this placeholder.
+let drainedReason = 'incomplete'
 
-for (let i = 0; i < MAX; i++) {
+for (let i = 0; ; i++) {
+  // Optional safety cap — its OWN exit reason, not a queue state. Dead when MAX
+  // is Infinity (the default unbounded drain).
+  if (i >= MAX) { drainedReason = 'max-stories-reached'; break }
   // CLAIM — atomic to-do -> in-progress; deps satisfied from done/ only.
+  // 'queue-drained' is the happy unattended path; any other non-spawn-dev outcome
+  // (waiting-on-in-progress, parse/claim error) is surfaced verbatim.
   const claim = await seam(`node ${CLI} claimNextStory --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, `claim:${i}`)
   if (!claim || claim.next !== 'spawn-dev') { drainedReason = claim?.next || claim?._parseError || 'claim-failed'; break }
   const { ref, title, manifestPath } = claim
@@ -147,7 +157,9 @@ for (let i = 0; i < MAX; i++) {
 return {
   sessionUlid: SU,
   drainedReason,
-  drained: drainedReason !== 'budget-exhausted',
+  // True ONLY on a genuine full drain (queue emptied). Hitting the cap,
+  // waiting-on-in-progress, or any claim error is NOT a drain.
+  drained: drainedReason === 'queue-drained',
   completed,
   merged,
   pausedForHuman,

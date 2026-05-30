@@ -64,10 +64,28 @@ describe("Story 8.5 — drain workflow integrity", () => {
     }
   });
 
-  it("uses haiku couriers for seams; v1 dev runs in targetRepoRoot (no isolated worktree)", () => {
+  it("classifies drain exits with explicit reasons (no budget-exhausted mislabel)", () => {
+    // The happy unattended path keys off the real claimNextStory empty-queue signal.
+    expect(SRC).toContain("queue-drained");
+    // Hitting the optional cap is its OWN named exit, not a queue state.
+    expect(SRC).toContain("max-stories-reached");
+    // `drained` is the positive full-drain signal, not the old sentinel diff.
+    expect(SRC).toContain("drained: drainedReason === 'queue-drained'");
+    // The mislabelled token-budget placeholder is gone entirely.
+    expect(SRC).not.toContain("budget-exhausted");
+  });
+
+  it("treats maxStories as an optional cap (unbounded drain until queue empty by default)", () => {
+    // No hard default-1 cap: an omitted maxStories drains the whole queue.
+    expect(SRC).not.toContain("A.maxStories || 1");
+    expect(SRC).toContain("Infinity");
+  });
+
+  it("uses haiku couriers for seams; dev runs in targetRepoRoot (no isolated worktree)", () => {
     expect(SRC).toContain("model: 'haiku'");
-    // v1 is single-story serial: the dev runs directly in targetRepoRoot so
+    // The serial drain runs the dev directly in targetRepoRoot so
     // runDevTerminalAction's cwd aligns (an isolated worktree mismatches — first-run fix).
+    // A worktree-per-dev for PARALLEL multi-story drains is a post-Stage-1 follow-up.
     expect(SRC).not.toContain("isolation: 'worktree'");
   });
 });
