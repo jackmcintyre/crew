@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { execa as defaultExeca } from "execa";
 import { GitCommitMessageMalformedError, NegativeCapabilityDeniedError, GitBranchNameMalformedError, GitPushFailedError, } from "../errors.js";
 /**
@@ -274,4 +275,89 @@ export async function readRecentCommitTitles(opts) {
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
         .slice(0, limit);
+}
+// ---------------------------------------------------------------------------
+// resolveSessionLedgerRoot (Story 8.20 — ledger root from inside a worktree)
+// ---------------------------------------------------------------------------
+/**
+ * Resolve the orchestrating checkout root from a working directory that may be a
+ * git worktree.
+ *
+ * Story 8.20: the drain's dev edits inside its OWN worktree (cwd = worktree),
+ * but the session ledger (`.crew/state/sessions/<sessionUlid>/dev-outcome.json`,
+ * read by `processDevTranscript` against the orchestrating checkout) lives in the
+ * orchestrating checkout, NOT the worktree's separate working tree. A worktree
+ * shares the main checkout's `.git`, so `git rev-parse --git-common-dir` from
+ * inside the worktree points at `<orchestrating-checkout>/.git`; its parent is
+ * the orchestrating checkout root. From the orchestrating checkout itself this
+ * returns that same root, so callers can use it uniformly in both modes.
+ *
+ * Best-effort: on any git failure (not a repo, etc.) returns `cwd` unchanged, so
+ * a degraded git state degrades to "write the ledger where I am" rather than
+ * throwing.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard stays
+ * satisfied (only `lib/git.ts` may spawn `git`).
+ */
+export async function resolveSessionLedgerRoot(opts) {
+    const execaImpl = opts.execaImpl ?? defaultExeca;
+    const result = await execaImpl("git", ["-C", opts.cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], { reject: false });
+    if ((result.exitCode ?? 1) !== 0)
+        return opts.cwd;
+    const commonDir = (typeof result.stdout === "string" ? result.stdout : "").trim();
+    if (!commonDir)
+        return opts.cwd;
+    // `<root>/.git` → `<root>`. A bare repo would return the repo dir itself; the
+    // drain never runs against a bare repo, so the simple parent-of-.git holds.
+    return path.dirname(commonDir);
+}
+// ---------------------------------------------------------------------------
+// listDirtyPaths (Story 8.20 — explicit per-worktree stage set)
+// ---------------------------------------------------------------------------
+/**
+ * Return the repo-relative paths that are dirty (modified, added, deleted,
+ * untracked, renamed) in the working tree at `cwd`, parsed from
+ * `git status --porcelain -z`.
+ *
+ * Story 8.20: the drain's dev now edits *inside* its own worktree, so the dev's
+ * own changes are exactly the dirty set of that worktree (a worktree cut clean
+ * from `base` contains nothing else). `runDevTerminalAction` stages this
+ * explicit set rather than `git add .` — defence in depth so a `.crew/state`
+ * artefact or any unexpected untracked file is never swept into the story
+ * commit even inside the worktree.
+ *
+ * `.crew/state/**` is dropped unconditionally: the backlog ledger is the tools'
+ * domain and must never ride along in a story commit.
+ *
+ * Best-effort: a non-zero `git status` (not a repo, etc.) returns `[]`.
+ *
+ * Lives here so the `canonical-fs-guard.test.ts` AC6f static guard (which
+ * forbids any file under `src/**` other than `lib/git.ts` from spawning `git`)
+ * stays satisfied.
+ */
+export async function listDirtyPaths(opts) {
+    const execaImpl = opts.execaImpl ?? defaultExeca;
+    const result = await execaImpl("git", ["-C", opts.cwd, "status", "--porcelain", "-z"], { reject: false });
+    if ((result.exitCode ?? 1) !== 0)
+        return [];
+    const stdout = typeof result.stdout === "string" ? result.stdout : "";
+    const out = [];
+    const records = stdout.split("\0").filter((r) => r.length > 0);
+    for (let i = 0; i < records.length; i++) {
+        const rec = records[i];
+        // Each record: XY<space>PATH. A rename/copy emits the destination path as
+        // the NEXT NUL-record.
+        const xy = rec.slice(0, 2);
+        const p = rec.slice(3);
+        if (xy[0] === "R" || xy[0] === "C") {
+            const dest = records[i + 1];
+            if (dest !== undefined) {
+                out.push(dest);
+                i++;
+                continue;
+            }
+        }
+        out.push(p);
+    }
+    return out.filter((p) => !p.startsWith(".crew/state/") && p !== ".crew/state");
 }

@@ -135,33 +135,39 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       log(`${ref} resume-at-review -> PR #${prNumber} (dev already shipped; skipping dev)`)
     } else {
       // DEV — persona prompt (judgment + evidence-only discipline). The dev edits
-      // in targetRepoRoot (the workflow runtime pins the subagent's cwd to REPO),
-      // but runDevTerminalAction isolates the GIT WORK PRODUCT (Story 8.16): it
-      // creates a dedicated worktree, transplants ONLY the dev's own changed paths
-      // into it (an explicit set — never `git add .`), and commits/pushes/opens the
-      // PR from there, leaving the orchestrating checkout untouched and never
-      // sweeping a stray uncommitted change into the PR. We snapshot the dirty
-      // paths BEFORE the dev edits so the tool can subtract that baseline.
+      // and builds INSIDE ITS OWN WORKTREE (Story 8.20): the `isolation: 'worktree'`
+      // per-agent primitive roots the subagent's working directory in a fresh
+      // worktree cut clean from the base, so the dev's *editing surface* — not just
+      // its commit — is per-worktree. Two devs against the same repo therefore can
+      // never cross-contaminate edits, which is what makes the deferred concurrent
+      // dispatch (bmad:8.22) safe by construction. The orchestrating checkout is
+      // never the dev's editing surface. Because the worktree contains ONLY the
+      // dev's own work, runDevTerminalAction stages the worktree's own dirty set
+      // (an explicit changed-paths stage — never `git add .`); the 8.16
+      // snapshot-baseline/transplant is gone (it was the serial-only workaround).
+      // The dev passes its OWN working directory as targetRepoRoot (the worktree),
+      // NOT the orchestrating REPO — the tool maps the worktree back to the
+      // orchestrating checkout for the session ledger via `git --git-common-dir`.
       // The PR number transports via dev-outcome.json (machine-authoritative), not chat.
       // HEARTBEAT: enter the dev-build phase — the longest per-story span (the
       // single long dev agent() call). The start line flags it as the long one
       // so an operator reading the narrator knows a multi-minute gap is expected.
       const devStartedAt = await progressStart(ref, 'dev-build')
-      const baseline = (await seam(`node ${CLI} snapshotDirtyPaths --json '${J({ targetRepoRoot: REPO })}'`, `baseline:${ref}:${rw}${tag}`, true))?.dirtyPaths || []
       const reworkNote = rw === 0 ? '' :
         `\n\nThis is rework iteration ${rw}: address the reviewer's NEEDS CHANGES feedback on the existing PR (read .crew/state for the recorded verdict), push the fixes, and hand off again.`
       const devFinal = await agent(
         `${devPersona}\n\n## This run (story ${ref})\n` +
-          `- targetRepoRoot: ${REPO}\n- ref: ${ref}\n- title: "${title}"\n- sessionUlid: ${SU}\n- manifestPath: ${manifestPath}\n\n` +
+          `- ref: ${ref}\n- title: "${title}"\n- sessionUlid: ${SU}\n- manifestPath: ${manifestPath}\n\n` +
+          `You are working inside your OWN dedicated git worktree (your current working directory) — a clean checkout cut for this story alone. Edit and build HERE; never reach outside it.\n` +
           `Read the execution manifest at \`${manifestPath}\` — it identifies the source story and its acceptance criteria. ` +
-          `Implement the story end-to-end in the target repo at ${REPO} (your current working directory): write real code and tests, and run the project's build/test gates GREEN before opening the PR. ` +
+          `Implement the story end-to-end in your working directory: write real code and tests, and run the project's build/test gates GREEN before opening the PR. ` +
           `Do NOT gold-plate; do NOT touch the execution manifest or any \`.crew/state\` file (the tools own the ledger).\n\n` +
-          `To commit, push, and open the PR, run EXACTLY this (do not alter the path); fill \`body\` and \`summary\` with a real description of your change:\n` +
-          `  node ${CLI} runDevTerminalAction --json '${J({ targetRepoRoot: REPO, ref, title, type: 'feat', manifestPath, sessionUlid: SU, baselineDirtyPaths: baseline, body: '<one-paragraph body>', summary: '<one-line summary>' })}'\n` +
+          `To commit, push, and open the PR, run EXACTLY this — but FIRST replace \`<your-working-directory>\` with the absolute path of your current working directory (run \`pwd\` if unsure); do not alter any other field; fill \`body\` and \`summary\` with a real description of your change:\n` +
+          `  node ${CLI} runDevTerminalAction --json '${J({ targetRepoRoot: '<your-working-directory>', ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>' })}'\n` +
           `That tool runs the project's full build itself (the same whole-project build CI runs) before opening the PR and refuses to open one on a red build (Story 8.17), so a red PR can no longer leak — but still build green yourself first. ` +
           `Confirm it prints "ok":true and a "prUrl". If it prints a PrePrBuildFailedError, the build gate caught a red build — read the captured stderr/stdout in the error, fix the build (including breakage in files your story did not touch), and re-run the tool; do NOT hand off and do NOT emit the gh-recoverable line for a build failure. If it prints any other "error", or any crew tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
           `Otherwise, end your final message with EXACTLY this line and nothing after it:\n${HANDOFF(ref)}`,
-        { label: `dev:${ref}:${rw}${tag}`, phase: ph },
+        { label: `dev:${ref}:${rw}${tag}`, phase: ph, isolation: 'worktree' },
       )
 
       // Evidence check (in-script, cheap): the dev must have genuinely handed off.
@@ -230,6 +236,15 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
 // human instead of looping forever. scanOrphanedInProgress is read-only/idempotent
 // (retryable); reattach/block are one-shot mutations.
 phase('recover')
+// STALE-WORKTREE REAPING (Story 8.20 AC4): a worker that died mid-build leaves a
+// dev-story worktree keyed by its now-dead session id. The per-path stale-reap in
+// materialiseDevStoryWorktree only matches the LIVE session's own path, so
+// cross-session leftovers would otherwise accumulate. Reap them here — keyed on
+// the live session so this session's own in-flight worktrees are never touched —
+// alongside the in-progress manifest scan. Read-only/idempotent → retryable; a
+// garbled relay never breaks the run (worst case a leftover is reaped next time).
+const reap = await seam(`node ${CLI} reapStaleWorktrees --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, 'worktree-reap', true)
+if (reap && Array.isArray(reap.reaped) && reap.reaped.length) log(`reaped ${reap.reaped.length} stale dev worktree(s) from dead session(s)`)
 const scan = await seam(`node ${CLI} scanOrphanedInProgress --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, 'orphan-scan', true)
 const orphans = scan && Array.isArray(scan.orphans) ? scan.orphans : []
 if (orphans.length) log(`orphan recovery: ${orphans.length} in-progress story(ies) left by a prior run`)

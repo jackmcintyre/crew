@@ -38,7 +38,6 @@ import { readBacklogInventory } from "./tools/read-backlog-inventory.js";
 import { claimNextStory } from "./tools/claim-next-story.js";
 import { processDevTranscript } from "./tools/process-dev-transcript.js";
 import { runDevTerminalAction } from "./tools/run-dev-terminal-action.js";
-import { snapshotDirtyPaths } from "./tools/snapshot-dirty-paths.js";
 import { runReviewerSession } from "./tools/run-reviewer-session.js";
 import { postReviewerComments } from "./tools/post-reviewer-comments.js";
 import { processReviewerTranscript } from "./tools/process-reviewer-transcript.js";
@@ -50,6 +49,7 @@ import { processReviewerYield } from "./tools/process-reviewer-yield.js";
 import { scanOrphanedInProgress } from "./tools/scan-orphaned-in-progress.js";
 import { reattachOrphan } from "./tools/reattach-orphan.js";
 import { blockOrphanNoTranscript } from "./tools/block-orphan-no-transcript.js";
+import { reapStaleWorktrees } from "./tools/reap-stale-worktrees.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -71,7 +71,6 @@ const TOOLS: Record<string, ToolFn> = {
   claimNextStory,
   processDevTranscript,
   runDevTerminalAction,
-  snapshotDirtyPaths,
   runReviewerSession,
   postReviewerComments,
   processReviewerTranscript,
@@ -83,6 +82,7 @@ const TOOLS: Record<string, ToolFn> = {
   scanOrphanedInProgress,
   reattachOrphan,
   blockOrphanNoTranscript,
+  reapStaleWorktrees,
 };
 
 function emit(obj: unknown): void {

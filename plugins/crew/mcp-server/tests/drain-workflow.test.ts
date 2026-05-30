@@ -81,15 +81,21 @@ describe("Story 8.5 — drain workflow integrity", () => {
     expect(SRC).toContain("Infinity");
   });
 
-  it("uses sonnet couriers for seams; dev runs in targetRepoRoot (no isolated worktree)", () => {
+  it("uses sonnet couriers for seams; dev edits inside its own worktree (Story 8.20)", () => {
     // Couriers relay tool JSON verbatim; sonnet is far more reliable at that than
     // haiku (which garbled a verdict relay on the first multi-story drain, story 8.13).
     expect(SRC).toContain("model: 'sonnet'");
     expect(SRC).not.toContain("model: 'haiku'");
-    // The serial drain runs the dev directly in targetRepoRoot so
-    // runDevTerminalAction's cwd aligns (an isolated worktree mismatches — first-run fix).
-    // A worktree-per-dev for PARALLEL multi-story drains is a post-Stage-1 follow-up.
-    expect(SRC).not.toContain("isolation: 'worktree'");
+    // Story 8.20: the dev's EDITING SURFACE is its own worktree — the dev agent is
+    // spawned with the runtime's per-agent `isolation: 'worktree'` primitive, so two
+    // devs against the same repo can never cross-contaminate edits. This is what
+    // makes the deferred concurrent dispatch (bmad:8.22) safe by construction.
+    expect(SRC).toContain("isolation: 'worktree'");
+    // The 8.16 snapshot-baseline/transplant workaround is gone (it was serial-only).
+    expect(SRC).not.toContain("snapshotDirtyPaths");
+    expect(SRC).not.toContain("baselineDirtyPaths");
+    // Crash-recovery reaps stale dev worktrees left by dead sessions (8.20 AC4).
+    expect(SRC).toContain("reapStaleWorktrees");
   });
 
   it("retries the relay only on read-only/idempotent seams (mutating seams pause safely)", () => {
