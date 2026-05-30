@@ -1548,3 +1548,34 @@ export class RetroProposalAlreadyExistsError extends DomainError {
     this.isoTimestamp = opts.isoTimestamp;
   }
 }
+
+/**
+ * `materialiseDevStoryWorktree` failed to stand up the dev's isolated worktree
+ * on the drain path. Raised on a non-zero `git status` (snapshotting the dev's
+ * changed paths) or a failed `git worktree add` — both are structural failures
+ * that must halt the dev step rather than silently fall back to committing in
+ * the orchestrating checkout.
+ *
+ * (Story 8.16)
+ */
+export class DevStoryWorktreeError extends DomainError {
+  readonly ref: string;
+  readonly phase: "status" | "worktree-add";
+  readonly underlyingMessage: string;
+
+  constructor(opts: {
+    ref: string;
+    phase: "status" | "worktree-add";
+    underlyingMessage: string;
+  }) {
+    super(
+      `materialiseDevStoryWorktree: failed to isolate the dev's worktree for ` +
+        `'${opts.ref}' at phase '${opts.phase}': ${opts.underlyingMessage}. ` +
+        `The dev step has been halted — it must not fall back to committing in ` +
+        `the orchestrating checkout. (Story 8.16)`,
+    );
+    this.ref = opts.ref;
+    this.phase = opts.phase;
+    this.underlyingMessage = opts.underlyingMessage;
+  }
+}

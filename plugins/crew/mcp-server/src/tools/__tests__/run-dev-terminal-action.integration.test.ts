@@ -215,6 +215,7 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -275,6 +276,7 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -306,6 +308,7 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -337,6 +340,7 @@ describe("runDevTerminalAction — PR base branch", () => {
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -355,6 +359,7 @@ describe("runDevTerminalAction — PR base branch", () => {
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       base: "main",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
@@ -375,6 +380,7 @@ describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
       summary: "summary",
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
     expect(result.branch).toMatch(/^story\/[a-z0-9-]+$/);
@@ -394,6 +400,7 @@ describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
       summary: "summary",
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
     const afterRef = result.branch.slice("story/1-1-x-".length);
@@ -411,6 +418,7 @@ describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
       summary: "summary",
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
     expect(result.branch).toMatch(/^story\/[a-z0-9-]+$/);
@@ -430,6 +438,7 @@ describe("runDevTerminalAction — commit type validation (AC3c)", () => {
         summary: SUMMARY,
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
+        worktree: false,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(ConventionalCommitTypeUnknownError);
@@ -453,6 +462,7 @@ describe("runDevTerminalAction — body wrap (AC3d)", () => {
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -482,6 +492,7 @@ describe("runDevTerminalAction — body wrap (AC3d)", () => {
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -612,6 +623,7 @@ describe("runDevTerminalAction — push failure (AC3f)", () => {
         summary: SUMMARY,
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
+        worktree: false,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(GitPushFailedError);
@@ -630,6 +642,7 @@ describe("runDevTerminalAction — push failure (AC3f)", () => {
         summary: SUMMARY,
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
+        worktree: false,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       });
     } catch {
@@ -668,6 +681,7 @@ describe("runDevTerminalAction — gh pr create failure (AC3g)", () => {
         summary: SUMMARY,
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
+        worktree: false,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(GhPrCreateFailedError);
@@ -686,6 +700,7 @@ describe("runDevTerminalAction — gh pr create failure (AC3g)", () => {
         summary: SUMMARY,
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
+        worktree: false,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(GhPrCreateFailedError);
@@ -706,6 +721,7 @@ describe("runDevTerminalAction — manifest not mutated (AC3h)", () => {
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -726,6 +742,7 @@ describe("runDevTerminalAction — ACs checklist mirroring (AC3i)", () => {
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -757,6 +774,7 @@ describe("runDevTerminalAction — ACs checklist mirroring (AC3i)", () => {
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -791,6 +809,7 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -834,6 +853,7 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
       summary: SUMMARY,
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
+      worktree: false,
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
@@ -865,6 +885,7 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
         summary: SUMMARY,
         manifestPath: ctx.manifestPath,
         sessionUlid: SESSION_ULID,
+        worktree: false,
         execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
       }),
     ).rejects.toBeInstanceOf(GhPrCreateFailedError);

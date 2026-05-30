@@ -9,18 +9,30 @@
  *
  * @see _bmad-output/implementation-artifacts/4-4-dev-subagent-git-push-and-gh-pr-create-terminal-action.md § Behavioural contract
  *
- * Invariants (all enforced BEFORE any subprocess spawn):
+ * Worktree isolation (Story 8.16): by default the branch/commit/push/PR are
+ * produced inside a dedicated git worktree distinct from `targetRepoRoot`,
+ * carrying ONLY the dev's own changed paths (an explicit stage set — never
+ * `git add .`). This leaves the orchestrating session's checkout untouched and
+ * prevents a stray uncommitted change from being swept into the story PR. The
+ * worktree is always torn down (success or failure) so repeated drains never
+ * accumulate orphans. Pass `worktree: false` to commit in `targetRepoRoot`
+ * directly (the legacy Story 4.4 path, retained for that story's tests).
+ *
+ * Invariants (the validation invariants are enforced BEFORE any subprocess spawn):
  * - `type` MUST be in the conventional-commits set.
  * - Branch slug MUST be renderable from `ref` + `title`.
- * - The five steps execute in strict order: createBranch → readManifest →
- *   extractAcs → commit → push → composePrBody → gh pr create.
+ * - Steps execute in strict order: validateType → branchSlug → readManifest →
+ *   extractAcs → materialiseWorktree → createBranch → commit → push →
+ *   composePrBody → gh pr create → cleanup.
+ * - The commit stages an EXPLICIT path set (the dev's own changes), never an
+ *   indiscriminate `git add .`.
  * - No flags are passed to push or gh pr create beyond the closed v1 signatures.
- * - No file outside the git working tree is mutated (manifest is read-only).
+ * - The manifest is read-only.
  * - No telemetry emitted in v1.
  * - Returns `{ ok: true, branch, commitSha, prUrl }` on success; raises a
  *   typed error on failure.
  *
- * (Story 4.4 FR29 / Pattern §9 / NFR16)
+ * (Story 4.4 FR29 / Pattern §9 / NFR16; worktree isolation: Story 8.16)
  */
 import { execa as defaultExeca } from "execa";
 export interface DevTerminalActionResult {
@@ -46,6 +58,22 @@ export interface DevTerminalActionResult {
  *                             targeting a repo whose trunk is not `dev` must pass
  *                             this explicitly (a productization follow-up will
  *                             source it from adapter config).
+ * @param opts.worktree        Worktree isolation (Story 8.16). Defaults to ON:
+ *                             the branch/commit/push/PR are produced inside a
+ *                             dedicated git worktree distinct from
+ *                             `targetRepoRoot`, carrying ONLY the dev's own
+ *                             changed paths (an explicit set — never `git add .`)
+ *                             so the orchestrating checkout is left untouched and
+ *                             a stray uncommitted change is never swept into the
+ *                             PR. Pass `false` to commit in `targetRepoRoot`
+ *                             directly (legacy behaviour; used by Story 4.4's
+ *                             integration tests).
+ * @param opts.baselineDirtyPaths  Repo-relative paths already dirty BEFORE the
+ *                             dev started — excluded from the worktree transplant
+ *                             so unrelated working-tree changes never ride along
+ *                             (AC2). The drain workflow captures this snapshot
+ *                             immediately before spawning the dev. Ignored when
+ *                             `worktree` is `false`.
  * @param opts.execaImpl       Optional test seam (production callers omit this).
  */
 export declare function runDevTerminalAction(opts: {
@@ -58,5 +86,7 @@ export declare function runDevTerminalAction(opts: {
     manifestPath: string;
     sessionUlid: string;
     base?: string;
+    worktree?: boolean;
+    baselineDirtyPaths?: readonly string[];
     execaImpl?: typeof defaultExeca;
 }): Promise<DevTerminalActionResult>;

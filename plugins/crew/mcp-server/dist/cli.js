@@ -36,6 +36,7 @@ import { readBacklogInventory } from "./tools/read-backlog-inventory.js";
 import { claimNextStory } from "./tools/claim-next-story.js";
 import { processDevTranscript } from "./tools/process-dev-transcript.js";
 import { runDevTerminalAction } from "./tools/run-dev-terminal-action.js";
+import { snapshotDirtyPaths } from "./tools/snapshot-dirty-paths.js";
 import { runReviewerSession } from "./tools/run-reviewer-session.js";
 import { postReviewerComments } from "./tools/post-reviewer-comments.js";
 import { processReviewerTranscript } from "./tools/process-reviewer-transcript.js";
@@ -60,6 +61,7 @@ const TOOLS = {
     claimNextStory,
     processDevTranscript,
     runDevTerminalAction,
+    snapshotDirtyPaths,
     runReviewerSession,
     postReviewerComments,
     processReviewerTranscript,
