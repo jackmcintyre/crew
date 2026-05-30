@@ -108,11 +108,6 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
 /**
- * The closed `blocked_by` enum type — Story 5.13 AC2.
- * Thirteen members; see JSDoc on the `blocked_by` field above.
- */
-export type BlockedBy = NonNullable<ExecutionManifest["blocked_by"]>;
-/**
  * Canonical reader for execution manifests.
  *
  * **Every future reader MUST go through this helper.** Callers should never

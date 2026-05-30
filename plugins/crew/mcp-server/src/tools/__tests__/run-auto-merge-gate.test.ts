@@ -61,20 +61,6 @@ const DEFAULT_LABELS_RESPONSE = JSON.stringify([
 ]);
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SKILL_FILE = path.resolve(
-  HERE,
-  "..", // src/tools/
-  "..", // src/
-  "..", // mcp-server/
-  "..", // plugins/crew/
-  "..", // plugins/
-  "..", // repo root (worktree)
-  "plugins",
-  "crew",
-  "skills",
-  "start",
-  "SKILL.md",
-);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -866,44 +852,11 @@ describe("AC5(e) — low + insufficient-data pauses", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// (5i) (f) Manual-merge override (structural SKILL.md check)
-// ---------------------------------------------------------------------------
-
-describe("AC5(f) — manual-merge override (structural SKILL.md check)", () => {
-  it("SKILL.md contains runAutoMergeGate invocation", async () => {
-    const raw = await fs.readFile(SKILL_FILE, "utf8");
-    expect(raw).toContain("runAutoMergeGate");
-  });
-
-  it("runAutoMergeGate appears under done-ready-for-merge branch only (not under done-blocked-*)", async () => {
-    const raw = await fs.readFile(SKILL_FILE, "utf8");
-
-    // Strip the YAML frontmatter (everything between the opening --- and closing ---)
-    // so we're only searching the body prose, not the allowed_tools list.
-    const bodyMatch = /^---\n[\s\S]*?\n---\n([\s\S]*)$/m.exec(raw);
-    expect(bodyMatch, "SKILL.md must have valid YAML front-matter").not.toBeNull();
-    const body = bodyMatch![1]!;
-
-    // Find the done-ready-for-merge section in the body
-    const readyForMergeIdx = body.indexOf("done-ready-for-merge");
-    expect(readyForMergeIdx).toBeGreaterThan(-1);
-
-    // Find done-blocked sections in the body
-    // Story 5.21: done-blocked-no-session-result removed; use done-blocked-reviewer-blocked as the sibling anchor.
-    const blockedNeedsChangesIdx = body.indexOf("done-blocked-reviewer-needs-changes");
-    const blockedBlockedIdx = body.indexOf("done-blocked-reviewer-blocked");
-
-    // runAutoMergeGate invocation (prose) should appear after done-ready-for-merge
-    const gateIdx = body.indexOf("runAutoMergeGate(");
-    expect(gateIdx).toBeGreaterThan(-1);
-    expect(gateIdx).toBeGreaterThan(readyForMergeIdx);
-
-    // runAutoMergeGate invocation should appear BEFORE the blocked sections
-    const firstBlockedIdx = Math.min(blockedNeedsChangesIdx, blockedBlockedIdx);
-    expect(gateIdx).toBeLessThan(firstBlockedIdx);
-  });
-});
+// Note: the former AC5(f)/AC5(i) "structural SKILL.md check" tests (which read
+// skills/start/SKILL.md to assert the orchestration prose invoked runAutoMergeGate
+// under the right branch) were removed when /crew:start was retired — the drain
+// workflow is the orchestration now, and the gate TOOL is covered by the cases
+// above + below. (daemon-retirement, 2026-05-30)
 
 // ---------------------------------------------------------------------------
 // (5j) (g) No-tier pause (legacy manifest)
@@ -948,22 +901,6 @@ describe("AC5(h) — boundary: ratio exactly equals threshold (>= semantics)", (
     expect(result.decision).toBe("auto-merge");
     expect(result.reason).toBe("low-risk-met-threshold");
     expect(result.merged).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// (5l) (i) SKILL.md content-structure: literal invocation anchor
-// ---------------------------------------------------------------------------
-
-describe("AC5(i) — SKILL.md contains literal runAutoMergeGate invocation anchor", () => {
-  it("prose under done-ready-for-merge contains the tool invocation with the required argument keys", async () => {
-    const raw = await fs.readFile(SKILL_FILE, "utf8");
-    // Strip frontmatter so we're checking the prose body, not the allowed_tools list
-    const bodyMatch = /^---\n[\s\S]*?\n---\n([\s\S]*)$/m.exec(raw);
-    expect(bodyMatch).not.toBeNull();
-    const body = bodyMatch![1]!;
-    // Regex that allows whitespace flex but pins the tool name and argument keys
-    expect(body).toMatch(/runAutoMergeGate\s*\(\s*\{[^}]*targetRepoRoot[^}]*prNumber[^}]*ref[^}]*sessionUlid[^}]*\}\s*\)/);
   });
 });
 
