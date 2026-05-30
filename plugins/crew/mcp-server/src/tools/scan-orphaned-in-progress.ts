@@ -24,10 +24,13 @@ import { parse as yamlParse } from "yaml";
 import { execa as defaultExeca } from "execa";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 import { buildBranchSlug } from "../lib/pr-body.js";
+import { readDevOutcomeFile } from "../lib/read-dev-outcome-file.js";
 
 export interface OrphanedManifest {
   /** Story ref, e.g. `"native:01HZ..."` or `"bmad:1.1"`. */
   ref: string;
+  /** Story title from the manifest — needed by the drain to re-run the dev phase. */
+  title: string;
   /** The stale `claimed_by` ULID from the manifest. */
   staleUlid: string;
   /** Absolute path to the in-progress manifest file. */
@@ -43,6 +46,19 @@ export interface OrphanedManifest {
    * fallback to the existing `blockOrphanNoTranscript` behaviour. (Story 5.20 AC1)
    */
   hasOpenPR: boolean;
+  /**
+   * PR number recovered from the orphan's (stale) session `dev-outcome.json`,
+   * or `null` if the dev never opened a PR (file absent) or the file is
+   * malformed. The autonomous drain uses this to resume at review WITHOUT
+   * re-running dev. Added in the crash-recovery change.
+   */
+  prNumber: number | null;
+  /**
+   * The story's crash-resume count so far (manifest `drain_resume_attempts`,
+   * `0` if unset). The drain caps resumptions on this so a doomed story cannot
+   * loop forever. Added in the crash-recovery change.
+   */
+  resumeAttempts: number;
 }
 
 export interface ScanOrphanedInProgressResult {
@@ -169,13 +185,27 @@ export async function scanOrphanedInProgress(
       hasOpenPR = false;
     }
 
+    // Recover the PR number (if any) from the stale session's dev-outcome.json
+    // so the drain can resume at review without re-running dev. Defensive: a
+    // malformed/absent outcome file must NOT abort the whole scan — treat as null.
+    let prNumber: number | null = null;
+    try {
+      const outcome = await readDevOutcomeFile(targetRepoRoot, staleUlid);
+      prNumber = outcome?.prNumber ?? null;
+    } catch {
+      prNumber = null;
+    }
+
     orphans.push({
       ref: manifest.ref,
+      title: manifest.title,
       staleUlid,
       manifestPath: absPath,
       transcriptPath,
       hasTranscript,
       hasOpenPR,
+      prNumber,
+      resumeAttempts: manifest.drain_resume_attempts ?? 0,
     });
   }
 

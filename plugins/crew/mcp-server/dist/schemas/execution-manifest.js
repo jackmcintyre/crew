@@ -190,6 +190,19 @@ export const ExecutionManifestSchema = z
      */
     rework_count: z.number().int().nonnegative().optional(),
     /**
+     * Count of times the autonomous drain has re-claimed this story after a
+     * prior run left it orphaned in `in-progress/` (a crash/interruption).
+     * `undefined` ≡ `0`. Incremented in-place by `reattachOrphan` each time the
+     * drain auto-resumes the orphan. The drain caps resumes on this count so a
+     * genuinely-broken story cannot loop forever — past the cap it is blocked
+     * (`orphan-no-transcript`) for a human instead of re-resumed.
+     *
+     * Distinct from `rework_count` (NEEDS CHANGES rounds within one session);
+     * this counts crash-resumptions across sessions. Added in the crash-recovery
+     * change (drain auto-resume).
+     */
+    drain_resume_attempts: z.number().int().nonnegative().optional(),
+    /**
      * Risk tier verdict from the classifier (Story 4.9b — FR40a, Pattern §11).
      * Written by `postReviewerComments` after a successful POST/PATCH.
      * Optional so existing manifests (to-do/, blocked/) parse unchanged.
