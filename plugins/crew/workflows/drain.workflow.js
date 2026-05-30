@@ -35,17 +35,29 @@ const RawSchema = { type: 'object', additionalProperties: false, properties: { s
 const safeParse = (s) => { try { return JSON.parse(String(s).trim()) } catch (e) { return { _parseError: String(e), raw: String(s).slice(0, 400) } } }
 const J = (o) => JSON.stringify(o)
 
-// A SEAM: a cheap one-shot courier (haiku) that runs ONE CLI command verbatim
+// A SEAM: a cheap one-shot courier (sonnet) that runs ONE CLI command verbatim
 // and returns its single JSON line. This is the deterministic-seam discipline —
 // every load-bearing decision is a tool call, never script JS and never agent prose.
-const seam = async (cmd, label) => {
-  const r = await agent(
-    `You are a deterministic command runner. Use the Bash tool to execute the command below EXACTLY as written. ` +
-      `Hard rules: do NOT modify the command, do NOT change or "correct" any path, do NOT cd, do NOT read files, do NOT run anything else. ` +
-      `It prints exactly one line of JSON to stdout — return that line verbatim in the "stdout" field.\n\nCOMMAND:\n${cmd}`,
-    { schema: RawSchema, label, phase: 'drain', model: 'haiku' },
-  )
-  return r ? safeParse(r.stdout) : { _parseError: 'agent-null' }
+// `retryable` re-invokes the courier on a garbled (non-JSON) relay — a fresh LLM
+// call usually returns clean JSON. Safe ONLY for read-only / idempotent seams.
+// MUTATING seams (claim / verdict / gate) leave retryable=false: a garble there
+// safely pauses that one story (no-silent-failure) rather than risk re-applying a
+// mutation the first call may already have landed. Sonnet makes garbles rare to begin with.
+const seam = async (cmd, label, retryable = false) => {
+  const attempts = retryable ? 3 : 1
+  let parsed = { _parseError: 'agent-null' }
+  for (let a = 0; a < attempts; a++) {
+    const r = await agent(
+      `You are a deterministic command runner. Use the Bash tool to execute the command below EXACTLY as written. ` +
+        `Hard rules: do NOT modify the command, do NOT change or "correct" any path, do NOT cd, do NOT read files, do NOT run anything else. ` +
+        `It prints exactly one line of JSON to stdout — return that line verbatim in the "stdout" field.\n\nCOMMAND:\n${cmd}`,
+      { schema: RawSchema, label, phase: 'drain', model: 'sonnet' },
+    )
+    parsed = r ? safeParse(r.stdout) : { _parseError: 'agent-null' }
+    if (!parsed._parseError) return parsed
+    if (a < attempts - 1) log(`seam ${label} garbled relay (attempt ${a + 1}/${attempts}) — retrying`)
+  }
+  return parsed
 }
 
 phase('drain')
@@ -53,13 +65,13 @@ if (!REPO || !CLI) return { error: 'missing-args', need: ['targetRepoRoot', 'cli
 
 // Session id: prefer the launcher-minted id (Layer-1 journal stability across
 // resume); fall back to minting one via the CLI for a standalone run.
-const SU = A.sessionUlid || (await seam(`node ${CLI} mintSessionUlid`, 'mint')).sessionUlid
+const SU = A.sessionUlid || (await seam(`node ${CLI} mintSessionUlid`, 'mint', true)).sessionUlid
 if (!SU) return { error: 'no-session-ulid' }
 log(`drain session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' : MAX} maxRework=${MAX_REWORK}`)
 
 // Persona system prompts — these carry the evidence-only discipline (Story 8.3):
 // agents produce code / a PR / a transcript; the TOOLS own the backlog ledger.
-const devPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-dev' })}'`, 'persona:dev'))?.systemPrompt || ''
+const devPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-dev' })}'`, 'persona:dev', true))?.systemPrompt || ''
 
 const completed = [], merged = [], pausedForHuman = [], blocked = []
 // Set the moment the loop exits; every break path below overwrites this placeholder.
@@ -115,7 +127,9 @@ for (let i = 0; ; i++) {
     // The handoff line is the only transcript content processDevTranscript parses
     // for routing; prNumber comes from the machine-written outcome file. Feeding
     // the canonical (verified-present) handoff keeps the seam's shell arg safe.
-    const pd = await seam(`node ${CLI} processDevTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, devTranscript: HANDOFF(ref) })}'`, `pd:${ref}:${rw}`)
+    // processDevTranscript is idempotent (re-reads dev-outcome.json, re-stamps the
+    // same blocked_by) — safe to retry the relay on a garble.
+    const pd = await seam(`node ${CLI} processDevTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, devTranscript: HANDOFF(ref) })}'`, `pd:${ref}:${rw}`, true)
     if (!pd || pd.next !== 'spawn-reviewer') { blocked.push({ ref, blocked_by: pd?.next || pd?._parseError || 'pd-failed' }); break }
     prNumber = pd.prNumber
     log(`${ref} -> PR #${prNumber}`)

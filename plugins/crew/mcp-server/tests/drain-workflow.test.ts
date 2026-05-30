@@ -81,11 +81,25 @@ describe("Story 8.5 — drain workflow integrity", () => {
     expect(SRC).toContain("Infinity");
   });
 
-  it("uses haiku couriers for seams; dev runs in targetRepoRoot (no isolated worktree)", () => {
-    expect(SRC).toContain("model: 'haiku'");
+  it("uses sonnet couriers for seams; dev runs in targetRepoRoot (no isolated worktree)", () => {
+    // Couriers relay tool JSON verbatim; sonnet is far more reliable at that than
+    // haiku (which garbled a verdict relay on the first multi-story drain, story 8.13).
+    expect(SRC).toContain("model: 'sonnet'");
+    expect(SRC).not.toContain("model: 'haiku'");
     // The serial drain runs the dev directly in targetRepoRoot so
     // runDevTerminalAction's cwd aligns (an isolated worktree mismatches — first-run fix).
     // A worktree-per-dev for PARALLEL multi-story drains is a post-Stage-1 follow-up.
     expect(SRC).not.toContain("isolation: 'worktree'");
+  });
+
+  it("retries the relay only on read-only/idempotent seams (mutating seams pause safely)", () => {
+    // The seam helper takes a `retryable` flag (default false) and re-invokes the
+    // courier on a garbled (non-JSON) relay.
+    expect(SRC).toContain("retryable = false");
+    // Read-only / idempotent seams opt in: mint, persona, processDevTranscript.
+    expect(SRC).toContain("'mint', true");
+    expect(SRC).toContain("'persona:dev', true");
+    // Mutating seams (claim / verdict / gate) omit retryable → a garble surfaces as a
+    // parse error and the loop pauses that story rather than risk a double-apply.
   });
 });
