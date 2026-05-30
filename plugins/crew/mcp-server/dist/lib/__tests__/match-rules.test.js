@@ -150,3 +150,79 @@ describe("matchRule — AND-combination", () => {
         }).matched).toBe(false);
     });
 });
+// ---------------------------------------------------------------------------
+// additive_only signal (Stage-2 part C)
+// ---------------------------------------------------------------------------
+describe("matchRule — additive_only", () => {
+    const rule = { id: "low.additive-only", additive_only: true };
+    it("matches when the diff is additive-only", () => {
+        const result = matchRule(rule, {
+            changedPaths: ["src/new.ts"],
+            detectedChangeTypes: [],
+            diffSize: 10,
+            additiveOnly: true,
+        });
+        expect(result.matched).toBe(true);
+    });
+    it("does NOT match when the diff is not additive-only", () => {
+        const result = matchRule(rule, {
+            changedPaths: ["src/existing.ts"],
+            detectedChangeTypes: [],
+            diffSize: 10,
+            additiveOnly: false,
+        });
+        expect(result.matched).toBe(false);
+    });
+    it("does NOT match when additiveOnly is unknown (undefined → conservative)", () => {
+        const result = matchRule(rule, {
+            changedPaths: ["src/x.ts"],
+            detectedChangeTypes: [],
+            diffSize: 10,
+        });
+        expect(result.matched).toBe(false);
+    });
+    it("AND-combines with diff_size_thresholds — additive AND within size matches", () => {
+        const combo = {
+            id: "low.additive-bounded",
+            additive_only: true,
+            diff_size_thresholds: { max_lines_changed: 300 },
+        };
+        expect(matchRule(combo, { changedPaths: ["a.ts"], detectedChangeTypes: [], diffSize: 200, additiveOnly: true }).matched).toBe(true);
+        // additive but over the size cap → no match
+        expect(matchRule(combo, { changedPaths: ["a.ts"], detectedChangeTypes: [], diffSize: 400, additiveOnly: true }).matched).toBe(false);
+    });
+});
+// ---------------------------------------------------------------------------
+// path_excludes guard (subtractive)
+// ---------------------------------------------------------------------------
+describe("matchRule — path_excludes", () => {
+    const rule = {
+        id: "low.additive-only",
+        additive_only: true,
+        path_excludes: [".github/**", "**/package.json"],
+    };
+    it("does NOT match when a changed path hits an exclude, even if additive", () => {
+        expect(matchRule(rule, {
+            changedPaths: [".github/workflows/release.yml"],
+            detectedChangeTypes: [],
+            diffSize: 10,
+            additiveOnly: true,
+        }).matched).toBe(false);
+    });
+    it("does NOT match when ANY of several paths is excluded", () => {
+        expect(matchRule(rule, {
+            changedPaths: ["src/safe.ts", "tools/foo/package.json"],
+            detectedChangeTypes: [],
+            diffSize: 10,
+            additiveOnly: true,
+        }).matched).toBe(false);
+    });
+    it("matches when no changed path is excluded", () => {
+        expect(matchRule(rule, {
+            changedPaths: ["src/new-helper.ts", "src/new-helper.test.ts"],
+            detectedChangeTypes: [],
+            diffSize: 10,
+            additiveOnly: true,
+        }).matched).toBe(true);
+    });
+});

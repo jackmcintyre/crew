@@ -50,7 +50,11 @@ export type AutoMergeGateReason =
   | "low-risk-provisional-trust"
   | "medium-risk"
   | "high-risk"
-  | "no-tier-no-signal";
+  | "no-tier-no-signal"
+  // Emitted by `runAutoMergeGate` (NOT `decideAutoMerge`): the risk gate said
+  // auto-merge, but the PR's CI was not green within the wait window, so the
+  // gate downgraded to pause-needs-human. (Stage-2 CI-gating.)
+  | "ci-not-green";
 
 export interface DecideAutoMergeInput {
   /** The manifest's `risk_tier` field. May be `undefined` for legacy manifests. */

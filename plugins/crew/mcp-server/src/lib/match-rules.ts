@@ -11,6 +11,10 @@
  * - `diff_size_thresholds`: if present, `diffSize` satisfies the bounds
  *   (`min_lines_changed ≤ diffSize ≤ max_lines_changed`, with absent bounds
  *   treated as -∞ and +∞ respectively).
+ * - `additive_only`: if `true`, the PR's diff must be additive-only (every
+ *   changed file is a new-file addition — `ctx.additiveOnly`).
+ * - `path_excludes`: subtractive guard — if ANY changed file matches any of
+ *   these globs, the rule does NOT match, regardless of its positive signals.
  *
  * Absent signal fields are "not declared" and do NOT constrain the match.
  * Story 4.9's schema guarantees every rule declares at least one signal, so
@@ -25,6 +29,13 @@ export interface MatchRuleContext {
   changedPaths: string[];
   detectedChangeTypes: ChangeType[];
   diffSize: number;
+  /**
+   * True iff every changed file in the PR is a brand-new file addition — no
+   * existing file modified, deleted, or renamed (Stage-2 part C). Consulted
+   * only by rules that declare `additive_only: true`. Absent/undefined reads
+   * as "not additive" (conservative: such a rule won't match without proof).
+   */
+  additiveOnly?: boolean;
 }
 
 export interface MatchRuleResult {
@@ -45,6 +56,14 @@ export interface MatchRuleResult {
  *          when `path_patterns` was present and matched.
  */
 export function matchRule(rule: Rule, ctx: MatchRuleContext): MatchRuleResult {
+  // --- path_excludes guard (subtractive) — any excluded path disqualifies ---
+  if (rule.path_excludes !== undefined) {
+    const isExcluded = picomatch(rule.path_excludes);
+    if (ctx.changedPaths.some((p) => isExcluded(p))) {
+      return { matched: false, matchedPaths: [] };
+    }
+  }
+
   // --- path_patterns signal ---
   let pathSignalSatisfied = rule.path_patterns === undefined; // absent ⇒ satisfied
   let matchedPaths: string[] = [];
@@ -78,6 +97,11 @@ export function matchRule(rule: Rule, ctx: MatchRuleContext): MatchRuleResult {
     if (max_lines_changed !== undefined && ctx.diffSize > max_lines_changed) {
       return { matched: false, matchedPaths: [] };
     }
+  }
+
+  // --- additive_only signal ---
+  if (rule.additive_only === true && !ctx.additiveOnly) {
+    return { matched: false, matchedPaths: [] };
   }
 
   return { matched: true, matchedPaths };

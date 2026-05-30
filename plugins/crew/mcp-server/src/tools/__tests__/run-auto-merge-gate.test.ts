@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import {
   runAutoMergeGate,
   AutoMergeGateResultSchema,
+  classifyCiRollup,
 } from "../run-auto-merge-gate.js";
 import { registerAllTools } from "../register.js";
 import type { AgreementMetricResult } from "../compute-agreement.js";
@@ -375,6 +376,9 @@ function baseOpts(
     ref: REF,
     sessionUlid: SESSION_ULID,
     pluginRootOverride: pluginRoot,
+    // Default the CI gate to green so existing auto-merge assertions hold; the
+    // CI-gating tests override this to exercise failed / pending-timeout.
+    ciGateImpl: async () => "green",
     ...override,
   };
 }
@@ -520,6 +524,144 @@ describe("Stage-2 — provisional trust + reviewer-result tier fallback", () => 
     expect(result.decision).toBe("auto-merge");
     expect(result.reason).toBe("low-risk-provisional-trust");
     expect(fallbackConsulted).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stage-2 CI-gating: never auto-merge a PR whose CI is not green
+// ---------------------------------------------------------------------------
+
+describe("classifyCiRollup", () => {
+  it("all checks SUCCESS (CheckRun) → green", () => {
+    expect(classifyCiRollup([
+      { status: "COMPLETED", conclusion: "SUCCESS", name: "build" },
+      { status: "COMPLETED", conclusion: "SKIPPED", name: "lint" },
+    ])).toBe("green");
+  });
+
+  it("any failing check → failed", () => {
+    expect(classifyCiRollup([
+      { status: "COMPLETED", conclusion: "SUCCESS", name: "build" },
+      { status: "COMPLETED", conclusion: "FAILURE", name: "test" },
+    ])).toBe("failed");
+  });
+
+  it("any in-progress check → pending", () => {
+    expect(classifyCiRollup([
+      { status: "IN_PROGRESS", name: "build" },
+    ])).toBe("pending");
+  });
+
+  it("empty rollup → pending (checks not registered yet, conservatively not green)", () => {
+    expect(classifyCiRollup([])).toBe("pending");
+  });
+
+  it("StatusContext state SUCCESS → green, FAILURE → failed, PENDING → pending", () => {
+    expect(classifyCiRollup([{ state: "SUCCESS", context: "ci" }])).toBe("green");
+    expect(classifyCiRollup([{ state: "FAILURE", context: "ci" }])).toBe("failed");
+    expect(classifyCiRollup([{ state: "PENDING", context: "ci" }])).toBe("pending");
+  });
+
+  // Allowlist guards (code-review): non-success non-failure states must NOT green-wash.
+  it("SKIPPED / NEUTRAL completed checks count as pass → green", () => {
+    expect(classifyCiRollup([
+      { status: "COMPLETED", conclusion: "SUCCESS", name: "build" },
+      { status: "COMPLETED", conclusion: "SKIPPED", name: "optional" },
+      { status: "COMPLETED", conclusion: "NEUTRAL", name: "advisory" },
+    ])).toBe("green");
+  });
+
+  it("COMPLETED check with UNKNOWN conclusion → pending (not green)", () => {
+    expect(classifyCiRollup([
+      { status: "COMPLETED", conclusion: "SOME_FUTURE_VALUE", name: "x" },
+    ])).toBe("pending");
+  });
+
+  it("COMPLETED check with no conclusion → pending (not green)", () => {
+    expect(classifyCiRollup([{ status: "COMPLETED", name: "x" }])).toBe("pending");
+  });
+
+  it("sparse / unrecognized-shape item → pending, and never green-washes a sibling", () => {
+    expect(classifyCiRollup([{ __typename: "Unknown" }])).toBe("pending");
+    // a passing check + a sparse item must NOT be green (the sparse item is unproven)
+    expect(classifyCiRollup([
+      { status: "COMPLETED", conclusion: "SUCCESS" },
+      { __typename: "Unknown" },
+    ])).toBe("pending");
+  });
+
+  it("lowercase/odd failure value is NOT treated as failure but is NOT green either (pending)", () => {
+    expect(classifyCiRollup([{ status: "COMPLETED", conclusion: "failure" }])).toBe("pending");
+  });
+});
+
+describe("Stage-2 CI gate — non-green CI blocks the auto-merge", () => {
+  it("risk says auto-merge but CI failed → pause-needs-human (ci-not-green), label applied, NOT merged", async () => {
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    const { impl: fakeExeca, calls } = makePauseExeca();
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(makeMetric(0.95)), // risk gate would auto-merge
+      ciGateImpl: async () => "failed",
+    }));
+
+    expect(result.decision).toBe("pause-needs-human");
+    expect(result.reason).toBe("ci-not-green");
+    expect(result.merged).toBe(false);
+    expect(result.labelsApplied).toEqual(["needs-human"]);
+    // no pr merge call happened
+    const mergeCalls = calls.filter(c => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "merge");
+    expect(mergeCalls).toHaveLength(0);
+  });
+
+  it("CI still pending at timeout → pause-needs-human (ci-not-green), NOT merged", async () => {
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    const { impl: fakeExeca } = makePauseExeca();
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(makeMetric(0.95)),
+      ciGateImpl: async () => "pending-timeout",
+    }));
+
+    expect(result.decision).toBe("pause-needs-human");
+    expect(result.reason).toBe("ci-not-green");
+    expect(result.merged).toBe(false);
+  });
+
+  it("CI green → merge proceeds (gate fires only on green)", async () => {
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+    const { impl: fakeExeca } = makeMergeExeca();
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(makeMetric(0.95)),
+      ciGateImpl: async () => "green",
+    }));
+
+    expect(result.decision).toBe("auto-merge");
+    expect(result.merged).toBe(true);
+  });
+
+  it("CI gate does NOT run when the risk gate already pauses (medium)", async () => {
+    await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "medium" });
+    const { impl: fakeExeca } = makePauseExeca();
+    let ciConsulted = false;
+
+    const result = await runAutoMergeGate(baseOpts({
+      dryRun: false,
+      execaImpl: fakeExeca,
+      computeAgreementImpl: makeAgreementImpl(makeMetric(0.95)),
+      ciGateImpl: async () => { ciConsulted = true; return "green"; },
+    }));
+
+    expect(result.decision).toBe("pause-needs-human");
+    expect(result.reason).toBe("medium-risk");
+    expect(ciConsulted).toBe(false);
   });
 });
 
@@ -944,6 +1086,7 @@ describe("AC5(m) — pr-merge denied without permission entry in gh_allow", () =
         execaImpl: fakeExeca,
         computeAgreementImpl: makeAgreementImpl(makeMetric(0.8)),
         thresholdOverride: 0.8,
+        ciGateImpl: async () => "green",
       }),
     ).rejects.toThrow(GhSubcommandDeniedError);
   });
@@ -1109,6 +1252,7 @@ describe("Story 5.34 — AC2: real generalist-dev permissions, both gate branche
       dryRun: false,
       execaImpl: fakeExeca,
       computeAgreementImpl: makeAgreementImpl(makeMetric(0.9)), // above default 0.8 threshold
+      ciGateImpl: async () => "green",
     });
 
     expect(result.decision).toBe("auto-merge");

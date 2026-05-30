@@ -79,6 +79,12 @@ export interface ClassifyRiskTierOptions {
   commitMessages: string[];
   /** Total lines added + removed across the PR */
   diffSize: number;
+  /**
+   * True iff every changed file in the PR is a brand-new file addition — no
+   * existing file modified/deleted/renamed (Stage-2 part C). Defaults to
+   * `false` when omitted (callers that cannot compute it stay conservative).
+   */
+  additiveOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +133,7 @@ export async function classifyRiskTier(
   opts: ClassifyRiskTierOptions,
 ): Promise<RiskTierClassifierResult> {
   const { targetRepoRoot, pluginRoot, storyId, changedPaths, commitMessages, diffSize } = opts;
+  const additiveOnly = opts.additiveOnly ?? false;
 
   // Step 1: Load spec (propagates errors verbatim)
   const spec = await lookupRiskTieringSpec({ targetRepoRoot, pluginRoot });
@@ -142,6 +149,7 @@ export async function classifyRiskTier(
         changedPaths,
         detectedChangeTypes,
         diffSize,
+        additiveOnly,
       });
 
       if (!matched) continue;

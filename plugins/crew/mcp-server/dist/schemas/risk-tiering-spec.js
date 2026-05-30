@@ -29,11 +29,30 @@ export const RuleSchema = z
     path_patterns: z.array(z.string().min(1)).min(1).optional(),
     change_types: z.array(ChangeTypeSchema).min(1).optional(),
     diff_size_thresholds: DiffSizeThresholdsSchema.optional(),
+    /**
+     * Subtractive guard: if ANY changed file matches any of these globs, the
+     * rule does NOT match — regardless of its other (positive) signals. Used to
+     * keep convention-wired / high-blast-radius additions (CI workflows,
+     * dependency manifests, config overrides, scripts) out of a `low` tier even
+     * when they are purely additive. Not a standalone signal — a rule must also
+     * declare at least one positive signal.
+     */
+    path_excludes: z.array(z.string().min(1)).min(1).optional(),
+    /**
+     * Additive-only signal (Stage-2 part C). When `true`, the rule matches only
+     * if EVERY changed file in the PR is a brand-new file addition — no existing
+     * file is modified, deleted, or renamed. Purely-additive code cannot alter
+     * an existing code path (wiring it in would require editing an existing file,
+     * which makes the PR no longer additive-only), so it is genuinely low-risk.
+     * `false`/absent does not constrain the match.
+     */
+    additive_only: z.boolean().optional(),
 })
     .strict()
     .refine((rule) => rule.path_patterns !== undefined ||
     rule.change_types !== undefined ||
-    rule.diff_size_thresholds !== undefined, { message: "rule declares no signal fields" });
+    rule.diff_size_thresholds !== undefined ||
+    rule.additive_only !== undefined, { message: "rule declares no signal fields" });
 export const RiskTieringSpecSchema = z
     .object({
     version: z.string().regex(/^\d+\.\d+\.\d+$/),
