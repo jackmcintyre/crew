@@ -22,8 +22,14 @@
  * - `type` MUST be in the conventional-commits set.
  * - Branch slug MUST be renderable from `ref` + `title`.
  * - Steps execute in strict order: validateType → branchSlug → readManifest →
- *   extractAcs → materialiseWorktree → createBranch → commit → push →
- *   composePrBody → gh pr create → cleanup.
+ *   extractAcs → materialiseWorktree → createBranch → commit → fullBuildGate →
+ *   push → composePrBody → gh pr create → cleanup.
+ * - The full-build gate (Story 8.17) runs the project's full build — the same
+ *   whole-project type-check CI runs (`pnpm build` at `plugins/crew`) — in the
+ *   dev's working directory AFTER the commit and BEFORE `gh pr create`, so a red
+ *   build raises `PrePrBuildFailedError` and NO PR is opened. This is a
+ *   deterministic tool-layer seam: the dev agent cannot skip the build under load
+ *   the way a prose mandate could (the #211 failure class).
  * - The commit stages an EXPLICIT path set (the dev's own changes), never an
  *   indiscriminate `git add .`.
  * - No flags are passed to push or gh pr create beyond the closed v1 signatures.
@@ -35,7 +41,7 @@
  * (Story 4.4 FR29 / Pattern §9 / NFR16; worktree isolation: Story 8.16)
  */
 import * as path from "node:path";
-import { ConventionalCommitTypeUnknownError, GhPrCreateFailedError, } from "../errors.js";
+import { ConventionalCommitTypeUnknownError, GhPrCreateFailedError, PrePrBuildFailedError, } from "../errors.js";
 import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
 import { atomicWriteFile } from "../lib/managed-fs.js";
 import { gh } from "../lib/gh.js";
@@ -45,6 +51,7 @@ import { readManifest } from "../lib/manifest-io.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { materialiseDevStoryWorktree } from "../lib/dev-story-worktree.js";
+import { runProjectBuild } from "../lib/run-project-build.js";
 const ROLE = "generalist-dev";
 /**
  * Run the dev subagent's terminal action end-to-end.
@@ -155,14 +162,36 @@ export async function runDevTerminalAction(opts) {
             body: wrappedBody || undefined,
             ...(execaImpl ? { execaImpl } : {}),
         });
-        // (viii) Push.
+        // (viii) Full-build gate (Story 8.17). Run the project's full build — the
+        // same whole-project type-check CI runs (`pnpm build` at `plugins/crew`) — in
+        // the dev's working directory (`gitRoot`: the worktree when isolation is on,
+        // else `targetRepoRoot`). This is the deterministic tool-layer seam that
+        // replaces the prose-only "run the build green first" mandate: a red build
+        // raises PrePrBuildFailedError carrying the exit code + captured output, so NO
+        // PR is opened (the #211 failure class — a story broke an untouched sibling
+        // file and a red PR was opened). It runs AFTER the commit and BEFORE the push
+        // / PR-create, so a failing build never even reaches origin.
+        const buildResult = await runProjectBuild({
+            devWorkingDir: gitRoot,
+            ...(execaImpl ? { execaImpl } : {}),
+        });
+        if (buildResult.exitCode !== 0) {
+            throw new PrePrBuildFailedError({
+                exitCode: buildResult.exitCode,
+                buildCommand: buildResult.commandLine,
+                buildCwd: buildResult.cwd,
+                stdout: buildResult.stdout,
+                stderr: buildResult.stderr,
+            });
+        }
+        // (ix) Push.
         await gitPush({
             targetRepoRoot: gitRoot,
             branchName: branch,
             role: ROLE,
             ...(execaImpl ? { execaImpl } : {}),
         });
-        // (ix) Compose PR body.
+        // (x) Compose PR body.
         // specPath for the PR body should be repo-relative if possible.
         const specPathForPr = path.isAbsolute(manifest.source_path)
             ? path.relative(targetRepoRoot, manifest.source_path)
@@ -173,7 +202,7 @@ export async function runDevTerminalAction(opts) {
             acs,
             summary,
         });
-        // (x) gh pr create — cwd pinned to gitRoot so `gh` resolves the intended
+        // (xi) gh pr create — cwd pinned to gitRoot so `gh` resolves the intended
         // repo when the dev operates in a worktree (the worktree shares the same
         // .git object store and `origin` remote as targetRepoRoot).
         const pluginRoot = getPluginRoot();
@@ -199,7 +228,7 @@ export async function runDevTerminalAction(opts) {
                 diagnostic: "stdout did not contain a PR URL",
             });
         }
-        // (xi) Extract prNumber from the PR URL.
+        // (xii) Extract prNumber from the PR URL.
         const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
         if (!prNumberMatch) {
             throw new GhPrCreateFailedError({
@@ -208,14 +237,14 @@ export async function runDevTerminalAction(opts) {
             });
         }
         const prNumber = parseInt(prNumberMatch[1], 10);
-        // (xii) Atomically write dev-outcome.json to the session directory under
+        // (xiii) Atomically write dev-outcome.json to the session directory under
         // targetRepoRoot (NOT the worktree — the worktree is torn down, and
         // processDevTranscript reads the orchestrating checkout's session dir).
         // This must happen BEFORE return so the machine-authoritative PR number
         // is available to processDevTranscript without relying on LLM-authored text.
         const devOutcomePath = path.resolve(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, "dev-outcome.json");
         await atomicWriteFile(devOutcomePath, JSON.stringify({ prUrl, prNumber, branch, commitSha: commitResult.commitSha }, null, 2));
-        // (xiii) Return success.
+        // (xiv) Return success.
         return {
             ok: true,
             branch,
