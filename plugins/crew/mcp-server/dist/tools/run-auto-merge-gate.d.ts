@@ -47,19 +47,19 @@ export declare const AutoMergeGateResultSchema: z.ZodObject<{
         "pause-needs-human": "pause-needs-human";
     }>;
     reason: z.ZodEnum<{
-        "low-risk-met-threshold": "low-risk-met-threshold";
-        "low-risk-sub-threshold": "low-risk-sub-threshold";
-        "low-risk-insufficient-data": "low-risk-insufficient-data";
-        "low-risk-provisional-trust": "low-risk-provisional-trust";
-        "medium-risk": "medium-risk";
-        "high-risk": "high-risk";
-        "no-tier-no-signal": "no-tier-no-signal";
         "ci-not-green": "ci-not-green";
+        "high-risk": "high-risk";
+        "low-risk-insufficient-data": "low-risk-insufficient-data";
+        "low-risk-met-threshold": "low-risk-met-threshold";
+        "low-risk-provisional-trust": "low-risk-provisional-trust";
+        "low-risk-sub-threshold": "low-risk-sub-threshold";
+        "medium-risk": "medium-risk";
+        "no-tier-no-signal": "no-tier-no-signal";
     }>;
     risk_tier: z.ZodNullable<z.ZodEnum<{
-        medium: "medium";
-        low: "low";
         high: "high";
+        low: "low";
+        medium: "medium";
     }>>;
     agreement_metric: z.ZodNullable<z.ZodObject<{
         ratio: z.ZodNumber;

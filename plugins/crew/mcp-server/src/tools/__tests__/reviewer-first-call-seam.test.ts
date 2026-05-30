@@ -35,6 +35,7 @@ import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { processReviewerTranscript } from "../process-reviewer-transcript.js";
+import { sanitiseRefForPathSegment } from "../../lib/read-reviewer-result-file.js";
 import { ReviewerFirstCallSkippedError } from "../../errors.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { writeInProgressSnapshot } from "../../state/manifest-state-machine.js";

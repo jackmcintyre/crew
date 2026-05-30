@@ -30,18 +30,18 @@ import type { ChangeType } from "../schemas/risk-tiering-spec.js";
 export declare const RiskTierClassifierResultSchema: z.ZodObject<{
     story_id: z.ZodString;
     tier: z.ZodEnum<{
-        medium: "medium";
-        low: "low";
         high: "high";
+        low: "low";
+        medium: "medium";
     }>;
     matched_rule: z.ZodString;
     evidence: z.ZodObject<{
         paths: z.ZodArray<z.ZodString>;
         change_types: z.ZodArray<z.ZodEnum<{
-            revert: "revert";
-            migration: "migration";
-            schema: "schema";
             "dep-bump": "dep-bump";
+            migration: "migration";
+            revert: "revert";
+            schema: "schema";
         }>>;
         diff_size: z.ZodNumber;
     }, z.core.$strict>;
@@ -57,17 +57,17 @@ export declare const RiskTierBlockSchema: z.ZodObject<{
     evidence: z.ZodObject<{
         paths: z.ZodArray<z.ZodString>;
         change_types: z.ZodArray<z.ZodEnum<{
-            revert: "revert";
-            migration: "migration";
-            schema: "schema";
             "dep-bump": "dep-bump";
+            migration: "migration";
+            revert: "revert";
+            schema: "schema";
         }>>;
         diff_size: z.ZodNumber;
     }, z.core.$strict>;
     tier: z.ZodEnum<{
-        medium: "medium";
-        low: "low";
         high: "high";
+        low: "low";
+        medium: "medium";
     }>;
 }, z.core.$strict>;
 export type RiskTierClassifierResult = z.infer<typeof RiskTierClassifierResultSchema>;

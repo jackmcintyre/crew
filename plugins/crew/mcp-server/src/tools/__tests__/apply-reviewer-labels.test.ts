@@ -297,6 +297,7 @@ describe("(4d) error propagation — GhRecoverableError on first label call", ()
       applyReviewerLabels({
         targetRepoRoot: tmpRoot,
         sessionUlid: SESSION_ULID,
+        ref: STORY_REF,
         pluginRootOverride: pluginRoot,
         execaImpl: stub,
       }),

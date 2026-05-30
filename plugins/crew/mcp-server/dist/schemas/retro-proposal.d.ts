@@ -51,9 +51,9 @@ export declare const RuleProposalSchema: z.ZodObject<{
     text: z.ZodString;
     target_failure_class: z.ZodString;
     recommended_promotion_level: z.ZodEnum<{
+        advisory: "advisory";
         must: "must";
         should: "should";
-        advisory: "advisory";
     }>;
 }, z.core.$strict>;
 /**
@@ -68,8 +68,8 @@ export declare const RuleRetirementProposalSchema: z.ZodObject<{
     target_rule_id: z.ZodString;
     fire_count_over_window: z.ZodNumber;
     recommended_action: z.ZodEnum<{
-        retire: "retire";
         relax: "relax";
+        retire: "retire";
     }>;
 }, z.core.$strict>;
 /**
@@ -97,8 +97,8 @@ export declare const SkillReviseProposalSchema: z.ZodObject<{
     target_skill_path: z.ZodString;
     revised_body: z.ZodString;
     version_bump: z.ZodEnum<{
-        patch: "patch";
         minor: "minor";
+        patch: "patch";
     }>;
 }, z.core.$strict>;
 /**
@@ -188,9 +188,9 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     text: z.ZodString;
     target_failure_class: z.ZodString;
     recommended_promotion_level: z.ZodEnum<{
+        advisory: "advisory";
         must: "must";
         should: "should";
-        advisory: "advisory";
     }>;
 }, z.core.$strict>, z.ZodObject<{
     id: z.ZodString;
@@ -200,8 +200,8 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     target_rule_id: z.ZodString;
     fire_count_over_window: z.ZodNumber;
     recommended_action: z.ZodEnum<{
-        retire: "retire";
         relax: "relax";
+        retire: "retire";
     }>;
 }, z.core.$strict>, z.ZodObject<{
     id: z.ZodString;
@@ -219,8 +219,8 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     target_skill_path: z.ZodString;
     revised_body: z.ZodString;
     version_bump: z.ZodEnum<{
-        patch: "patch";
         minor: "minor";
+        patch: "patch";
     }>;
 }, z.core.$strict>, z.ZodObject<{
     id: z.ZodString;
@@ -284,9 +284,9 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         text: z.ZodString;
         target_failure_class: z.ZodString;
         recommended_promotion_level: z.ZodEnum<{
+            advisory: "advisory";
             must: "must";
             should: "should";
-            advisory: "advisory";
         }>;
     }, z.core.$strict>, z.ZodObject<{
         id: z.ZodString;
@@ -296,8 +296,8 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         target_rule_id: z.ZodString;
         fire_count_over_window: z.ZodNumber;
         recommended_action: z.ZodEnum<{
-            retire: "retire";
             relax: "relax";
+            retire: "retire";
         }>;
     }, z.core.$strict>, z.ZodObject<{
         id: z.ZodString;
@@ -315,8 +315,8 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         target_skill_path: z.ZodString;
         revised_body: z.ZodString;
         version_bump: z.ZodEnum<{
-            patch: "patch";
             minor: "minor";
+            patch: "patch";
         }>;
     }, z.core.$strict>, z.ZodObject<{
         id: z.ZodString;

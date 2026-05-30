@@ -26,8 +26,8 @@ export declare const GhErrorMapEntrySchema: z.ZodObject<{
     stderr_regex: z.ZodOptional<z.ZodString>;
     class: z.ZodEnum<{
         defer: "defer";
-        retry: "retry";
         "needs-human": "needs-human";
+        retry: "retry";
     }>;
 }, z.core.$strict>;
 /**
@@ -41,8 +41,8 @@ export declare const GhErrorMapSchema: z.ZodObject<{
         stderr_regex: z.ZodOptional<z.ZodString>;
         class: z.ZodEnum<{
             defer: "defer";
-            retry: "retry";
             "needs-human": "needs-human";
+            retry: "retry";
         }>;
     }, z.core.$strict>>;
 }, z.core.$strict>;

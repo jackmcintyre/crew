@@ -28,6 +28,7 @@ import * as os from "node:os";
 import { runReviewerSession } from "../run-reviewer-session.js";
 import { DuplicateStandardsCriterionIdError, GhRecoverableError, } from "../../errors.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { sanitiseRefForPathSegment, } from "../../lib/read-reviewer-result-file.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 // ---------------------------------------------------------------------------
 // Constants
@@ -520,7 +521,7 @@ describe("prDiff is populated from the execaImpl stub", () => {
 // AC4(k): reviewer-result.json persistence assertions (Task 9.6 — revision 2)
 // ---------------------------------------------------------------------------
 describe("AC4(k): reviewer-result.json persistence (revision 2)", () => {
-    const expectedFilePath = () => path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID, "reviewer-result.json");
+    const expectedFilePath = () => path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID, sanitiseRefForPathSegment(STORY_REF), "reviewer-result.json");
     it("happy path: reviewer-result.json exists at expected path after successful session", async () => {
         await callSession();
         const raw = await fs.readFile(expectedFilePath(), "utf8");
