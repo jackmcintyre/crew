@@ -121,8 +121,16 @@ beforeEach(async () => {
     await writeInProgressSnapshot({ targetRepoRoot: tmpRoot, ref: STORY_REF, manifest });
   }
 
-  // Session directory (where reviewer-result.json would be written)
-  sessionDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+  // Session directory (where reviewer-result.json would be written).
+  // Story 8.15: reviewer-result.json is namespaced per story ref within the session.
+  sessionDir = path.join(
+    tmpRoot,
+    ".crew",
+    "state",
+    "sessions",
+    SESSION_ULID,
+    sanitiseRefForPathSegment(STORY_REF),
+  );
   resultFilePath = path.join(sessionDir, "reviewer-result.json");
 });
 
