@@ -134,4 +134,5 @@ development_status:
   8-7-summarise-drain-result: done
   8-8-native-scan-classify-unmatched-files: done
   8-9-document-provisional-trust-flag: done
+  8-10-explain-gate-reason-helper: ready-for-dev
   epic-8-retrospective: optional
