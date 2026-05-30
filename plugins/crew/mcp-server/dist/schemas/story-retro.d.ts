@@ -47,10 +47,10 @@ export declare const LESSON_KINDS: readonly ["pitfall", "pattern", "tool-quirk",
  */
 export declare const LessonSchema: z.ZodObject<{
     kind: z.ZodEnum<{
-        discipline: "discipline";
         pattern: "pattern";
         pitfall: "pitfall";
         "tool-quirk": "tool-quirk";
+        discipline: "discipline";
     }>;
     text: z.ZodString;
     failure_class: z.ZodOptional<z.ZodString>;
@@ -68,10 +68,10 @@ export declare const LessonSchema: z.ZodObject<{
 export declare const StoryRetroPayloadSchema: z.ZodObject<{
     lessons: z.ZodDefault<z.ZodArray<z.ZodObject<{
         kind: z.ZodEnum<{
-            discipline: "discipline";
             pattern: "pattern";
             pitfall: "pitfall";
             "tool-quirk": "tool-quirk";
+            discipline: "discipline";
         }>;
         text: z.ZodString;
         failure_class: z.ZodOptional<z.ZodString>;

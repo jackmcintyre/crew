@@ -37,6 +37,12 @@ export interface ApplyReviewerLabelsOptions {
     targetRepoRoot: string;
     sessionUlid: string;
     /**
+     * Story ref (e.g. `"bmad:8.15"`). Required to derive the per-story
+     * reviewer-result path (Story 8.15) so a multi-story drain reads THIS
+     * story's verdict, not whichever story last ran in the shared session.
+     */
+    ref: string;
+    /**
      * When set to `"reviewer-failure"`, forces non-green label treatment
      * regardless of what `reviewer-result.json` says. Used in the SKILL.md
      * error handler when the reviewer cycle fails before writing a verdict.

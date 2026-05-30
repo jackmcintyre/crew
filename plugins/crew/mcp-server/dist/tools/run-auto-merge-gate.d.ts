@@ -47,19 +47,19 @@ export declare const AutoMergeGateResultSchema: z.ZodObject<{
         "pause-needs-human": "pause-needs-human";
     }>;
     reason: z.ZodEnum<{
-        "ci-not-green": "ci-not-green";
-        "high-risk": "high-risk";
-        "low-risk-insufficient-data": "low-risk-insufficient-data";
         "low-risk-met-threshold": "low-risk-met-threshold";
-        "low-risk-provisional-trust": "low-risk-provisional-trust";
         "low-risk-sub-threshold": "low-risk-sub-threshold";
+        "low-risk-insufficient-data": "low-risk-insufficient-data";
+        "low-risk-provisional-trust": "low-risk-provisional-trust";
         "medium-risk": "medium-risk";
+        "high-risk": "high-risk";
         "no-tier-no-signal": "no-tier-no-signal";
+        "ci-not-green": "ci-not-green";
     }>;
     risk_tier: z.ZodNullable<z.ZodEnum<{
-        high: "high";
-        low: "low";
         medium: "medium";
+        low: "low";
+        high: "high";
     }>>;
     agreement_metric: z.ZodNullable<z.ZodObject<{
         ratio: z.ZodNumber;
@@ -115,7 +115,7 @@ export interface RunAutoMergeGateOptions {
      */
     provisionalTrustOverride?: boolean;
     /** Test seam: inject a custom reviewer-result reader (Stage-2 tier fallback). */
-    readReviewerResultImpl?: (targetRepoRoot: string, sessionUlid: string) => Promise<ReviewerResultFileShape | null>;
+    readReviewerResultImpl?: (targetRepoRoot: string, sessionUlid: string, ref: string) => Promise<ReviewerResultFileShape | null>;
     /**
      * Test seam: bypass the real CI poll (Stage-2 CI-gating). Production callers
      * omit this; the gate polls GitHub checks. Tests inject the desired outcome.

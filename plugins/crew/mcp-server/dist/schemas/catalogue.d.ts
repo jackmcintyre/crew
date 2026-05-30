@@ -24,9 +24,9 @@ import { z } from "zod";
  * against. Missing any of the three is a contract violation.
  */
 export declare const ModelTierSchema: z.ZodEnum<{
-    haiku: "haiku";
     opus: "opus";
     sonnet: "sonnet";
+    haiku: "haiku";
 }>;
 export declare const LockedPhrasesSchema: z.ZodObject<{
     handoff: z.ZodString;
@@ -37,9 +37,9 @@ export declare const CatalogueRoleSchema: z.ZodObject<{
     role: z.ZodString;
     domain: z.ZodString;
     model_tier: z.ZodEnum<{
-        haiku: "haiku";
         opus: "opus";
         sonnet: "sonnet";
+        haiku: "haiku";
     }>;
     tools_allow: z.ZodArray<z.ZodString>;
     gh_allow: z.ZodDefault<z.ZodArray<z.ZodString>>;

@@ -141,8 +141,8 @@ export async function processReviewerTranscript(
   const { targetRepoRoot, ref, sessionUlid, manifestPath } = opts;
   const chatLog: string[] = [];
 
-  // Read the persisted reviewer-result.json file.
-  const resultFile = await readReviewerResultFile(targetRepoRoot, sessionUlid);
+  // Read the persisted reviewer-result.json file (Story 8.15: per-ref path).
+  const resultFile = await readReviewerResultFile(targetRepoRoot, sessionUlid, ref);
 
   if (resultFile === null) {
     // File absent — reviewer skipped runReviewerSession.

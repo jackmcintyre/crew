@@ -50,6 +50,12 @@ export type PostReviewerCommentsResult = {
 export interface PostReviewerCommentsOptions {
     targetRepoRoot: string;
     sessionUlid: string;
+    /**
+     * Story ref (e.g. `"bmad:8.15"`). Required to derive the per-story
+     * reviewer-result path (Story 8.15) so a multi-story drain reads THIS
+     * story's verdict, not whichever story last ran in the shared session.
+     */
+    ref: string;
     role?: string;
     /** Test seam — production callers do not pass this. */
     execaImpl?: typeof defaultExeca;

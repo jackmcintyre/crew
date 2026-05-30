@@ -33,10 +33,10 @@ import { z } from "zod";
 export declare const ExecutionManifestSchema: z.ZodObject<{
     ref: z.ZodString;
     status: z.ZodEnum<{
-        blocked: "blocked";
-        done: "done";
-        "in-progress": "in-progress";
         "to-do": "to-do";
+        blocked: "blocked";
+        "in-progress": "in-progress";
+        done: "done";
     }>;
     adapter: z.ZodString;
     source_path: z.ZodString;
@@ -54,19 +54,19 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     implementation_notes: z.ZodOptional<z.ZodString>;
     withdrawn: z.ZodDefault<z.ZodBoolean>;
     blocked_by: z.ZodOptional<z.ZodEnum<{
-        "deps-drift": "deps-drift";
-        "gh-defer": "gh-defer";
-        "gh-needs-human": "gh-needs-human";
-        "gh-retry": "gh-retry";
         "handoff-grammar": "handoff-grammar";
-        "orphan-no-transcript": "orphan-no-transcript";
-        "planning-discipline": "planning-discipline";
-        "reviewer-grammar": "reviewer-grammar";
+        "gh-defer": "gh-defer";
+        "gh-retry": "gh-retry";
+        "gh-needs-human": "gh-needs-human";
         "reviewer-no-session-result": "reviewer-no-session-result";
-        "reviewer-verdict-blocked": "reviewer-verdict-blocked";
         "reviewer-verdict-needs-changes": "reviewer-verdict-needs-changes";
+        "reviewer-verdict-blocked": "reviewer-verdict-blocked";
         "routing-failure": "routing-failure";
         "routing-self-yield": "routing-self-yield";
+        "planning-discipline": "planning-discipline";
+        "orphan-no-transcript": "orphan-no-transcript";
+        "reviewer-grammar": "reviewer-grammar";
+        "deps-drift": "deps-drift";
     }>>;
     discipline_violations: z.ZodOptional<z.ZodArray<z.ZodObject<{
         code: z.ZodString;
@@ -77,27 +77,27 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     rework_count: z.ZodOptional<z.ZodNumber>;
     drain_resume_attempts: z.ZodOptional<z.ZodNumber>;
     risk_tier: z.ZodOptional<z.ZodEnum<{
-        high: "high";
-        low: "low";
         medium: "medium";
+        low: "low";
+        high: "high";
     }>>;
     risk_tier_evidence: z.ZodOptional<z.ZodObject<{
         matched_rule: z.ZodString;
         paths: z.ZodDefault<z.ZodArray<z.ZodString>>;
         change_types: z.ZodDefault<z.ZodArray<z.ZodEnum<{
-            "dep-bump": "dep-bump";
-            migration: "migration";
             revert: "revert";
+            migration: "migration";
             schema: "schema";
+            "dep-bump": "dep-bump";
         }>>>;
         diff_size: z.ZodNumber;
     }, z.core.$strict>>;
     lessons: z.ZodOptional<z.ZodArray<z.ZodObject<{
         kind: z.ZodEnum<{
-            discipline: "discipline";
             pattern: "pattern";
             pitfall: "pitfall";
             "tool-quirk": "tool-quirk";
+            discipline: "discipline";
         }>;
         text: z.ZodString;
         failure_class: z.ZodOptional<z.ZodString>;

@@ -16,9 +16,9 @@ export declare const PersonaFrontmatterSchema: z.ZodObject<{
     role: z.ZodString;
     domain: z.ZodString;
     model_tier: z.ZodEnum<{
-        haiku: "haiku";
         opus: "opus";
         sonnet: "sonnet";
+        haiku: "haiku";
     }>;
     tools_allow: z.ZodArray<z.ZodString>;
     gh_allow: z.ZodDefault<z.ZodArray<z.ZodString>>;

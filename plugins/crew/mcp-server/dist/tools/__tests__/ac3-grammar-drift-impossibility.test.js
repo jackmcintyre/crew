@@ -117,7 +117,8 @@ afterEach(() => {
     rmSync(tmpRoot, { recursive: true, force: true });
 });
 async function writeResultFile(data) {
-    const sessDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+    // Story 8.15: seed at the per-ref namespaced path the reader now derives.
+    const sessDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID, sanitiseRefForPathSegment(STORY_REF));
     await fs.mkdir(sessDir, { recursive: true });
     await atomicWriteFile(path.join(sessDir, "reviewer-result.json"), JSON.stringify(data));
 }
