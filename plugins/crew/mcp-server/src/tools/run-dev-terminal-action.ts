@@ -9,21 +9,31 @@
  *
  * @see _bmad-output/implementation-artifacts/4-4-dev-subagent-git-push-and-gh-pr-create-terminal-action.md § Behavioural contract
  *
- * Worktree isolation (Story 8.16): by default the branch/commit/push/PR are
- * produced inside a dedicated git worktree distinct from `targetRepoRoot`,
- * carrying ONLY the dev's own changed paths (an explicit stage set — never
- * `git add .`). This leaves the orchestrating session's checkout untouched and
- * prevents a stray uncommitted change from being swept into the story PR. The
- * worktree is always torn down (success or failure) so repeated drains never
- * accumulate orphans. Pass `worktree: false` to commit in `targetRepoRoot`
- * directly (the legacy Story 4.4 path, retained for that story's tests).
+ * Worktree isolation (Story 8.16, superseded by Story 8.20): by default the dev
+ * edits, builds, commits, and opens the PR *inside its own git worktree*. The
+ * drain workflow spawns the dev subagent with the runtime's per-agent
+ * `isolation: 'worktree'` primitive, so the dev's working directory — the
+ * `targetRepoRoot` it passes to this tool — *is* a worktree cut clean from the
+ * base, distinct from the orchestrating session's checkout. Because that
+ * worktree contains ONLY the dev's own work, this tool stages the worktree's own
+ * dirty set (an explicit changed-paths stage — never `git add .`), so a
+ * `.crew/state` artefact or any unexpected file is never swept into the story
+ * commit. The orchestrating checkout is never the dev's editing surface and is
+ * never touched, so two devs against the same repo cannot cross-contaminate.
+ *
+ * Story 8.20 removed 8.16's transplant machinery: the dev no longer edits in the
+ * shared checkout, so there is no snapshot-dirty-paths baseline to subtract and
+ * no current-minus-baseline transplant — the worktree IS the editing surface.
+ *
+ * Pass `worktree: false` to commit in `targetRepoRoot` directly with `git add .`
+ * (the legacy Story 4.4 path, retained for that story's tests).
  *
  * Invariants (the validation invariants are enforced BEFORE any subprocess spawn):
  * - `type` MUST be in the conventional-commits set.
  * - Branch slug MUST be renderable from `ref` + `title`.
  * - Steps execute in strict order: validateType → branchSlug → readManifest →
- *   extractAcs → materialiseWorktree → createBranch → commit → fullBuildGate →
- *   push → composePrBody → gh pr create → cleanup.
+ *   extractAcs → listDirtyPaths (worktree mode) → createBranch → commit →
+ *   fullBuildGate → push → composePrBody → gh pr create.
  * - The full-build gate (Story 8.17) runs the project's full build — the same
  *   whole-project type-check CI runs (`pnpm build` at `plugins/crew`) — in the
  *   dev's working directory AFTER the commit and BEFORE `gh pr create`, so a red
@@ -54,6 +64,8 @@ import {
   gitCommit,
   gitCreateBranch,
   gitPush,
+  listDirtyPaths,
+  resolveSessionLedgerRoot,
   CONVENTIONAL_COMMIT_TYPES,
 } from "../lib/git.js";
 import {
@@ -65,7 +77,6 @@ import {
 import { readManifest } from "../lib/manifest-io.js";
 import { loadRolePermissions } from "../state/load-role-permissions.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
-import { materialiseDevStoryWorktree } from "../lib/dev-story-worktree.js";
 import { runProjectBuild } from "../lib/run-project-build.js";
 import { execa as defaultExeca } from "execa";
 
@@ -95,22 +106,16 @@ const ROLE = "generalist-dev";
  *                             targeting a repo whose trunk is not `dev` must pass
  *                             this explicitly (a productization follow-up will
  *                             source it from adapter config).
- * @param opts.worktree        Worktree isolation (Story 8.16). Defaults to ON:
- *                             the branch/commit/push/PR are produced inside a
- *                             dedicated git worktree distinct from
- *                             `targetRepoRoot`, carrying ONLY the dev's own
- *                             changed paths (an explicit set — never `git add .`)
- *                             so the orchestrating checkout is left untouched and
- *                             a stray uncommitted change is never swept into the
- *                             PR. Pass `false` to commit in `targetRepoRoot`
- *                             directly (legacy behaviour; used by Story 4.4's
- *                             integration tests).
- * @param opts.baselineDirtyPaths  Repo-relative paths already dirty BEFORE the
- *                             dev started — excluded from the worktree transplant
- *                             so unrelated working-tree changes never ride along
- *                             (AC2). The drain workflow captures this snapshot
- *                             immediately before spawning the dev. Ignored when
- *                             `worktree` is `false`.
+ * @param opts.worktree        Worktree-aware staging (Story 8.16 / 8.20).
+ *                             Defaults to ON: `targetRepoRoot` is treated as the
+ *                             dev's own worktree (the runtime rooted the dev
+ *                             there via per-agent `isolation: 'worktree'`), so
+ *                             the commit stages the worktree's own dirty set — an
+ *                             explicit changed-paths stage, never `git add .` —
+ *                             and `.crew/state/**` is never swept in. Pass
+ *                             `false` to commit in `targetRepoRoot` with
+ *                             `git add .` (legacy Story 4.4 path; used by that
+ *                             story's integration tests).
  * @param opts.execaImpl       Optional test seam (production callers omit this).
  */
 export async function runDevTerminalAction(opts: {
@@ -124,7 +129,6 @@ export async function runDevTerminalAction(opts: {
   sessionUlid: string;
   base?: string;
   worktree?: boolean;
-  baselineDirtyPaths?: readonly string[];
   execaImpl?: typeof defaultExeca;
 }): Promise<DevTerminalActionResult> {
   const {
@@ -163,40 +167,34 @@ export async function runDevTerminalAction(opts: {
   // (iii) Extract ACs from the spec file.
   const acs = await extractAcsFromSpec(specPath);
 
-  // (iv) Materialise the dev's isolated worktree (Story 8.16). All subsequent git
-  // work (branch/commit/push) and `gh pr create` target `gitRoot` — the worktree
-  // when isolation is on, else `targetRepoRoot`. The worktree carries ONLY the
-  // dev's own changed paths, so the orchestrating checkout is left untouched and
-  // a stray uncommitted change can never be swept into the PR. `committedPaths`
-  // is the explicit stage set (never `git add .`); in worktree mode the transplant
-  // already populated those paths, so we stage exactly them; in legacy mode we
-  // fall back to `["."]` (Story 4.4 behaviour).
-  let gitRoot = targetRepoRoot;
+  // (iv) Resolve the dev's git surface and the stage set (Story 8.16 / 8.20).
+  // In worktree mode `targetRepoRoot` IS the dev's own worktree — the runtime
+  // rooted the dev there via per-agent `isolation: 'worktree'`, so the dev
+  // edited and built in it and it is distinct from the orchestrating checkout.
+  // The worktree was cut clean from `base`, so its dirty set is EXACTLY the
+  // dev's own work; we stage that explicit set (never `git add .`) and drop any
+  // `.crew/state/**` artefact. In legacy mode (`worktree: false`) we commit
+  // `targetRepoRoot` with `git add .` (Story 4.4 behaviour).
+  //
+  // There is no second worktree to create or tear down here: the editing surface
+  // IS the worktree the runtime handed the dev, so the 8.16 transplant /
+  // orchestrating-checkout-restore machinery is gone. A failed flow therefore
+  // cannot revert a sibling flow's in-flight work (8.20 AC4).
+  const gitRoot = targetRepoRoot;
   let committedPaths: readonly string[] = ["."];
-  let cleanupWorktree: (() => Promise<{ warnings: string[] }>) | undefined;
 
   if (useWorktree) {
-    const wt = await materialiseDevStoryWorktree({
-      targetRepoRoot,
-      sessionUlid,
-      ref,
-      base,
-      ...(opts.baselineDirtyPaths ? { baselineDirtyPaths: opts.baselineDirtyPaths } : {}),
+    const dirty = await listDirtyPaths({
+      cwd: gitRoot,
       ...(execaImpl ? { execaImpl } : {}),
     });
-    gitRoot = wt.worktreePath;
-    // Stage the explicit transplanted set. An empty set (the dev produced no
-    // changes the orchestrating tree didn't already have) still must commit
-    // something or `git commit` fails — but a dev that handed off with no
-    // changes is itself a defect, so we let the empty-commit guard in gitCommit
-    // surface it. We pass the carried paths; "." would re-introduce the
-    // git-add-everything hazard inside the worktree (harmless there, since the
-    // worktree only contains the transplant, but explicit is clearer).
-    committedPaths = wt.carriedPaths.length > 0 ? wt.carriedPaths : ["."];
-    cleanupWorktree = wt.cleanup;
+    // An empty dirty set means the dev handed off with no changes — itself a
+    // defect. We do NOT fall back to `["."]` (that would re-introduce the
+    // git-add-everything hazard); the empty-commit guard in gitCommit surfaces it.
+    committedPaths = dirty;
   }
 
-  try {
+  {
     // (v) Create the story branch inside the (worktree or main) repo root.
     await gitCreateBranch({
       targetRepoRoot: gitRoot,
@@ -303,13 +301,24 @@ export async function runDevTerminalAction(opts: {
     }
     const prNumber = parseInt(prNumberMatch[1]!, 10);
 
-    // (xiii) Atomically write dev-outcome.json to the session directory under
-    // targetRepoRoot (NOT the worktree — the worktree is torn down, and
-    // processDevTranscript reads the orchestrating checkout's session dir).
-    // This must happen BEFORE return so the machine-authoritative PR number
-    // is available to processDevTranscript without relying on LLM-authored text.
+    // (xiii) Atomically write dev-outcome.json to the session directory under the
+    // ORCHESTRATING CHECKOUT — not the worktree. processDevTranscript reads
+    // `<orchestrating-checkout>/.crew/state/sessions/<sessionUlid>/dev-outcome.json`,
+    // but in worktree mode the dev's cwd (`gitRoot`/`targetRepoRoot`) is the
+    // worktree, whose separate (gitignored) `.crew/state` the orchestrating
+    // session cannot see. resolveSessionLedgerRoot maps a worktree cwd back to
+    // its orchestrating checkout via `git --git-common-dir`; from the
+    // orchestrating checkout itself it is a no-op. This must happen BEFORE return
+    // so the machine-authoritative PR number reaches processDevTranscript without
+    // relying on LLM-authored text.
+    const ledgerRoot = useWorktree
+      ? await resolveSessionLedgerRoot({
+          cwd: gitRoot,
+          ...(execaImpl ? { execaImpl } : {}),
+        })
+      : targetRepoRoot;
     const devOutcomePath = path.resolve(
-      targetRepoRoot,
+      ledgerRoot,
       ".crew",
       "state",
       "sessions",
@@ -321,19 +330,15 @@ export async function runDevTerminalAction(opts: {
       JSON.stringify({ prUrl, prNumber, branch, commitSha: commitResult.commitSha }, null, 2),
     );
 
-    // (xiv) Return success.
+    // (xiv) Return success. The dev's worktree is owned by the runtime's
+    // per-agent `isolation: 'worktree'` primitive (or, in tests, by the caller),
+    // so this tool does NOT tear it down — a failed flow can therefore never
+    // revert a concurrently-running sibling flow's in-flight work (8.20 AC4).
     return {
       ok: true,
       branch,
       commitSha: commitResult.commitSha,
       prUrl,
     };
-  } finally {
-    // Always tear down the worktree — on success AND on any failure mid-build —
-    // so repeated drains never accumulate orphaned worktrees and a failure does
-    // not leave one wedged. Cleanup is best-effort: its warnings are non-fatal.
-    if (cleanupWorktree) {
-      await cleanupWorktree();
-    }
   }
 }

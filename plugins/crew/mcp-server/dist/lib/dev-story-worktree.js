@@ -1,29 +1,47 @@
 /**
- * `materialiseDevStoryWorktree` — Story 8.16.
+ * `materialiseDevStoryWorktree` — Story 8.16, superseded by Story 8.20.
  *
- * Materialises a dedicated git worktree for the drain's generalist-dev step so
- * the dev's branch / commit / PR are produced in a checkout *distinct* from the
- * orchestrating session's `targetRepoRoot`. This closes the two coupled defects
- * the first real end-to-end drain surfaced (2026-05-30, PR #211):
+ * Cuts a dedicated git worktree for the drain's generalist-dev step so the dev
+ * **edits and builds inside the worktree**, not in the orchestrating session's
+ * `targetRepoRoot` checkout. This is the true-parallelism substrate: when the
+ * dev's *editing surface* (not merely its commit) is its own worktree, two devs
+ * working the same repository at once cannot cross-pollute each other's
+ * in-flight changes, and one flow's cleanup cannot revert a sibling's work.
  *
- *   1. The dev edited files in the same checkout the orchestrating session ran
- *      from — interrupted runs left work-in-progress in the shared tree.
- *   2. `runDevTerminalAction` committed via `git add .`, so any stray
- *      uncommitted change present at commit time was swept into the story PR.
+ * History — what 8.20 changed:
  *
- * The dev subagent has no way to change its own cwd (the workflow runtime spawns
- * it pinned to `targetRepoRoot`), so it necessarily edits in `targetRepoRoot`.
- * This module makes the *git work product* — not the editing surface — isolated:
- * it creates a worktree off `base`, transplants ONLY the dev's own changed paths
- * into it (an explicit path set, never `git add .`), and leaves the orchestrating
- * checkout's tree clean of those changes. The branch / commit / push / PR then
- * run with the repo root pointed at the worktree, which shares the same `.git`
- * object store and `origin` remote — so `gh` resolves the same GitHub repo and
- * the cwd-inference snag the 8.5 scope flagged cannot occur.
+ *   Story 8.16 (PR #212) isolated only the dev's git *work product*: the dev
+ *   still edited in the shared `targetRepoRoot`, and this helper transplanted
+ *   the dev's own changed paths into the worktree afterwards (current-dirty
+ *   minus a pre-edit baseline) then reverted them in the checkout on cleanup.
+ *   That baseline-diff attribution is correct for a *serial* drain but breaks
+ *   under concurrency: two devs editing the same checkout each see the other's
+ *   edits as "their own", and one flow's cleanup reverts files the other is
+ *   still editing.
  *
- * Mirrors the precedent `materialise-pr-branch-worktree.ts` (Story 5.26): a
- * sibling `dev-<ref>-worktree/` under `.crew/state/sessions/<sessionUlid>/`,
- * `git worktree add` off the base, and a best-effort idempotent `cleanup()`.
+ *   Story 8.20 makes the dev edit *in* the worktree (the workflow spawns the dev
+ *   subagent with the runtime's per-agent `isolation: 'worktree'` primitive, so
+ *   its file-editing sandbox root *is* the worktree). A worktree cut clean from
+ *   `base` therefore contains ONLY the dev's own edits — so the
+ *   snapshot-dirty-paths baseline, the current-minus-baseline transplant, and
+ *   the orchestrating-checkout restore are all gone. The correctness floor 8.16
+ *   fought for (no stray pre-existing change ever rides into a story commit) is
+ *   now preserved *structurally*: the worktree never contains anything but the
+ *   dev's work, so there is nothing to attribute and nothing to subtract.
+ *
+ * Worktree location (8.20 design point 3): a **sibling of the checkout**, under
+ * `<parent>/.crew-worktrees/<sessionUlid>/dev-<ref>-worktree`, NOT nested inside
+ * `targetRepoRoot`. A nested worktree would make a dev's own file search / build
+ * scan recurse into a self-copy, and would put concurrent worktrees inside the
+ * shared tree. The worktree still shares the checkout's `.git` object store and
+ * `origin` remote (it is a real `git worktree`), so `gh` resolves the same repo
+ * and `git worktree list` enumerates every session's worktrees — which is how
+ * stale-session leftovers are reaped (see `reapStaleDevStoryWorktrees`).
+ *
+ * Mirrors the precedent `materialise-pr-branch-worktree.ts` (Story 5.26):
+ * `git worktree add --detach` off the base and a best-effort idempotent
+ * `cleanup()`. The static `canonical-fs-guard` test allows this file to spawn
+ * `git` directly (same precedent as 8.16 / 5.26).
  */
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
@@ -42,31 +60,32 @@ async function runGit(args, cwd, execaImpl) {
     };
 }
 /**
- * Parse `git status --porcelain` (v1, NUL-separated) into the set of changed
- * repo-relative paths. Handles renames (`R  old\0new`) by taking the new path.
- * Drops paths under `.crew/state/` — the backlog ledger is the tools' domain and
- * must never ride along in a story commit.
+ * Sanitise a story ref into a filesystem-safe worktree directory segment.
+ * `bmad:8.20` → `bmad-8.20`.
  */
-function parsePorcelainZ(stdout) {
-    const out = [];
-    const records = stdout.split("\0").filter((r) => r.length > 0);
-    for (let i = 0; i < records.length; i++) {
-        const rec = records[i];
-        // Each record: XY<space>PATH. The two status columns + a space, then path.
-        const xy = rec.slice(0, 2);
-        const p = rec.slice(3);
-        // A rename/copy emits the destination path as the NEXT NUL-record.
-        if (xy[0] === "R" || xy[0] === "C") {
-            const dest = records[i + 1];
-            if (dest !== undefined) {
-                out.push(dest);
-                i++;
-                continue;
-            }
-        }
-        out.push(p);
+function refSegment(ref) {
+    return ref.replace(/[^A-Za-z0-9._-]/g, "-");
+}
+/** Resolve symlinks; return the input unchanged if it cannot be resolved. */
+async function realpathOrSelf(p) {
+    try {
+        return await fs.realpath(p);
     }
-    return out;
+    catch {
+        return p;
+    }
+}
+/**
+ * The directory that holds ALL of a session's dev-story worktrees — a sibling
+ * of the checkout, never nested inside it. Exported so the reaper and tests
+ * derive the same root.
+ */
+export function devStoryWorktreesRoot(targetRepoRoot, sessionUlid) {
+    return path.join(path.dirname(targetRepoRoot), ".crew-worktrees", sessionUlid);
+}
+/** The worktree path for one story in one session. Exported for the reaper/tests. */
+export function devStoryWorktreePath(targetRepoRoot, sessionUlid, ref) {
+    return path.join(devStoryWorktreesRoot(targetRepoRoot, sessionUlid), `dev-${refSegment(ref)}-worktree`);
 }
 // ---------------------------------------------------------------------------
 // Main export
@@ -74,28 +93,15 @@ function parsePorcelainZ(stdout) {
 export async function materialiseDevStoryWorktree(opts) {
     const { targetRepoRoot, sessionUlid, ref, base } = opts;
     const execaImpl = opts.execaImpl ?? defaultExeca;
-    const baseline = new Set(opts.baselineDirtyPaths ?? []);
     const setupLog = [];
     // -------------------------------------------------------------------------
-    // Step 1: Snapshot the dev's changed paths in the orchestrating checkout.
-    // dev paths = current dirty paths − baseline dirty paths (− .crew/state/**).
+    // Step 1: Compute the worktree path (sibling of the checkout) and reap any
+    // stale worktree already sitting at exactly this path (e.g. a crashed prior
+    // run of the SAME session+ref). This reaps ONLY this path — a concurrent
+    // flow's worktree (a different ref) is untouched.
     // -------------------------------------------------------------------------
-    const statusResult = await runGit(["-C", targetRepoRoot, "status", "--porcelain", "-z"], targetRepoRoot, execaImpl);
-    if (statusResult.exitCode !== 0) {
-        throw new DevStoryWorktreeError({
-            ref,
-            phase: "status",
-            underlyingMessage: `git status --porcelain failed (exit ${statusResult.exitCode}): ${statusResult.stderr}`,
-        });
-    }
-    const allDirty = parsePorcelainZ(statusResult.stdout);
-    const carriedPaths = allDirty.filter((p) => !baseline.has(p) &&
-        !p.startsWith(".crew/state/") &&
-        p !== ".crew/state");
-    // -------------------------------------------------------------------------
-    // Step 2: Compute the worktree path and reap any stale worktree there.
-    // -------------------------------------------------------------------------
-    const worktreePath = path.join(targetRepoRoot, ".crew", "state", "sessions", sessionUlid, `dev-${ref.replace(/[^A-Za-z0-9._-]/g, "-")}-worktree`);
+    const worktreePath = devStoryWorktreePath(targetRepoRoot, sessionUlid, ref);
+    await fs.mkdir(path.dirname(worktreePath), { recursive: true });
     let staleExists = false;
     try {
         await fs.access(worktreePath);
@@ -112,6 +118,7 @@ export async function materialiseDevStoryWorktree(opts) {
                 `Falling back to fs.rm.`);
             try {
                 await fs.rm(worktreePath, { recursive: true, force: true });
+                await runGit(["-C", targetRepoRoot, "worktree", "prune"], targetRepoRoot, execaImpl);
             }
             catch (rmErr) {
                 setupLog.push(`[dev-story-worktree] fs.rm also failed: ${rmErr instanceof Error ? rmErr.message : String(rmErr)}.`);
@@ -119,8 +126,10 @@ export async function materialiseDevStoryWorktree(opts) {
         }
     }
     // -------------------------------------------------------------------------
-    // Step 3: git worktree add <path> <base> — a detached-from-base checkout the
-    // dev's branch will be created in. `--detach` keeps `base` usable elsewhere;
+    // Step 2: git worktree add --detach <path> <base> — a clean checkout cut from
+    // `base`, the dev's editing + build surface. `--detach` keeps `base` usable in
+    // the orchestrating checkout and composes with concurrency (each story cuts a
+    // distinct path off the same base; git serialises the `.git` index update).
     // runDevTerminalAction creates the story branch inside the worktree next.
     // -------------------------------------------------------------------------
     const add = await runGit(["-C", targetRepoRoot, "worktree", "add", "--detach", worktreePath, base], targetRepoRoot, execaImpl);
@@ -131,68 +140,22 @@ export async function materialiseDevStoryWorktree(opts) {
             underlyingMessage: `git worktree add ${worktreePath} ${base} failed (exit ${add.exitCode}): ${add.stderr}`,
         });
     }
+    setupLog.push(`[dev-story-worktree] worktree for ${ref} cut clean from ${base} at ${worktreePath}.`);
     // -------------------------------------------------------------------------
-    // Step 4: Transplant the dev's own changed paths into the worktree. For each
-    // path: if it still exists in targetRepoRoot, copy it across (preserving the
-    // dev's edit); if it was deleted, delete it in the worktree too. This stages
-    // an EXPLICIT path set — never `git add .` — so a stray pre-existing change
-    // (excluded above as baseline) can never ride along (AC2).
-    // -------------------------------------------------------------------------
-    for (const rel of carriedPaths) {
-        const srcAbs = path.join(targetRepoRoot, rel);
-        const destAbs = path.join(worktreePath, rel);
-        let srcExists = false;
-        try {
-            await fs.access(srcAbs);
-            srcExists = true;
-        }
-        catch {
-            // Source missing → the dev deleted this path.
-        }
-        if (srcExists) {
-            await fs.mkdir(path.dirname(destAbs), { recursive: true });
-            await fs.cp(srcAbs, destAbs, { recursive: true });
-        }
-        else {
-            await fs.rm(destAbs, { recursive: true, force: true });
-        }
-    }
-    setupLog.push(`[dev-story-worktree] transplanted ${carriedPaths.length} dev path(s) into ${worktreePath}.`);
-    // -------------------------------------------------------------------------
-    // Step 5: Build cleanup — restore the orchestrating checkout AND remove the
-    // worktree. Both are best-effort; failures surface as warnings, not throws.
+    // Step 3: Cleanup — remove ONLY this worktree. The orchestrating checkout is
+    // NEVER touched (the dev never edited it), so there is nothing to restore —
+    // the transplant/restore machinery 8.16 needed is gone. Best-effort: failures
+    // surface as warnings, not throws, so a failed flow never wedges a sibling.
     // -------------------------------------------------------------------------
     async function cleanup() {
         const warnings = [];
-        // (a) Restore targetRepoRoot to clean of the dev's changes so the
-        //     orchestrating session's tree is left untouched. Tracked dev edits are
-        //     reverted; dev-created untracked files are removed. Baseline/stray
-        //     changes are left exactly as they were.
-        for (const rel of carriedPaths) {
-            const checkout = await runGit(["-C", targetRepoRoot, "checkout", "--", rel], targetRepoRoot, execaImpl);
-            if (checkout.exitCode !== 0) {
-                // The path was untracked (no committed version to restore) → remove it.
-                try {
-                    await fs.rm(path.join(targetRepoRoot, rel), {
-                        recursive: true,
-                        force: true,
-                    });
-                }
-                catch (rmErr) {
-                    warnings.push(`[dev-story-worktree] cleanup: could not restore/remove ${rel}: ` +
-                        `${rmErr instanceof Error ? rmErr.message : String(rmErr)}.`);
-                }
-            }
-        }
-        // (b) Remove the worktree. --force handles a dirty worktree (e.g. failure
-        //     mid-build) so it is never left wedged.
         const remove = await runGit(["-C", targetRepoRoot, "worktree", "remove", worktreePath, "--force"], targetRepoRoot, execaImpl);
         if (remove.exitCode !== 0) {
             warnings.push(`[dev-story-worktree] cleanup: git worktree remove ${worktreePath} --force ` +
                 `failed (exit ${remove.exitCode}): ${remove.stderr}. ` +
                 `Run 'git worktree prune' to clean up.`);
-            // Belt-and-braces: also try a raw fs.rm so a future drain's stale-reap
-            // does not trip over a half-removed directory.
+            // Belt-and-braces: also try a raw fs.rm + prune so a future drain's
+            // stale-reap does not trip over a half-removed directory.
             try {
                 await fs.rm(worktreePath, { recursive: true, force: true });
                 await runGit(["-C", targetRepoRoot, "worktree", "prune"], targetRepoRoot, execaImpl);
@@ -203,5 +166,73 @@ export async function materialiseDevStoryWorktree(opts) {
         }
         return { warnings };
     }
-    return { worktreePath, carriedPaths, setupLog, cleanup };
+    return { worktreePath, setupLog, cleanup };
+}
+/**
+ * Reap dev-story worktrees left behind by *other* (dead) sessions.
+ *
+ * A worker that dies mid-build leaves a worktree keyed by its now-dead session
+ * id. The per-path stale-reap in `materialiseDevStoryWorktree` only matches the
+ * *live* session's own path, so cross-session leftovers would otherwise
+ * accumulate forever. The crash-recovery scan already identifies dead sessions;
+ * this reaps their leftover worktrees too (8.20 AC4).
+ *
+ * Enumerates registered worktrees via `git worktree list --porcelain`, keeps
+ * only those under the dev-story worktrees parent (`<parent>/.crew-worktrees/`)
+ * whose session segment is NOT the current session, and removes each. Removing
+ * one stale worktree NEVER disturbs the current session's worktree or another
+ * dead session's — each removal targets one explicit path.
+ *
+ * Best-effort and read-tolerant: a non-zero `git worktree list` (e.g. not a
+ * repo) returns an empty result rather than throwing, so a degraded git state
+ * never blocks the drain.
+ */
+export async function reapStaleDevStoryWorktrees(opts) {
+    const { targetRepoRoot, currentSessionUlid } = opts;
+    const execaImpl = opts.execaImpl ?? defaultExeca;
+    const reaped = [];
+    const warnings = [];
+    const list = await runGit(["-C", targetRepoRoot, "worktree", "list", "--porcelain"], targetRepoRoot, execaImpl);
+    if (list.exitCode !== 0) {
+        return { reaped, warnings };
+    }
+    // The parent dir that holds *every* session's dev-story worktrees:
+    //   <parent>/.crew-worktrees/<sessionUlid>/dev-<ref>-worktree
+    // `git worktree list` reports CANONICAL (symlink-resolved) paths, so canonicalise
+    // the checkout root before deriving the parent — otherwise a symlinked
+    // targetRepoRoot (e.g. a macOS tmpdir) would make every prefix check miss and
+    // leak every stale worktree. realpath is best-effort: fall back to the raw path.
+    const canonRoot = await realpathOrSelf(targetRepoRoot);
+    const worktreesParent = path.join(path.dirname(canonRoot), ".crew-worktrees");
+    const liveSessionDir = path.join(worktreesParent, currentSessionUlid);
+    const registered = list.stdout
+        .split("\n")
+        .filter((l) => l.startsWith("worktree "))
+        .map((l) => l.slice("worktree ".length).trim())
+        .filter((p) => p.length > 0);
+    for (const wt of registered) {
+        // Only consider dev-story worktrees (under the shared parent dir).
+        const rel = path.relative(worktreesParent, wt);
+        if (rel.startsWith("..") || path.isAbsolute(rel))
+            continue;
+        // Skip the live session's own worktrees — never reap our own in-flight work.
+        const inLiveSession = path.relative(liveSessionDir, wt);
+        if (!inLiveSession.startsWith("..") && !path.isAbsolute(inLiveSession)) {
+            continue;
+        }
+        const remove = await runGit(["-C", targetRepoRoot, "worktree", "remove", wt, "--force"], targetRepoRoot, execaImpl);
+        reaped.push(wt);
+        if (remove.exitCode !== 0) {
+            warnings.push(`[dev-story-worktree] reap: git worktree remove ${wt} --force failed ` +
+                `(exit ${remove.exitCode}): ${remove.stderr}.`);
+            try {
+                await fs.rm(wt, { recursive: true, force: true });
+                await runGit(["-C", targetRepoRoot, "worktree", "prune"], targetRepoRoot, execaImpl);
+            }
+            catch {
+                // Already reported.
+            }
+        }
+    }
+    return { reaped, warnings };
 }
