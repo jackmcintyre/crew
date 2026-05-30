@@ -292,7 +292,7 @@ export async function runAutoMergeGate(opts) {
     const manifest = await readManifestFn(manifestPath);
     let risk_tier = manifest.risk_tier;
     if (risk_tier === undefined) {
-        const reviewerResult = await readReviewerResultFn(opts.targetRepoRoot, opts.sessionUlid);
+        const reviewerResult = await readReviewerResultFn(opts.targetRepoRoot, opts.sessionUlid, opts.ref);
         // Trust the reviewer-computed tier ONLY when the result is the authoritative,
         // GREEN verdict for THIS ref. This makes the safety binding deterministic
         // rather than relying on the caller invoking the gate only on a green verdict

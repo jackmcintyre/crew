@@ -365,6 +365,7 @@ describe("AC5 (user-surface): postReviewerComments posts a PR review with inline
         const firstPostResult = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: SMOKE_STORY_REF,
             execaImpl: firstPostStub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: SMOKE_PLUGIN_VERSION,
@@ -423,6 +424,7 @@ describe("AC5 (user-surface): postReviewerComments posts a PR review with inline
         const secondPostResult = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: SMOKE_STORY_REF,
             execaImpl: secondPostStub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: SMOKE_PLUGIN_VERSION,

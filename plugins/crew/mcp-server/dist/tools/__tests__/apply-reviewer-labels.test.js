@@ -19,6 +19,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { applyReviewerLabels } from "../apply-reviewer-labels.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { sanitiseRefForPathSegment } from "../../lib/read-reviewer-result-file.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 import { GhRecoverableError, GhSubcommandDeniedError } from "../../errors.js";
 import { makeGhExecaStub } from "../../__tests__/test-helpers/gh-execa-stub.js";
@@ -28,6 +29,7 @@ import { gh } from "../../lib/gh.js";
 // Constants
 // ---------------------------------------------------------------------------
 const SESSION_ULID = "01HZTEST4_8_INTEGRATION0000";
+const STORY_REF = "native:01HZTEST00000000000000000";
 const PR_NUMBER = 42;
 const LABELS_URL = `/repos/jackmcintyre/crew/issues/${PR_NUMBER}/labels`;
 const LABELS_URL_PATTERN = /\/labels$/;
@@ -45,11 +47,11 @@ const NEEDS_HUMAN_LABEL_RESPONSE_ARRAY = JSON.stringify([
 function makeBaseResultFile(verdict) {
     return {
         sessionUlid: SESSION_ULID,
-        ref: "native:01HZTEST00000000000000000",
+        ref: STORY_REF,
         recommendedVerdict: verdict,
         acResults: {},
         standardsByCriterionId: {},
-        sourceStoryRef: "native:01HZTEST00000000000000000",
+        sourceStoryRef: STORY_REF,
         prNumber: PR_NUMBER,
         standardsVersion: "0.1.0",
     };
@@ -88,7 +90,8 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 async function writeResultFile(data) {
-    const sessDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+    // Story 8.15: seed at the per-ref namespaced path the reader now derives.
+    const sessDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID, sanitiseRefForPathSegment(STORY_REF));
     await fs.mkdir(sessDir, { recursive: true });
     await atomicWriteFile(path.join(sessDir, "reviewer-result.json"), JSON.stringify(data));
 }
@@ -122,6 +125,7 @@ describe("(4e) missing reviewer-result.json", () => {
         const result = await applyReviewerLabels({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             pluginRootOverride: pluginRoot,
             execaImpl: stub,
         });
@@ -140,6 +144,7 @@ describe("(4a) AC1 — READY FOR MERGE verdict", () => {
         const result = await applyReviewerLabels({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             pluginRootOverride: pluginRoot,
             execaImpl: stub,
         });
@@ -159,6 +164,7 @@ describe("(4b) AC2 — NEEDS CHANGES verdict", () => {
         const result = await applyReviewerLabels({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             pluginRootOverride: pluginRoot,
             execaImpl: stub,
         });
@@ -176,6 +182,7 @@ describe("(4b) AC2 — BLOCKED verdict", () => {
         const result = await applyReviewerLabels({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             pluginRootOverride: pluginRoot,
             execaImpl: stub,
         });
@@ -194,6 +201,7 @@ describe("(4b) AC2 — verdictOverride: reviewer-failure overrides READY FOR MER
         const result = await applyReviewerLabels({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             verdictOverride: "reviewer-failure",
             pluginRootOverride: pluginRoot,
             execaImpl: stub,
@@ -218,6 +226,7 @@ describe("(4d) error propagation — GhRecoverableError on first label call", ()
         await expect(applyReviewerLabels({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             pluginRootOverride: pluginRoot,
             execaImpl: stub,
         })).rejects.toThrow(GhRecoverableError);
@@ -287,6 +296,7 @@ describe("(step-10 error handler) verdictOverride fires two label calls regardle
         const result = await applyReviewerLabels({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             verdictOverride: "reviewer-failure",
             pluginRootOverride: pluginRoot,
             execaImpl: stub,
@@ -307,6 +317,7 @@ describe("(step-10 error handler) verdictOverride fires two label calls regardle
         const result = await applyReviewerLabels({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             verdictOverride: "reviewer-failure",
             pluginRootOverride: pluginRoot,
             execaImpl: stub,

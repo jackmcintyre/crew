@@ -48,6 +48,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { reviewerResultFilePath } from "../../lib/read-reviewer-result-file.js";
 import { writeInProgressSnapshot } from "../../state/manifest-state-machine.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processDevTranscript } from "../process-dev-transcript.js";
@@ -247,9 +248,9 @@ function makeReviewerOpts() {
  * Mirrors what `runReviewerSession` writes before returning.
  */
 async function seedReviewerResultFile(targetRepoRoot, sessionUlid, ref, recommendedVerdict) {
-    const sessionDir = path.join(targetRepoRoot, ".crew", "state", "sessions", sessionUlid);
-    await fs.mkdir(sessionDir, { recursive: true });
-    const filePath = path.join(sessionDir, "reviewer-result.json");
+    // Story 8.15: seed at the per-ref namespaced path the reader now derives.
+    const filePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
     const content = {
         sessionUlid,
         ref,

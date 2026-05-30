@@ -17,6 +17,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { postReviewerComments } from "../post-reviewer-comments.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { sanitiseRefForPathSegment } from "../../lib/read-reviewer-result-file.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 import { __resetPluginVersionCacheForTests } from "../../lib/plugin-version.js";
 import { GhRecoverableError, GhApiResponseShapeError, ReviewerResultFileMalformedError } from "../../errors.js";
@@ -160,7 +161,8 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 async function writeResultFile(data) {
-    const sessDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+    // Story 8.15: seed at the per-ref namespaced path the reader now derives.
+    const sessDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID, sanitiseRefForPathSegment(STORY_REF));
     await fs.mkdir(sessDir, { recursive: true });
     await atomicWriteFile(path.join(sessDir, "reviewer-result.json"), JSON.stringify(data));
 }
@@ -182,6 +184,7 @@ describe("(4c-i) READY FOR MERGE, all-pass", () => {
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -223,6 +226,7 @@ describe("(4c-ii) NEEDS CHANGES, failing artifact in diff", () => {
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -260,6 +264,7 @@ describe("(4c-iii) NEEDS CHANGES, failing artifact NOT in diff", () => {
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -297,6 +302,7 @@ describe("(4c-iv) BLOCKED, manual checks required", () => {
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -329,6 +335,7 @@ describe("(4c-v) BLOCKED, no ACs declared", () => {
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -353,6 +360,7 @@ describe("(4c-vi) Missing reviewer-result.json", () => {
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -376,6 +384,7 @@ describe("(4e) Negative: recoverable gh pr diff error", () => {
         await expect(postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -387,13 +396,14 @@ describe("(4e) Negative: recoverable gh pr diff error", () => {
 // ---------------------------------------------------------------------------
 describe("(4f) Negative: malformed reviewer-result.json", () => {
     it("ReviewerResultFileMalformedError propagates uncaught", async () => {
-        const sessDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+        const sessDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID, sanitiseRefForPathSegment(STORY_REF));
         await fs.mkdir(sessDir, { recursive: true });
         await atomicWriteFile(path.join(sessDir, "reviewer-result.json"), "NOT VALID JSON {{{ broken");
         const stub = makeGhExecaStub();
         await expect(postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -413,6 +423,7 @@ describe("(4g) Negative: malformed gh api GET reviews response", () => {
         await expect(postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -451,6 +462,7 @@ describe("(4.7 AC3) Two-run idempotent rerun — POST then PATCH", () => {
         const firstResult = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: firstRunStub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -503,6 +515,7 @@ describe("(4.7 AC3) Two-run idempotent rerun — POST then PATCH", () => {
         const secondResult = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: secondRunStub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -561,7 +574,7 @@ describe("(4.12 AC5 b1) reviewer.verdict telemetry — normal POST-success path"
             const resultData = makeReviewerResult("READY FOR MERGE", {
                 1: makeArtifactPassResult(1),
             });
-            const sessDir = path.join(telemetryTmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+            const sessDir = path.join(telemetryTmpRoot, ".crew", "state", "sessions", SESSION_ULID, sanitiseRefForPathSegment(STORY_REF));
             await fs.mkdir(sessDir, { recursive: true });
             await atomicWriteFile(path.join(sessDir, "reviewer-result.json"), JSON.stringify(resultData));
             // Stub gh to succeed — no overrides means normal POST path.
@@ -572,6 +585,7 @@ describe("(4.12 AC5 b1) reviewer.verdict telemetry — normal POST-success path"
             const result = await postReviewerComments({
                 targetRepoRoot: telemetryTmpRoot,
                 sessionUlid: SESSION_ULID,
+                ref: STORY_REF,
                 execaImpl: stub,
                 pluginRootOverride: telemetryPluginRoot,
                 pluginVersionOverride: TELEMETRY_PLUGIN_VERSION,
@@ -631,7 +645,7 @@ describe("(4.12 AC5 c2) reviewer.verdict telemetry — substitution-override (re
             const resultData = makeReviewerResult("NEEDS CHANGES", {
                 1: makeArtifactPassResult(1),
             });
-            const sessDir = path.join(telemetryTmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+            const sessDir = path.join(telemetryTmpRoot, ".crew", "state", "sessions", SESSION_ULID, sanitiseRefForPathSegment(STORY_REF));
             await fs.mkdir(sessDir, { recursive: true });
             await atomicWriteFile(path.join(sessDir, "reviewer-result.json"), JSON.stringify(resultData));
             // The substituted body that recordAgentInvoke would supply on timeout.
@@ -646,6 +660,7 @@ describe("(4.12 AC5 c2) reviewer.verdict telemetry — substitution-override (re
             const result = await postReviewerComments({
                 targetRepoRoot: telemetryTmpRoot,
                 sessionUlid: SESSION_ULID,
+                ref: STORY_REF,
                 execaImpl: stub,
                 pluginRootOverride: telemetryPluginRoot,
                 pluginVersionOverride: TELEMETRY_PLUGIN_VERSION,
@@ -714,6 +729,7 @@ describe("(4.7 AC3 3e) Wrong-ref non-match — POST path when prior verdict is f
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -774,6 +790,7 @@ describe("(4.7 AC3) Null-bodied prior reviews skipped (Copilot/plain approval sh
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -855,6 +872,7 @@ describe("Story 4.9b AC4 (4g): stamp-both-places integration", () => {
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -899,6 +917,7 @@ describe("Story 4.9b AC4 (4h): backward-compat — missing classification", () =
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,
@@ -938,6 +957,7 @@ describe("Story 4.9b AC4 (4i): manifest stamp best-effort — writeManifest thro
         const result = await postReviewerComments({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
+            ref: STORY_REF,
             execaImpl: stub,
             pluginRootOverride: pluginRoot,
             pluginVersionOverride: PLUGIN_VERSION,

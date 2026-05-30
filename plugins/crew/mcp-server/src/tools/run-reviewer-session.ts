@@ -42,6 +42,7 @@ import { gh } from "../lib/gh.js";
 import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
 import { slugifyStandardsCriterion } from "../lib/slugify-standards-criterion.js";
 import { atomicWriteFile } from "../lib/managed-fs.js";
+import { reviewerResultFilePath } from "../lib/read-reviewer-result-file.js";
 import { DuplicateStandardsCriterionIdError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { materialisePrBranchWorktree } from "../lib/materialise-pr-branch-worktree.js";
@@ -662,17 +663,16 @@ export async function runReviewerSession(
   // Only the verdict-relevant projection is persisted — heavy fields
   // (sourceStory, prDiff) stay in-memory only.
   // The parent directory is created if absent.
+  //
+  // Story 8.15: the result is namespaced per story ref within the session dir
+  // (`<sessionUlid>/<sanitised-ref>/reviewer-result.json`) so a multi-story
+  // drain — which shares one session ULID across stories — cannot have a later
+  // story overwrite an earlier story's verdict. The path is derived via the
+  // shared `reviewerResultFilePath` helper, the same derivation every reader
+  // uses, so writer and readers always agree.
   // -------------------------------------------------------------------------
-  const sessionDir = path.join(
-    targetRepoRoot,
-    ".crew",
-    "state",
-    "sessions",
-    sessionUlid,
-  );
-  await fs.mkdir(sessionDir, { recursive: true });
-
-  const resultFilePath = path.join(sessionDir, "reviewer-result.json");
+  const resultFilePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
+  await fs.mkdir(path.dirname(resultFilePath), { recursive: true });
   const fileProjection: ReviewerResultFileShape = {
     sessionUlid,
     ref,

@@ -32,6 +32,10 @@ import {
   GhRecoverableError,
 } from "../../errors.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import {
+  reviewerResultFilePath,
+  sanitiseRefForPathSegment,
+} from "../../lib/read-reviewer-result-file.js";
 import { __resetGhErrorMapCacheForTests } from "../../lib/gh-error-map.js";
 import type { execa } from "execa";
 import type { ReviewerResultFileShape } from "../run-reviewer-session.js";
@@ -641,7 +645,15 @@ describe("prDiff is populated from the execaImpl stub", () => {
 
 describe("AC4(k): reviewer-result.json persistence (revision 2)", () => {
   const expectedFilePath = () =>
-    path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID, "reviewer-result.json");
+    path.join(
+      tmpRoot,
+      ".crew",
+      "state",
+      "sessions",
+      SESSION_ULID,
+      sanitiseRefForPathSegment(STORY_REF),
+      "reviewer-result.json",
+    );
 
   it("happy path: reviewer-result.json exists at expected path after successful session", async () => {
     await callSession();

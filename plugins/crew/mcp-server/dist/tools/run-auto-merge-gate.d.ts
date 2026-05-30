@@ -115,7 +115,7 @@ export interface RunAutoMergeGateOptions {
      */
     provisionalTrustOverride?: boolean;
     /** Test seam: inject a custom reviewer-result reader (Stage-2 tier fallback). */
-    readReviewerResultImpl?: (targetRepoRoot: string, sessionUlid: string) => Promise<ReviewerResultFileShape | null>;
+    readReviewerResultImpl?: (targetRepoRoot: string, sessionUlid: string, ref: string) => Promise<ReviewerResultFileShape | null>;
     /**
      * Test seam: bypass the real CI poll (Stage-2 CI-gating). Production callers
      * omit this; the gate polls GitHub checks. Tests inject the desired outcome.

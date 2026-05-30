@@ -24,6 +24,7 @@ import { promises as fs, mkdtempSync, rmSync } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { sanitiseRefForPathSegment } from "../../lib/read-reviewer-result-file.js";
 import { postReviewerComments } from "../post-reviewer-comments.js";
 import { composeVerdictLine } from "../../lib/compose-reviewer-summary.js";
 import { UnreachableBlockedReasonError } from "../../errors.js";
@@ -149,7 +150,15 @@ afterEach(() => {
 });
 
 async function writeResultFile(data: ReviewerResultFileShape): Promise<void> {
-  const sessDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+  // Story 8.15: seed at the per-ref namespaced path the reader now derives.
+  const sessDir = path.join(
+    tmpRoot,
+    ".crew",
+    "state",
+    "sessions",
+    SESSION_ULID,
+    sanitiseRefForPathSegment(STORY_REF),
+  );
   await fs.mkdir(sessDir, { recursive: true });
   await atomicWriteFile(path.join(sessDir, "reviewer-result.json"), JSON.stringify(data));
 }
@@ -272,6 +281,7 @@ describe("AC3(b): postReviewerComments produces AC2-grammar verdict with no LLM 
       const result = await postReviewerComments({
         targetRepoRoot: tmpRoot,
         sessionUlid: SESSION_ULID,
+        ref: STORY_REF,
         execaImpl: stub,
         pluginRootOverride: pluginRoot,
         pluginVersionOverride: AC3_PLUGIN_VERSION,

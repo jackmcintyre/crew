@@ -35,6 +35,7 @@ import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
 import { processReviewerTranscript } from "../process-reviewer-transcript.js";
+import { sanitiseRefForPathSegment } from "../../lib/read-reviewer-result-file.js";
 import { ReviewerFirstCallSkippedError } from "../../errors.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { writeInProgressSnapshot } from "../../state/manifest-state-machine.js";
@@ -120,8 +121,16 @@ beforeEach(async () => {
     await writeInProgressSnapshot({ targetRepoRoot: tmpRoot, ref: STORY_REF, manifest });
   }
 
-  // Session directory (where reviewer-result.json would be written)
-  sessionDir = path.join(tmpRoot, ".crew", "state", "sessions", SESSION_ULID);
+  // Session directory (where reviewer-result.json would be written).
+  // Story 8.15: reviewer-result.json is namespaced per story ref within the session.
+  sessionDir = path.join(
+    tmpRoot,
+    ".crew",
+    "state",
+    "sessions",
+    SESSION_ULID,
+    sanitiseRefForPathSegment(STORY_REF),
+  );
   resultFilePath = path.join(sessionDir, "reviewer-result.json");
 });
 

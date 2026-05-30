@@ -417,6 +417,7 @@ describe("AC5 (user-surface): applyReviewerLabels applies reviewed-by-agent + ne
       const postResult = await postReviewerComments({
         targetRepoRoot: tmpRoot,
         sessionUlid: SESSION_ULID,
+        ref: SMOKE_STORY_REF,
         execaImpl: postStub,
         pluginRootOverride: pluginRoot,
         pluginVersionOverride: SMOKE_PLUGIN_VERSION,
@@ -473,6 +474,7 @@ describe("AC5 (user-surface): applyReviewerLabels applies reviewed-by-agent + ne
       const labelsResult = await applyReviewerLabels({
         targetRepoRoot: tmpRoot,
         sessionUlid: SESSION_ULID,
+        ref: SMOKE_STORY_REF,
         pluginRootOverride: pluginRoot,
         execaImpl: labelsStub,
       });

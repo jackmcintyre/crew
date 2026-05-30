@@ -140,6 +140,7 @@ export interface RunAutoMergeGateOptions {
   readReviewerResultImpl?: (
     targetRepoRoot: string,
     sessionUlid: string,
+    ref: string,
   ) => Promise<ReviewerResultFileShape | null>;
   /**
    * Test seam: bypass the real CI poll (Stage-2 CI-gating). Production callers
@@ -407,6 +408,7 @@ export async function runAutoMergeGate(
     const reviewerResult = await readReviewerResultFn(
       opts.targetRepoRoot,
       opts.sessionUlid,
+      opts.ref,
     );
     // Trust the reviewer-computed tier ONLY when the result is the authoritative,
     // GREEN verdict for THIS ref. This makes the safety binding deterministic

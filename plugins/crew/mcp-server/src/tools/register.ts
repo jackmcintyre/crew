@@ -1079,15 +1079,17 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       properties: {
         targetRepoRoot: { type: "string" },
         sessionUlid: { type: "string" },
+        ref: { type: "string" },
         role: { type: "string" },
       },
-      required: ["targetRepoRoot", "sessionUlid"],
+      required: ["targetRepoRoot", "sessionUlid", "ref"],
     },
     handler: async (args) => {
       const parsed = z
         .object({
           targetRepoRoot: z.string().min(1),
           sessionUlid: z.string().min(1),
+          ref: z.string().min(1),
           role: z.string().optional(),
         })
         .parse(args);
@@ -1126,16 +1128,18 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       properties: {
         targetRepoRoot: { type: "string" },
         sessionUlid: { type: "string" },
+        ref: { type: "string" },
         verdictOverride: { type: "string", enum: ["reviewer-failure"] },
         role: { type: "string" },
       },
-      required: ["targetRepoRoot", "sessionUlid"],
+      required: ["targetRepoRoot", "sessionUlid", "ref"],
     },
     handler: async (args) => {
       const parsed = z
         .object({
           targetRepoRoot: z.string().min(1),
           sessionUlid: z.string().min(1),
+          ref: z.string().min(1),
           verdictOverride: z.literal("reviewer-failure").optional(),
           role: z.string().optional(),
         })
