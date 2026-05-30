@@ -5,7 +5,9 @@
  *
  * A rule matches when EVERY declared signal field on it matches the diff:
  * - `path_patterns`: if present, AT LEAST ONE `changedPaths` entry matches
- *   AT LEAST ONE pattern (via `picomatch` with default options).
+ *   AT LEAST ONE pattern (via `picomatch` with default options). With
+ *   `all_paths_match: true`, instead EVERY changed file must match a pattern
+ *   (and there must be ≥1) — the conservative low-tier semantic.
  * - `change_types`: if present, AT LEAST ONE detected change type appears
  *   in the rule's array.
  * - `diff_size_thresholds`: if present, `diffSize` satisfies the bounds

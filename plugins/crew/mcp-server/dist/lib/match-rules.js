@@ -5,7 +5,9 @@
  *
  * A rule matches when EVERY declared signal field on it matches the diff:
  * - `path_patterns`: if present, AT LEAST ONE `changedPaths` entry matches
- *   AT LEAST ONE pattern (via `picomatch` with default options).
+ *   AT LEAST ONE pattern (via `picomatch` with default options). With
+ *   `all_paths_match: true`, instead EVERY changed file must match a pattern
+ *   (and there must be ≥1) — the conservative low-tier semantic.
  * - `change_types`: if present, AT LEAST ONE detected change type appears
  *   in the rule's array.
  * - `diff_size_thresholds`: if present, `diffSize` satisfies the bounds
@@ -46,7 +48,17 @@ export function matchRule(rule, ctx) {
     if (rule.path_patterns !== undefined) {
         const isMatch = picomatch(rule.path_patterns);
         matchedPaths = ctx.changedPaths.filter((p) => isMatch(p));
-        pathSignalSatisfied = matchedPaths.length > 0;
+        if (rule.all_paths_match === true) {
+            // Conservative (low-tier) semantic: EVERY changed file must match, and
+            // there must be at least one. A single non-matching file (e.g. code
+            // alongside docs) disqualifies the rule — so an empty diff never matches.
+            pathSignalSatisfied =
+                ctx.changedPaths.length > 0 && matchedPaths.length === ctx.changedPaths.length;
+        }
+        else {
+            // Default: AT LEAST ONE changed file matches (correct for high rules).
+            pathSignalSatisfied = matchedPaths.length > 0;
+        }
     }
     // Short-circuit: path signal failed
     if (!pathSignalSatisfied) {
