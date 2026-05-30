@@ -1,5 +1,5 @@
 generated: 2026-05-19
-last_updated: '2026-05-30'
+last_updated: '2026-05-31'
 project: crew
 project_key: NOKEY
 tracking_system: file-system
@@ -144,4 +144,7 @@ development_status:
   8-17-dev-runs-full-build-before-opening-pr: ready-for-dev
   8-18-drain-progress-heartbeat: ready-for-dev
   8-19-drain-pause-to-ping-on-genuine-ambiguity: ready-for-dev
+  8-20-true-drain-parallelism-dev-edits-in-own-worktree: ready-for-dev
+  8-21-drain-observability-seams-non-fatal: ready-for-dev
+  8-22-drain-dispatches-concurrent-workers: ready-for-dev
   epic-8-retrospective: optional
