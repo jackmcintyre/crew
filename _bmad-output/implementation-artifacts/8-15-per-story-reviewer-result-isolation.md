@@ -24,7 +24,7 @@ vitest: plugins/crew/mcp-server/src/tools/__tests__/per-story-reviewer-result-is
 
 **AC2 — writer and reader agree on a per-ref, deterministic path:**
 
-`runReviewerSession` writes the reviewer result to a path that is namespaced by the story ref within the session directory (e.g. a per-ref subdirectory or filename), and `processReviewerTranscript` reads from the same deterministically-derived path for the requested ref. The derivation handles refs containing a colon (e.g. `bmad:8.13`) safely as a filesystem path component, and is covered by the test above.
+`runReviewerSession` writes the reviewer result to a path that is namespaced by the story ref within the session directory (e.g. a per-ref subdirectory or filename), and `processReviewerTranscript` reads from the same deterministically-derived path for the requested ref. The derivation safely handles refs that contain characters not valid in a single path segment (notably the colon in a BMad-style ref) by sanitising them into a path-safe component, and is covered by the test above.
 vitest: plugins/crew/mcp-server/src/tools/__tests__/per-story-reviewer-result-isolation.test.ts
 
 ## Notes
