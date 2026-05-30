@@ -137,6 +137,7 @@ development_status:
   8-10-explain-gate-reason-helper: done
   8-11-summarise-gate-outcome-helper: done
   8-12-unattended-drain-runbook: done
-  8-13-risk-tiering-worked-examples: ready-for-dev
+  8-13-risk-tiering-worked-examples: done
   8-14-drain-result-and-exit-reasons: done
+  8-15-per-story-reviewer-result-isolation: backlog
   epic-8-retrospective: optional
