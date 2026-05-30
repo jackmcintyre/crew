@@ -33,6 +33,16 @@ const MAX_RESUME = Number.isInteger(A.maxResume) && A.maxResume > 0 ? A.maxResum
 
 const HANDOFF = (ref) => `Handoff to reviewer — story ${ref} ready for review.`
 
+// NEEDS-HUMAN-DECISION signal (Story 8.19): the dev emits this locked marker as
+// its last line — INSTEAD of the handoff phrase — when it hits a genuine
+// decision a human must make to proceed correctly (distinct from a normal
+// handoff, a domain-yield, and a hard block). The drain detects the marker on
+// the REAL dev transcript, asks processDevTranscript to extract the verbatim
+// question (the tool owns the parse), routes the story to the human-needed
+// surface (pausedForHuman) carrying the question, NOTIFIES the operator, and
+// continues to the next claimable story rather than halting the whole run.
+const NEEDS_HUMAN_MARKER = /^needs-human-decision:[ \t]*\S/m
+
 // Clamp a seam-agent's output to a single stdout string: the courier cannot
 // "decide" — the tool already decided, and the script switches on the parse.
 const RawSchema = { type: 'object', additionalProperties: false, properties: { stdout: { type: 'string' } }, required: ['stdout'] }
@@ -89,6 +99,23 @@ const progressStart = async (ref, ph) => {
 const progressDone = async (ref, ph, startedAtMs) => {
   const r = await seam(`node ${CLI} drainPhaseDone --json '${J({ ref, phase: ph, startedAtMs: startedAtMs ?? 0 })}'`, `progress-done:${ref}:${ph}`, true)
   if (r && !r._parseError && typeof r.line === 'string') log(r.line)
+}
+
+// OPERATOR NOTIFICATION (Story 8.19): when a story pauses for a human decision,
+// the drain pushes a notification naming the ref and the question. The binding
+// contract is "the question reaches the operator with the ref" — we do NOT
+// hard-wire a specific notifier the runtime may not expose. The drain narrator
+// (`log()`) is the channel the runtime always provides, so we surface the pause
+// there; if the runtime additionally injects a dedicated `notify` seam (e.g. a
+// push channel), we route through that too. This path is exercised by the drain
+// integration test via an injected notifier so a future change cannot silently
+// drop it. `typeof` guards keep the workflow safe when no `notify` is injected.
+const notifyHumanNeeded = (ref, question) => {
+  const line = `NEEDS HUMAN — story ${ref} paused for a decision. question: ${question}`
+  log(line)
+  if (typeof notify === 'function') {
+    try { notify({ kind: 'needs-human-decision', ref, question, line }) } catch (_e) { /* notification is best-effort; never break the drain */ }
+  }
 }
 
 phase('drain')
@@ -164,10 +191,35 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
         { label: `dev:${ref}:${rw}${tag}`, phase: ph },
       )
 
+      const devText = String(devFinal || '')
+
+      // NEEDS-HUMAN-DECISION (Story 8.19): the dev signalled a genuine decision a
+      // human must make — checked BEFORE the handoff/`dev-no-handoff` paths so an
+      // ambiguity pause is never mistaken for a dirty no-handoff exit or a silent
+      // failure. processDevTranscript owns the parse (extracts the verbatim
+      // question and stamps the manifest); the script only routes. We pass the
+      // REAL dev transcript here (not the synthesised handoff phrase) so the tool
+      // can read the question. On a clean parse we file the story into the
+      // human-needed surface (pausedForHuman) carrying its question, NOTIFY the
+      // operator, and RETURN — no PR is opened and the drain continues to the
+      // next claimable story. retryable=true: the tool is idempotent (re-stamps
+      // the same blocked_by, re-extracts the same question).
+      if (NEEDS_HUMAN_MARKER.test(devText)) {
+        const ph0 = await seam(`node ${CLI} processDevTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, devTranscript: devText })}'`, `pd-needs-human:${ref}:${rw}${tag}`, true)
+        if (ph0 && ph0.next === 'done-needs-human-decision') {
+          const question = ph0.question || '(no question text captured)'
+          pausedForHuman.push({ ref, reason: 'needs-human-decision', question })
+          notifyHumanNeeded(ref, question)
+          return
+        }
+        // Marker present but the tool did not confirm it (garbled relay / parse
+        // miss): fall through to the normal evidence checks below rather than
+        // guess — a no-handoff exit then blocks the story (no silent success).
+      }
+
       // Evidence check (in-script, cheap): the dev must have genuinely handed off.
       // We do NOT fabricate a handoff — if the real transcript lacks the locked
       // phrase, the dev did not finish cleanly; block rather than fake success.
-      const devText = String(devFinal || '')
       if (!devText.includes(HANDOFF(ref))) {
         blocked.push({ ref, blocked_by: 'dev-no-handoff', tail: devText.slice(-300) })
         return

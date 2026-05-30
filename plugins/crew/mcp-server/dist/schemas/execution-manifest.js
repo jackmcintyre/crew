@@ -131,6 +131,14 @@ export const ExecutionManifestSchema = z
      *   - `reviewer-grammar`             — Story 4.3 RESERVED (no live writer; kept
      *                                      as forward-compat reservation per 4.3 rationale)
      *   - `deps-drift`                   — Story 5.13 NEW (scan-sources deps-drift gate)
+     *   - `needs-human-decision`         — Story 8.19 (process-dev-transcript): the
+     *                                      dev hit a genuine decision a human must
+     *                                      make to proceed correctly. NOT a hard
+     *                                      block — the story pauses into the
+     *                                      human-needed surface carrying the
+     *                                      verbatim question; the manifest is
+     *                                      stamped so its paused-for-human state is
+     *                                      durable and distinct from a generic block.
      *
      * See `_bmad-output/implementation-artifacts/5-13-*.md § AC2` for the
      * full closed-enum rationale and migration table.
@@ -152,6 +160,7 @@ export const ExecutionManifestSchema = z
         "orphan-no-transcript",
         "reviewer-grammar",
         "deps-drift",
+        "needs-human-decision",
     ])
         .optional(),
     /**

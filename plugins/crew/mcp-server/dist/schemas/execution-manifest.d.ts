@@ -59,6 +59,7 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
         "gh-needs-human": "gh-needs-human";
         "gh-retry": "gh-retry";
         "handoff-grammar": "handoff-grammar";
+        "needs-human-decision": "needs-human-decision";
         "orphan-no-transcript": "orphan-no-transcript";
         "planning-discipline": "planning-discipline";
         "reviewer-grammar": "reviewer-grammar";
