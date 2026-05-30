@@ -75,6 +75,7 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     }, z.core.$strip>>>;
     claimed_by: z.ZodOptional<z.ZodString>;
     rework_count: z.ZodOptional<z.ZodNumber>;
+    drain_resume_attempts: z.ZodOptional<z.ZodNumber>;
     risk_tier: z.ZodOptional<z.ZodEnum<{
         high: "high";
         low: "low";

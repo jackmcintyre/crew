@@ -1,8 +1,9 @@
 export const meta = {
   name: 'crew-drain',
   description:
-    'Stage-1 stateless drain: a serial per-story loop (claim -> dev -> review -> verdict -> auto-merge gate) driven entirely through one-shot CLI seams — NO persistent MCP server on the drain path, so the cascade-SIGTERM disconnect cannot occur by construction. Story 8.5.',
+    'Stage-1 stateless drain: a serial per-story loop (claim -> dev -> review -> verdict -> auto-merge gate) driven entirely through one-shot CLI seams — NO persistent MCP server on the drain path, so the cascade-SIGTERM disconnect cannot occur by construction. Recovers crash-orphaned stories first (auto-resume). Story 8.5 + crash-recovery.',
   phases: [
+    { title: 'recover', detail: 'scan in-progress/ for crash-orphaned stories from a prior run; auto-resume each (resume at review if a PR exists, else re-run), capped' },
     { title: 'drain', detail: 'serial per story: claim -> dev (worktree) -> processDevTranscript -> review -> processReviewerTranscript -> (rework) -> auto-merge gate' },
   ],
 }
@@ -17,6 +18,8 @@ export const meta = {
 //   maxStories     : OPTIONAL safety cap on stories claimed this run. Omitted →
 //                    drain until the queue is empty (the headline). Provided → stop after N.
 //   maxRework      : per-story NEEDS-CHANGES rework cap. Default 2.
+//   maxResume      : per-story crash-resume cap. Past this many auto-resumes a
+//                    still-orphaned story is blocked for a human. Default 2.
 // ---------------------------------------------------------------------------
 const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
 const REPO = A.targetRepoRoot || A.repo
@@ -26,6 +29,7 @@ const CLI = A.cli
 // the loop always terminates on queue-drained. A positive integer caps the run.
 const MAX = Number.isInteger(A.maxStories) && A.maxStories > 0 ? A.maxStories : Infinity
 const MAX_REWORK = A.maxRework || 2
+const MAX_RESUME = Number.isInteger(A.maxResume) && A.maxResume > 0 ? A.maxResume : 2
 
 const HANDOFF = (ref) => `Handoff to reviewer — story ${ref} ready for review.`
 
@@ -67,92 +71,101 @@ if (!REPO || !CLI) return { error: 'missing-args', need: ['targetRepoRoot', 'cli
 // resume); fall back to minting one via the CLI for a standalone run.
 const SU = A.sessionUlid || (await seam(`node ${CLI} mintSessionUlid`, 'mint', true)).sessionUlid
 if (!SU) return { error: 'no-session-ulid' }
-log(`drain session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' : MAX} maxRework=${MAX_REWORK}`)
+log(`drain session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' : MAX} maxRework=${MAX_REWORK} maxResume=${MAX_RESUME}`)
 
 // Persona system prompts — these carry the evidence-only discipline (Story 8.3):
 // agents produce code / a PR / a transcript; the TOOLS own the backlog ledger.
+// The reviewer persona is fetched up-front too so a crash-resume that skips dev
+// can still drive the review (it is exactly the prompt processDevTranscript
+// would otherwise hand back — just the persona system prompt, no story context).
 const devPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-dev' })}'`, 'persona:dev', true))?.systemPrompt || ''
+const reviewerPersona = (await seam(`node ${CLI} buildPersonaSpawnPrompt --json '${J({ targetRepoRoot: REPO, role: 'generalist-reviewer' })}'`, 'persona:reviewer', true))?.systemPrompt || ''
 
-const completed = [], merged = [], pausedForHuman = [], blocked = []
+const completed = [], merged = [], pausedForHuman = [], blocked = [], resumed = []
 // Set the moment the loop exits; every break path below overwrites this placeholder.
 let drainedReason = 'incomplete'
 
-for (let i = 0; ; i++) {
-  // Optional safety cap — its OWN exit reason, not a queue state. Dead when MAX
-  // is Infinity (the default unbounded drain).
-  if (i >= MAX) { drainedReason = 'max-stories-reached'; break }
-  // CLAIM — atomic to-do -> in-progress; deps satisfied from done/ only.
-  // 'queue-drained' is the happy unattended path; any other non-spawn-dev outcome
-  // (waiting-on-in-progress, parse/claim error) is surfaced verbatim.
-  const claim = await seam(`node ${CLI} claimNextStory --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, `claim:${i}`)
-  if (!claim || claim.next !== 'spawn-dev') { drainedReason = claim?.next || claim?._parseError || 'claim-failed'; break }
-  const { ref, title, manifestPath } = claim
-  log(`claimed ${ref} — ${title}`)
-
-  let verdict = null, prNumber = null
+// processStory: run ONE story end-to-end — rework loop (dev → review → verdict)
+// then the auto-merge gate — and file the outcome into exactly one result bucket.
+// Used by BOTH the orphan-resume prelude and the main claim loop.
+//   resumeAtReview=true  → the PR already exists from a crashed run; SKIP the dev
+//     spawn on the first iteration and review the existing PR (resumePrNumber).
+//     Any NEEDS-CHANGES rework after that runs dev normally (it pushes to the
+//     same existing PR, exactly as a normal rework round does).
+async function processStory({ ref, title, manifestPath, resumeAtReview = false, resumePrNumber = null, ph = 'drain', tag = '' }) {
+  let verdict = null, prNumber = resumeAtReview ? resumePrNumber : null
 
   for (let rw = 0; rw < MAX_REWORK; rw++) {
-    // DEV — persona prompt (judgment + evidence-only discipline). v1 is single-story
-    // serial, so the dev runs directly in targetRepoRoot (cwd = REPO): runDevTerminalAction
-    // infers the repo from cwd, so an isolated worktree would mismatch (handoff §6 —
-    // the changes would land in the worktree while git -C targetRepoRoot sees none).
-    // A worktree-per-dev for parallel multi-story drains is a post-Stage-1 follow-up.
-    // It implements against the manifest's ACs, then opens the PR via the one-shot CLI;
-    // the PR number transports via dev-outcome.json (machine-authoritative), not chat.
-    const reworkNote = rw === 0 ? '' :
-      `\n\nThis is rework iteration ${rw}: address the reviewer's NEEDS CHANGES feedback on the existing PR (read .crew/state for the recorded verdict), push the fixes, and hand off again.`
-    const devFinal = await agent(
-      `${devPersona}\n\n## This run (story ${ref})\n` +
-        `- targetRepoRoot: ${REPO}\n- ref: ${ref}\n- title: "${title}"\n- sessionUlid: ${SU}\n- manifestPath: ${manifestPath}\n\n` +
-        `Read the execution manifest at \`${manifestPath}\` — it identifies the source story and its acceptance criteria. ` +
-        `Implement the story end-to-end in the target repo at ${REPO} (your current working directory): write real code and tests, and run the project's build/test gates GREEN before opening the PR. ` +
-        `Do NOT gold-plate; do NOT touch the execution manifest or any \`.crew/state\` file (the tools own the ledger).\n\n` +
-        `To commit, push, and open the PR, run EXACTLY this (do not alter the path); fill \`body\` and \`summary\` with a real description of your change:\n` +
-        `  node ${CLI} runDevTerminalAction --json '${J({ targetRepoRoot: REPO, ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>' })}'\n` +
-        `Confirm it prints "ok":true and a "prUrl". If it prints an "error", or any crew tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
-        `Otherwise, end your final message with EXACTLY this line and nothing after it:\n${HANDOFF(ref)}`,
-      { label: `dev:${ref}:${rw}`, phase: 'drain' },
-    )
+    const skipDev = resumeAtReview && rw === 0
+    let reviewerPrompt
 
-    // Evidence check (in-script, cheap): the dev must have genuinely handed off.
-    // We do NOT fabricate a handoff — if the real transcript lacks the locked
-    // phrase, the dev did not finish cleanly; block rather than fake success.
-    const devText = String(devFinal || '')
-    if (!devText.includes(HANDOFF(ref))) {
-      blocked.push({ ref, blocked_by: 'dev-no-handoff', tail: devText.slice(-300) })
-      break
+    if (skipDev) {
+      // CRASH-RESUME at review: the dev already shipped a PR in the prior run.
+      // Re-running dev would try to re-open a duplicate PR, so we skip it and
+      // review the existing PR directly. reviewerPrompt is just the persona
+      // (what processDevTranscript would otherwise return).
+      reviewerPrompt = reviewerPersona
+      log(`${ref} resume-at-review -> PR #${prNumber} (dev already shipped; skipping dev)`)
+    } else {
+      // DEV — persona prompt (judgment + evidence-only discipline). v1 is single-story
+      // serial, so the dev runs directly in targetRepoRoot (cwd = REPO): runDevTerminalAction
+      // infers the repo from cwd, so an isolated worktree would mismatch (handoff §6 —
+      // the changes would land in the worktree while git -C targetRepoRoot sees none).
+      // A worktree-per-dev for parallel multi-story drains is a post-Stage-1 follow-up.
+      // It implements against the manifest's ACs, then opens the PR via the one-shot CLI;
+      // the PR number transports via dev-outcome.json (machine-authoritative), not chat.
+      const reworkNote = rw === 0 ? '' :
+        `\n\nThis is rework iteration ${rw}: address the reviewer's NEEDS CHANGES feedback on the existing PR (read .crew/state for the recorded verdict), push the fixes, and hand off again.`
+      const devFinal = await agent(
+        `${devPersona}\n\n## This run (story ${ref})\n` +
+          `- targetRepoRoot: ${REPO}\n- ref: ${ref}\n- title: "${title}"\n- sessionUlid: ${SU}\n- manifestPath: ${manifestPath}\n\n` +
+          `Read the execution manifest at \`${manifestPath}\` — it identifies the source story and its acceptance criteria. ` +
+          `Implement the story end-to-end in the target repo at ${REPO} (your current working directory): write real code and tests, and run the project's build/test gates GREEN before opening the PR. ` +
+          `Do NOT gold-plate; do NOT touch the execution manifest or any \`.crew/state\` file (the tools own the ledger).\n\n` +
+          `To commit, push, and open the PR, run EXACTLY this (do not alter the path); fill \`body\` and \`summary\` with a real description of your change:\n` +
+          `  node ${CLI} runDevTerminalAction --json '${J({ targetRepoRoot: REPO, ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>' })}'\n` +
+          `Confirm it prints "ok":true and a "prUrl". If it prints an "error", or any crew tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
+          `Otherwise, end your final message with EXACTLY this line and nothing after it:\n${HANDOFF(ref)}`,
+        { label: `dev:${ref}:${rw}${tag}`, phase: ph },
+      )
+
+      // Evidence check (in-script, cheap): the dev must have genuinely handed off.
+      // We do NOT fabricate a handoff — if the real transcript lacks the locked
+      // phrase, the dev did not finish cleanly; block rather than fake success.
+      const devText = String(devFinal || '')
+      if (!devText.includes(HANDOFF(ref))) {
+        blocked.push({ ref, blocked_by: 'dev-no-handoff', tail: devText.slice(-300) })
+        return
+      }
+
+      // PARSE DEV — locked-grammar handoff parse + prNumber from dev-outcome.json.
+      // processDevTranscript is idempotent (re-reads dev-outcome.json, re-stamps the
+      // same blocked_by) — safe to retry the relay on a garble.
+      const pd = await seam(`node ${CLI} processDevTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, devTranscript: HANDOFF(ref) })}'`, `pd:${ref}:${rw}${tag}`, true)
+      if (!pd || pd.next !== 'spawn-reviewer') { blocked.push({ ref, blocked_by: pd?.next || pd?._parseError || 'pd-failed' }); return }
+      prNumber = pd.prNumber
+      reviewerPrompt = pd.reviewerPrompt
+      log(`${ref} -> PR #${prNumber}`)
     }
 
-    // PARSE DEV — locked-grammar handoff parse + prNumber from dev-outcome.json.
-    // The handoff line is the only transcript content processDevTranscript parses
-    // for routing; prNumber comes from the machine-written outcome file. Feeding
-    // the canonical (verified-present) handoff keeps the seam's shell arg safe.
-    // processDevTranscript is idempotent (re-reads dev-outcome.json, re-stamps the
-    // same blocked_by) — safe to retry the relay on a garble.
-    const pd = await seam(`node ${CLI} processDevTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, devTranscript: HANDOFF(ref) })}'`, `pd:${ref}:${rw}`, true)
-    if (!pd || pd.next !== 'spawn-reviewer') { blocked.push({ ref, blocked_by: pd?.next || pd?._parseError || 'pd-failed' }); break }
-    prNumber = pd.prNumber
-    log(`${ref} -> PR #${prNumber}`)
-
     // REVIEW — clean context. The reviewer's binding verdict transports through
-    // the reviewer-result FILE that runReviewerSession writes (never chat). Its
-    // prompt comes from processDevTranscript; we add the one-shot CLI invocation.
+    // the reviewer-result FILE that runReviewerSession writes (never chat).
     await agent(
-      `${pd.reviewerPrompt}\n\n## How to run the review in this stateless run\n` +
+      `${reviewerPrompt}\n\n## How to run the review in this stateless run\n` +
         `Your FIRST and only mandatory action is to run EXACTLY this command (do not alter the path); it performs the three mandatory reads and writes the binding verdict to reviewer-result.json:\n` +
         `  node ${CLI} runReviewerSession --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, prNumber, role: 'generalist-reviewer' })}'\n` +
         `Then summarise the result it prints for the operator. Do NOT merge, push, edit the PR, or write any \`.crew/state\` file yourself — runReviewerSession owns the verdict file.`,
-      { label: `rev:${ref}:${rw}`, phase: 'drain' },
+      { label: `rev:${ref}:${rw}${tag}`, phase: ph },
     )
 
     // VERDICT — derived from the reviewer-result FILE; on green, completeStory
     // runs inside processReviewerTranscript (atomic in-progress -> done).
-    verdict = await seam(`node ${CLI} processReviewerTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, manifestPath })}'`, `verdict:${ref}:${rw}`)
+    verdict = await seam(`node ${CLI} processReviewerTranscript --json '${J({ targetRepoRoot: REPO, sessionUlid: SU, ref, manifestPath })}'`, `verdict:${ref}:${rw}${tag}`)
     const v = verdict?.next
     log(`${ref} verdict -> ${v}`)
     if (v === 'done-ready-for-merge') break
     if (v === 'done-blocked-reviewer-needs-changes') continue // rework
-    blocked.push({ ref, blocked_by: v || verdict?._parseError || 'verdict-failed' }); break
+    blocked.push({ ref, blocked_by: v || verdict?._parseError || 'verdict-failed' }); return
   }
 
   // GATE — only on a green verdict. risk-tier x agreement x threshold; the tool
@@ -166,14 +179,62 @@ for (let i = 0; ; i++) {
   }
 }
 
+// ── ORPHAN RECOVERY (crash resume) ─────────────────────────────────────────
+// A prior run that died mid-story leaves the manifest in in-progress/ claimed by
+// a now-stale session. Recover BEFORE draining new work: for each orphan, either
+// resume at review (a PR already exists — skip dev) or re-run the story (no PR),
+// capped by maxResume so a story that keeps crashing the loop is blocked for a
+// human instead of looping forever. scanOrphanedInProgress is read-only/idempotent
+// (retryable); reattach/block are one-shot mutations.
+phase('recover')
+const scan = await seam(`node ${CLI} scanOrphanedInProgress --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, 'orphan-scan', true)
+const orphans = scan && Array.isArray(scan.orphans) ? scan.orphans : []
+if (orphans.length) log(`orphan recovery: ${orphans.length} in-progress story(ies) left by a prior run`)
+for (const o of orphans) {
+  const { ref, title, prNumber, resumeAttempts, staleUlid, manifestPath } = o
+  // CAP — past the resume limit, block for a human rather than re-resume forever.
+  if ((resumeAttempts || 0) >= MAX_RESUME) {
+    await seam(`node ${CLI} blockOrphanNoTranscript --json '${J({ targetRepoRoot: REPO, ref, staleUlid })}'`, `orphan-block:${ref}`)
+    blocked.push({ ref, blocked_by: 'orphan-resume-cap', resumeAttempts })
+    log(`orphan ${ref} hit resume cap (${resumeAttempts}/${MAX_RESUME}) -> blocked for a human`)
+    continue
+  }
+  // Take ownership (reattachOrphan rewrites claimed_by → this session AND bumps
+  // drain_resume_attempts, so the cap advances every resume).
+  const re = await seam(`node ${CLI} reattachOrphan --json '${J({ targetRepoRoot: REPO, ref, currentSessionUlid: SU })}'`, `orphan-reattach:${ref}`)
+  if (!re || re._parseError) { blocked.push({ ref, blocked_by: re?._parseError || 'reattach-failed' }); continue }
+  const mode = prNumber ? 'resume-at-review' : 're-run'
+  resumed.push({ ref, mode, attempt: re.resumeAttempts })
+  log(`resuming orphan ${ref} (${mode}, attempt ${re.resumeAttempts})`)
+  await processStory({ ref, title, manifestPath, resumeAtReview: !!prNumber, resumePrNumber: prNumber || null, ph: 'recover', tag: ':resume' })
+}
+
+// ── MAIN DRAIN ─────────────────────────────────────────────────────────────
+phase('drain')
+for (let i = 0; ; i++) {
+  // Optional safety cap — its OWN exit reason, not a queue state. Dead when MAX
+  // is Infinity (the default unbounded drain).
+  if (i >= MAX) { drainedReason = 'max-stories-reached'; break }
+  // CLAIM — atomic to-do -> in-progress; deps satisfied from done/ only.
+  // 'queue-drained' is the happy unattended path; any other non-spawn-dev outcome
+  // (waiting-on-in-progress, parse/claim error) is surfaced verbatim.
+  const claim = await seam(`node ${CLI} claimNextStory --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, `claim:${i}`)
+  if (!claim || claim.next !== 'spawn-dev') { drainedReason = claim?.next || claim?._parseError || 'claim-failed'; break }
+  const { ref, title, manifestPath } = claim
+  log(`claimed ${ref} — ${title}`)
+  await processStory({ ref, title, manifestPath })
+}
+
 // The return object IS the no-silent-failures surface: every ref lands in exactly
 // one of completed / merged / pausedForHuman / blocked, with a drain reason.
+// `resumed` additionally records which stories were crash-recovered this run.
 return {
   sessionUlid: SU,
   drainedReason,
   // True ONLY on a genuine full drain (queue emptied). Hitting the cap,
   // waiting-on-in-progress, or any claim error is NOT a drain.
   drained: drainedReason === 'queue-drained',
+  resumed,
   completed,
   merged,
   pausedForHuman,

@@ -90,7 +90,29 @@ describe("reattachOrphan — successful rewrite", () => {
             ref,
             currentSessionUlid: CURRENT_SESSION_ULID,
         });
-        expect(result.chatLog[0]).toBe(`reattaching ${ref} — claimed_by rewritten from ${STALE_ULID} to ${CURRENT_SESSION_ULID}`);
+        expect(result.chatLog[0]).toBe(`reattaching ${ref} — claimed_by rewritten from ${STALE_ULID} to ${CURRENT_SESSION_ULID} (resume attempt 1)`);
+    });
+    it("bumps drain_resume_attempts and returns the post-increment count (crash-recovery cap)", async () => {
+        const ref = "native:01JVWX2REATTACH0000000003";
+        const absPath = await seedInProgressManifest(stateRoot, ref, STALE_ULID);
+        // First reattach: undefined -> 1.
+        const first = await reattachOrphan({
+            targetRepoRoot: tmpDir,
+            ref,
+            currentSessionUlid: CURRENT_SESSION_ULID,
+        });
+        expect(first.resumeAttempts).toBe(1);
+        let written = yamlParse(await fs.readFile(absPath, "utf8"));
+        expect(written["drain_resume_attempts"]).toBe(1);
+        // Second reattach (a later session re-resuming the same orphan): 1 -> 2.
+        const second = await reattachOrphan({
+            targetRepoRoot: tmpDir,
+            ref,
+            currentSessionUlid: "01JVWX2CURRENT0000000002CD",
+        });
+        expect(second.resumeAttempts).toBe(2);
+        written = yamlParse(await fs.readFile(absPath, "utf8"));
+        expect(written["drain_resume_attempts"]).toBe(2);
     });
 });
 // ---------------------------------------------------------------------------

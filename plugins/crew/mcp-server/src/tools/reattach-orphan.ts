@@ -23,6 +23,11 @@ import { readManifest, writeManifest } from "../lib/manifest-io.js";
 
 export interface ReattachOrphanResult {
   chatLog: string[];
+  /**
+   * The story's crash-resume count AFTER this reattach (post-increment). The
+   * autonomous drain reads this to cap repeated resumptions of a doomed story.
+   */
+  resumeAttempts: number;
 }
 
 export interface ReattachOrphanOptions {
@@ -83,17 +88,22 @@ export async function reattachOrphan(
 
   const staleUlid = manifest.claimed_by ?? "<absent>";
 
-  // Step 3: Rewrite claimed_by to the current session ULID.
+  // Step 3: Rewrite claimed_by to the current session ULID and bump the
+  // crash-resume counter. The drain reads `resumeAttempts` to cap repeated
+  // resumptions (a story that crashes the loop on every resume must not loop
+  // forever — past the cap the drain blocks it for a human instead).
+  const resumeAttempts = (manifest.drain_resume_attempts ?? 0) + 1;
   const updatedManifest = {
     ...manifest,
     claimed_by: currentSessionUlid,
+    drain_resume_attempts: resumeAttempts,
   };
   await writeManifest(absPath, updatedManifest);
 
-  // Step 4: Return the verbatim chat log entry.
+  // Step 4: Return the verbatim chat log entry + the post-increment count.
   const chatLog: string[] = [
-    `reattaching ${ref} — claimed_by rewritten from ${staleUlid} to ${currentSessionUlid}`,
+    `reattaching ${ref} — claimed_by rewritten from ${staleUlid} to ${currentSessionUlid} (resume attempt ${resumeAttempts})`,
   ];
 
-  return { chatLog };
+  return { chatLog, resumeAttempts };
 }

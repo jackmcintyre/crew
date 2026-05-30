@@ -46,6 +46,8 @@ import { completeStory } from "./tools/complete-story.js";
 import { getTeamSnapshot } from "./tools/get-team-snapshot.js";
 import { processReviewerYield } from "./tools/process-reviewer-yield.js";
 import { scanOrphanedInProgress } from "./tools/scan-orphaned-in-progress.js";
+import { reattachOrphan } from "./tools/reattach-orphan.js";
+import { blockOrphanNoTranscript } from "./tools/block-orphan-no-transcript.js";
 
 // Each tool is a pure fn(opts) -> result|Promise<result>. `any` here is
 // deliberate: the shim is a transport-agnostic courier and the tool functions
@@ -74,6 +76,8 @@ const TOOLS: Record<string, ToolFn> = {
   getTeamSnapshot,
   processReviewerYield,
   scanOrphanedInProgress,
+  reattachOrphan,
+  blockOrphanNoTranscript,
 };
 
 function emit(obj: unknown): void {
