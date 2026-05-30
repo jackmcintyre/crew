@@ -66,8 +66,35 @@ plugin:
 
 The flag is **operator-controlled and has no automatic expiry.** It will stay
 on until you turn it off yourself — there is no built-in timer or counter that
-disables it once enough history exists. You should turn it off once the
-agreement window has filled (i.e. the team has accrued enough resolved verdict
-pairs for the normal threshold gate to make its own judgement), so that the
-real threshold gate takes over and low-risk PRs are once again gated on actual
-agreement history rather than on cold-start trust.
+disables it once enough history exists.
+
+## When to take the training wheels off
+
+The design intent is that provisional trust is temporary. The auto-merge gate
+keeps a rolling window of the team's last 50 **resolved** verdict pairs (a
+reviewer verdict matched with the PR's eventual merge outcome). Once that window
+fills, the gate computes a real agreement ratio and switches to the normal
+threshold gate on its own — at which point `provisional_trust` has no further
+effect, because it only ever applied while that window was empty.
+
+**Important — the window does not fill automatically yet.** A verdict pair only
+becomes "resolved" when the PR's merge outcome is recorded as telemetry (via the
+`recordPrCloseAction` tool). Today that recording is **not wired into the
+auto-merge path**: when the gate auto-merges a PR it does not record a
+merge-outcome event. So in practice the agreement window stays empty, the ratio
+stays `null`, and **provisional trust never supersedes itself.** Until
+merge-outcome recording is wired up (tracked as a follow-up), the off-ramp is
+**manual** — judge it yourself rather than waiting for the window:
+
+- A reasonable rule of thumb: keep it **on** for an unattended proof run where
+  you want low-risk changes to flow hands-off, and turn it **off** for normal
+  operation once you've watched a batch of the loop's low-risk merges land
+  cleanly and you're comfortable a human should see the next ones.
+- Turning it off is the config edit above (`provisional_trust: false`). With it
+  off, every low-risk PR pauses for a human until real agreement history exists.
+
+You can inspect the current history at any time in the telemetry under
+`.crew/telemetry/*.jsonl`: count `reviewer.verdict.merge_action` events whose
+`merge_action` is `merged` or `closed-unmerged` — those are the resolved pairs
+that count toward the window of 50. (An empty count means the window has not
+started filling, which today is the expected state.)
