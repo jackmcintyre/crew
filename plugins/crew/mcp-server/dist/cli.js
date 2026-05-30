@@ -26,6 +26,7 @@
 import { DomainError } from "./errors.js";
 import { getStatus } from "./tools/get-status.js";
 import { mintSessionUlid } from "./tools/mint-session-ulid.js";
+import { drainPhaseStart, drainPhaseDone } from "./tools/drain-phase-progress.js";
 import { scanSources } from "./tools/scan-sources.js";
 import { createSmokeScratchRepo } from "./tools/create-smoke-scratch-repo.js";
 import { instantiatePersona } from "./tools/instantiate-persona.js";
@@ -51,6 +52,8 @@ import { blockOrphanNoTranscript } from "./tools/block-orphan-no-transcript.js";
 const TOOLS = {
     getStatus,
     mintSessionUlid,
+    drainPhaseStart,
+    drainPhaseDone,
     scanSources,
     createSmokeScratchRepo,
     instantiatePersona,

@@ -64,6 +64,33 @@ const seam = async (cmd, label, retryable = false) => {
   return parsed
 }
 
+// PROGRESS HEARTBEAT (Story 8.18): bracket each long per-story phase with an
+// operator-facing start line and a done line that carries elapsed wall-clock
+// time, so a long silent span (notably the ~10-minute dev-build) is no longer
+// indistinguishable from a hang. These lines are emitted through the SAME
+// narrator (`log()`) and change NO control flow — purely additive observability.
+//
+// The wall clock is read through the CLI seam (drainPhaseStart/drainPhaseDone),
+// never in-script: the Workflow runtime forbids the script from calling
+// Date.now()/new Date() (resume-determinism), but a seam result is recorded and
+// replayed, so reading the clock through a seam stays deterministic. The pure,
+// unit-tested formatDrainProgress helper does the formatting inside those tools.
+//
+// progressStart(ref, ph) -> the epoch-ms start time (handed back to progressDone)
+// progressDone(ref, ph, startedAtMs) -> emits the elapsed line.
+// Both are read-only/idempotent → retryable. A garbled relay never breaks the
+// run: progressStart falls back to a null start time and progressDone then
+// renders 0ms — the heartbeat degrades gracefully rather than failing the story.
+const progressStart = async (ref, ph) => {
+  const r = await seam(`node ${CLI} drainPhaseStart --json '${J({ ref, phase: ph })}'`, `progress-start:${ref}:${ph}`, true)
+  if (r && !r._parseError && typeof r.line === 'string') log(r.line)
+  return r && typeof r.atMs === 'number' ? r.atMs : null
+}
+const progressDone = async (ref, ph, startedAtMs) => {
+  const r = await seam(`node ${CLI} drainPhaseDone --json '${J({ ref, phase: ph, startedAtMs: startedAtMs ?? 0 })}'`, `progress-done:${ref}:${ph}`, true)
+  if (r && !r._parseError && typeof r.line === 'string') log(r.line)
+}
+
 phase('drain')
 if (!REPO || !CLI) return { error: 'missing-args', need: ['targetRepoRoot', 'cli'], got: Object.keys(A) }
 
@@ -116,6 +143,10 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       // sweeping a stray uncommitted change into the PR. We snapshot the dirty
       // paths BEFORE the dev edits so the tool can subtract that baseline.
       // The PR number transports via dev-outcome.json (machine-authoritative), not chat.
+      // HEARTBEAT: enter the dev-build phase — the longest per-story span (the
+      // single long dev agent() call). The start line flags it as the long one
+      // so an operator reading the narrator knows a multi-minute gap is expected.
+      const devStartedAt = await progressStart(ref, 'dev-build')
       const baseline = (await seam(`node ${CLI} snapshotDirtyPaths --json '${J({ targetRepoRoot: REPO })}'`, `baseline:${ref}:${rw}${tag}`, true))?.dirtyPaths || []
       const reworkNote = rw === 0 ? '' :
         `\n\nThis is rework iteration ${rw}: address the reviewer's NEEDS CHANGES feedback on the existing PR (read .crew/state for the recorded verdict), push the fixes, and hand off again.`
@@ -150,10 +181,14 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       prNumber = pd.prNumber
       reviewerPrompt = pd.reviewerPrompt
       log(`${ref} -> PR #${prNumber}`)
+      // HEARTBEAT: leave the dev-build phase with elapsed wall-clock time.
+      await progressDone(ref, 'dev-build', devStartedAt)
     }
 
     // REVIEW — clean context. The reviewer's binding verdict transports through
     // the reviewer-result FILE that runReviewerSession writes (never chat).
+    // HEARTBEAT: bracket the review phase (start → done with elapsed time).
+    const reviewStartedAt = await progressStart(ref, 'review')
     await agent(
       `${reviewerPrompt}\n\n## How to run the review in this stateless run\n` +
         `Your FIRST and only mandatory action is to run EXACTLY this command (do not alter the path); it performs the three mandatory reads and writes the binding verdict to reviewer-result.json:\n` +
@@ -161,6 +196,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
         `Then summarise the result it prints for the operator. Do NOT merge, push, edit the PR, or write any \`.crew/state\` file yourself — runReviewerSession owns the verdict file.`,
       { label: `rev:${ref}:${rw}${tag}`, phase: ph },
     )
+    await progressDone(ref, 'review', reviewStartedAt)
 
     // VERDICT — derived from the reviewer-result FILE; on green, completeStory
     // runs inside processReviewerTranscript (atomic in-progress -> done).
@@ -177,7 +213,10 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
   // pause-needs-human (no agreement history yet) -> a human merges.
   if (verdict?.next === 'done-ready-for-merge') {
     completed.push(ref)
+    // HEARTBEAT: bracket the gate phase (start → done with elapsed time).
+    const gateStartedAt = await progressStart(ref, 'gate')
     const gate = await seam(`node ${CLI} runAutoMergeGate --json '${J({ targetRepoRoot: REPO, prNumber, ref, sessionUlid: SU })}'`, `gate:${ref}`)
+    await progressDone(ref, 'gate', gateStartedAt)
     if (gate?.decision === 'auto-merge') merged.push({ ref, prNumber })
     else pausedForHuman.push({ ref, prNumber, reason: gate?.reason || gate?.decision || gate?._parseError || 'gate-failed' })
   }
