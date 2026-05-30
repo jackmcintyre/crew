@@ -258,13 +258,41 @@ function collectChangedPathsFromDiff(diff) {
     return result;
 }
 /**
- * Count the total lines added + removed in a unified diff (excludes +++ / --- headers).
+ * A path is "generated" — its line count reflects compiled/locked output, not
+ * authored source, so it must not inflate the risk-tier diff-size measurement.
+ * Covers committed build output under any `dist/` directory and the common
+ * dependency lockfiles.
  *
- * @internal
+ * @internal — exported for unit tests.
  */
-function computeDiffSize(diff) {
+export function isGeneratedDiffPath(p) {
+    if (/(^|\/)dist\//.test(p))
+        return true;
+    const base = p.split("/").pop() ?? "";
+    return base === "pnpm-lock.yaml" || base === "package-lock.json" || base === "yarn.lock";
+}
+/**
+ * Count the lines added + removed in a unified diff (excludes +++ / --- file
+ * headers), attributing each line to its file and SKIPPING generated files
+ * (see `isGeneratedDiffPath`). crew commits compiled `dist/`, which would
+ * otherwise ~double a source change's line count and defeat the risk-tier
+ * diff-size cap — this measures authored-source risk, not build output.
+ *
+ * @internal — exported for unit tests.
+ */
+export function computeDiffSize(diff) {
     let count = 0;
+    let excluded = false;
     for (const line of diff.split("\n")) {
+        if (line.startsWith("diff --git ")) {
+            // New file section. Derive the path from the `b/<path>` token (falls back
+            // to `a/<path>` for deletions) and decide whether to skip its lines.
+            const m = /\sb\/(.+)$/.exec(line) ?? /\sa\/(.+?)\s+b\//.exec(line);
+            excluded = m ? isGeneratedDiffPath(m[1].trim()) : false;
+            continue;
+        }
+        if (excluded)
+            continue;
         if ((line.startsWith("+") && !line.startsWith("+++")) ||
             (line.startsWith("-") && !line.startsWith("---"))) {
             count++;
