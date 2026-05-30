@@ -6,18 +6,16 @@
  * write-shaped `node:fs` API. Every other code path that wants to
  * record an observable event MUST call `logTelemetryEvent`.
  *
- * **Why `fs.appendFile` rather than `pino.destination()` in v1?**
- * `pino` (^10.3.1) is declared in `package.json` per the architecture
- * (`core-architectural-decisions.md` line 52). Its main appeal is
- * throughput via SonicBoom. This story emits a handful of events per
- * story execution — throughput is not the bottleneck. Using
- * `fs.appendFile` directly:
+ * **Why `fs.appendFile` rather than a logging library?**
+ * This path emits a handful of events per story execution — throughput
+ * is not the bottleneck. Using `fs.appendFile` directly:
  *   - keeps the writer synchronous-on-flush (a crash before flush
  *     doesn't lose events),
- *   - sidesteps SonicBoom's worker-thread + buffering semantics,
+ *   - avoids a worker-thread + buffering dependency,
  *   - keeps the month-rollover code path one function long.
- * A later story can swap to SonicBoom without touching callers; the
- * `pino` dep remains declared so that swap is a writer-only change.
+ * (`pino` was declared speculatively for a future SonicBoom swap that
+ * never landed; removed in the 2026-05-30 de-cruft pass. A later story
+ * can re-add it as a writer-only change without touching callers.)
  *
  * No module-level state — no cached handles, no in-memory queue, no
  * rollover registry. Each call resolves the month, ensures the

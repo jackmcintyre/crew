@@ -20,5 +20,4 @@ export declare const WorkspaceConfigSchema: z.ZodObject<{
         provisional_trust: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
-export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
 export type PluginSettings = z.infer<typeof PluginSettingsSchema>;

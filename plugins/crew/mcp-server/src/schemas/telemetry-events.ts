@@ -157,5 +157,3 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
 export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;
 export type ReviewerVerdictMergeActionEvent = z.infer<typeof ReviewerVerdictMergeActionEventSchema>;
-export type DevBudgetExceededEvent = z.infer<typeof DevBudgetExceededEventSchema>;
-export type YieldHandoffEvent = z.infer<typeof YieldHandoffEventSchema>;

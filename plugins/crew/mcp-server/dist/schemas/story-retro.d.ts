@@ -34,7 +34,6 @@ import { z } from "zod";
  * relax to `z.string()` here.
  */
 export declare const LESSON_KINDS: readonly ["pitfall", "pattern", "tool-quirk", "discipline"];
-export type LessonKind = (typeof LESSON_KINDS)[number];
 /**
  * Schema for a single retro lesson.
  *
@@ -57,7 +56,6 @@ export declare const LessonSchema: z.ZodObject<{
     failure_class: z.ZodOptional<z.ZodString>;
     routed_to: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
-export type Lesson = z.infer<typeof LessonSchema>;
 /**
  * Schema for the full retro payload accepted by `recordStoryRetro`.
  *

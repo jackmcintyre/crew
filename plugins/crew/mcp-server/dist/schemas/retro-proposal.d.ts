@@ -176,7 +176,6 @@ export declare const TeamChangeProposalSchema: z.ZodObject<{
  * coordinated schema-change story.
  */
 export declare const RETRO_PROPOSAL_TYPES: readonly ["rule", "rule-retirement", "skill-create", "skill-revise", "skill-supersede", "skill-retire", "team-change"];
-export type RetroProposalType = (typeof RETRO_PROPOSAL_TYPES)[number];
 /**
  * The full retro-proposal discriminated union. AC2: exactly seven
  * variants, closed enum, no `z.string()` fallback.

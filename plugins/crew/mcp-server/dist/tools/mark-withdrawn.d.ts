@@ -5,7 +5,6 @@ export declare const MarkWithdrawnInputSchema: z.ZodObject<{
     targetRepoRoot: z.ZodString;
     ref: z.ZodString;
 }, z.core.$strip>;
-export type MarkWithdrawnInput = z.infer<typeof MarkWithdrawnInputSchema>;
 export interface MarkWithdrawnOutput {
     ref: string;
     alreadyWithdrawn: boolean;

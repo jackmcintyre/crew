@@ -31,8 +31,6 @@ export const GhErrorMapEntrySchema = z
   })
   .strict();
 
-export type GhErrorMapEntry = z.infer<typeof GhErrorMapEntrySchema>;
-
 /**
  * Top-level shape of `gh-error-map.yaml`.
  *
@@ -43,5 +41,3 @@ export const GhErrorMapSchema = z
     entries: z.array(GhErrorMapEntrySchema),
   })
   .strict();
-
-export type GhErrorMap = z.infer<typeof GhErrorMapSchema>;

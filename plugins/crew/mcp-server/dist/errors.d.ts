@@ -515,6 +515,11 @@ export declare class PersonaFileNotFoundError extends DomainError {
  * and for future callers.
  *
  * Added in Story 4.3.
+ *
+ * @public — intentionally retained. Unused in code today, but the
+ * `/crew:start` SKILL.md documents it as a failure mode and a test asserts
+ * that doc names it, so it is part of the documented contract, not dead code.
+ * The `@public` tag keeps it out of the knip bloat-gate.
  */
 export declare class HandoffGrammarDriftError extends DomainError {
     readonly ref: string;
@@ -833,31 +838,6 @@ export declare class ShippedRiskTieringDefaultMissingError extends DomainError {
     readonly expectedPath: string;
     constructor(opts: {
         expectedPath: string;
-    });
-}
-/**
- * `recordAgentInvoke` received a `startedAt` / `completedAt` pair whose
- * derived `runtime_ms` is invalid — either a timestamp is malformed (not
- * parseable as ISO-8601) or `completedAt < startedAt` (negative runtime,
- * e.g. from clock skew on the operator's machine).
- *
- * No telemetry event is written; no substitution or budget check runs.
- * The dev session SKILL.md is expected to propagate this error to chat.
- *
- * Story 4.12 (NFR2/NFR3).
- */
-export declare class RuntimeBoundsInvalidError extends DomainError {
-    readonly sessionUlid: string;
-    readonly agent: string;
-    readonly startedAt: string;
-    readonly completedAt: string;
-    readonly reason: string;
-    constructor(opts: {
-        sessionUlid: string;
-        agent: string;
-        startedAt: string;
-        completedAt: string;
-        reason: string;
     });
 }
 /**
