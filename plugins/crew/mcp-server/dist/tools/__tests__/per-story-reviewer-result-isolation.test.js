@@ -115,14 +115,14 @@ beforeEach(async () => {
         "  - repo-view",
         "gh_allow_args: {}",
     ].join("\n"));
-    // Story specs: A's artifact is present; B's is missing. Distinct verdicts
-    // make cross-contamination detectable.
+    // Story specs: A's artifact is missing (→ NEEDS CHANGES); B's is present
+    // (→ READY FOR MERGE). Distinct verdicts make cross-contamination detectable.
     const storiesDir = path.join(tmpRoot, ".crew", "native-stories");
     await fs.mkdir(storiesDir, { recursive: true });
-    await atomicWriteFile(path.join(storiesDir, `${ULID_A}.md`), makeSourceStorySpec({ title: "Story A", artifact: "present.txt" }));
-    await atomicWriteFile(path.join(storiesDir, `${ULID_B}.md`), makeSourceStorySpec({ title: "Story B", artifact: "missing.txt" }));
-    // The artifact for A must exist (the AC-walk's fs.access check runs against
-    // the PR-branch worktree, which the stub populates from tmpRoot). B's is absent.
+    await atomicWriteFile(path.join(storiesDir, `${ULID_A}.md`), makeSourceStorySpec({ title: "Story A", artifact: "missing.txt" }));
+    await atomicWriteFile(path.join(storiesDir, `${ULID_B}.md`), makeSourceStorySpec({ title: "Story B", artifact: "present.txt" }));
+    // The artifact for B must exist (the AC-walk's fs.access check runs against
+    // the PR-branch worktree, which the stub populates from tmpRoot). A's is absent.
     await atomicWriteFile(path.join(tmpRoot, "present.txt"), "ok\n");
 });
 afterEach(() => {
@@ -253,7 +253,7 @@ describe("AC1 — two stories in one session keep independent reviewer-result fi
             execaImpl: makeStub(),
             pluginRootOverride: pluginRoot,
         });
-        // The two stories produced DIFFERENT verdicts (A: artifact present; B: missing).
+        // The two stories produced DIFFERENT verdicts (A: artifact missing; B: present).
         expect(resultA.recommendedVerdict).not.toBe(resultB.recommendedVerdict);
         // Reader: A is STILL independently readable after B was written, and still
         // carries A's own identity (ref + PR number) and verdict — not B's.
@@ -283,7 +283,7 @@ describe("AC1 — two stories in one session keep independent reviewer-result fi
             execaImpl: makeStub(),
             pluginRootOverride: pluginRoot,
         });
-        await runReviewerSession({
+        const resultB = await runReviewerSession({
             targetRepoRoot: tmpRoot,
             sessionUlid: SESSION_ULID,
             ref: REF_B,
@@ -291,15 +291,15 @@ describe("AC1 — two stories in one session keep independent reviewer-result fi
             execaImpl: makeStub(),
             pluginRootOverride: pluginRoot,
         });
-        // The reader is keyed by ref. Route it at ref A AFTER B ran last; it must
-        // read A's per-ref file (pre-8.15 it would have read B's clobbered file).
-        // A's artifact is present → READY FOR MERGE → processReviewerTranscript
-        // calls completeStory and moves the manifest to done/.
-        expect(resultA.recommendedVerdict).toBe("READY FOR MERGE");
+        // The reader is keyed by ref. A ran first, B ran LAST. Route the reader at
+        // ref A: if it (pre-8.15) read whichever story ran last it would see B's
+        // file; per-8.15 it must read A's own file. A's artifact is missing →
+        // NEEDS CHANGES, which stamps blocked_by and leaves the manifest in-progress
+        // (no completeStory move → no claim-time snapshot sidecar needed).
+        expect(resultA.recommendedVerdict).toBe("NEEDS CHANGES");
+        expect(resultB.recommendedVerdict).toBe("READY FOR MERGE");
         const inProgressDir = path.join(tmpRoot, ".crew", "state", "in-progress");
-        const doneDir = path.join(tmpRoot, ".crew", "state", "done");
         await fs.mkdir(inProgressDir, { recursive: true });
-        await fs.mkdir(doneDir, { recursive: true });
         const manifestPathA = path.join(inProgressDir, `${REF_A}.yaml`);
         await atomicWriteFile(manifestPathA, [
             `ref: "${REF_A}"`,
@@ -323,13 +323,15 @@ describe("AC1 — two stories in one session keep independent reviewer-result fi
             ref: REF_A,
             manifestPath: manifestPathA,
         });
-        // A's verdict was READY FOR MERGE → the reader routes to the ready branch by
-        // reading A's per-ref result file (NOT B's, which ran last).
-        expect(readerA.next).toBe("done-ready-for-merge");
+        // A's verdict was NEEDS CHANGES → the reader routes to the needs-changes
+        // branch by reading A's per-ref result file. If it had read B's file (the
+        // last story to run), it would have returned done-ready-for-merge instead.
+        expect(readerA.next).toBe("done-blocked-reviewer-needs-changes");
         // B's file is still present and unmodified — its identity intact.
         const fileB = await readReviewerResultFile(tmpRoot, SESSION_ULID, REF_B);
         expect(fileB).not.toBeNull();
         expect(fileB.ref).toBe(REF_B);
         expect(fileB.prNumber).toBe(PR_B);
+        expect(fileB.recommendedVerdict).toBe("READY FOR MERGE");
     });
 });
