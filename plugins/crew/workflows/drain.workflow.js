@@ -1,10 +1,10 @@
 export const meta = {
   name: 'crew-drain',
   description:
-    'Stage-1 stateless drain: a serial per-story loop (claim -> dev -> review -> verdict -> auto-merge gate) driven entirely through one-shot CLI seams — NO persistent MCP server on the drain path, so the cascade-SIGTERM disconnect cannot occur by construction. Recovers crash-orphaned stories first (auto-resume). Story 8.5 + crash-recovery.',
+    'Stage-1 stateless drain: a per-story loop (claim -> dev -> review -> verdict -> auto-merge gate) driven entirely through one-shot CLI seams — NO persistent MCP server on the drain path, so the cascade-SIGTERM disconnect cannot occur by construction. The main loop dispatches up to maxConcurrency stories at once (Story 8.22); per-dev worktree isolation (8.20) makes that safe. Recovers crash-orphaned stories first (auto-resume, serial). Story 8.5 + crash-recovery + concurrency.',
   phases: [
-    { title: 'recover', detail: 'scan in-progress/ for crash-orphaned stories from a prior run; auto-resume each (resume at review if a PR exists, else re-run), capped' },
-    { title: 'drain', detail: 'serial per story: claim -> dev (worktree) -> processDevTranscript -> review -> processReviewerTranscript -> (rework) -> auto-merge gate' },
+    { title: 'recover', detail: 'scan in-progress/ for crash-orphaned stories from a prior run; auto-resume each (resume at review if a PR exists, else re-run), serial, capped' },
+    { title: 'drain', detail: 'bounded-concurrent per story (up to maxConcurrency at once): claim -> dev (worktree) -> processDevTranscript -> review -> processReviewerTranscript -> (rework) -> auto-merge gate' },
   ],
 }
 
@@ -20,6 +20,12 @@ export const meta = {
 //   maxRework      : per-story NEEDS-CHANGES rework cap. Default 2.
 //   maxResume      : per-story crash-resume cap. Past this many auto-resumes a
 //                    still-orphaned story is blocked for a human. Default 2.
+//   maxConcurrency : OPTIONAL cap on how many stories the MAIN drain loop runs at
+//                    once (Story 8.22). Default 2. 1 → the historical strictly-serial
+//                    loop. Non-positive/garbage → the default. The orphan-resume
+//                    prelude stays serial regardless. Per-dev worktree isolation
+//                    (Story 8.20) is what makes >1 safe; the atomic claim guarantees
+//                    no two workers ever pick up the same ref.
 // ---------------------------------------------------------------------------
 const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
 const REPO = A.targetRepoRoot || A.repo
@@ -30,6 +36,10 @@ const CLI = A.cli
 const MAX = Number.isInteger(A.maxStories) && A.maxStories > 0 ? A.maxStories : Infinity
 const MAX_REWORK = A.maxRework || 2
 const MAX_RESUME = Number.isInteger(A.maxResume) && A.maxResume > 0 ? A.maxResume : 2
+// Concurrency cap for the main drain loop (Story 8.22). Mirrors the maxStories /
+// maxRework / maxResume knobs. Default 2; clamp a non-positive/garbage value to 1
+// so the loop is never spawned with zero workers (which would never drain).
+const MAX_CONCURRENCY = Number.isInteger(A.maxConcurrency) && A.maxConcurrency > 0 ? A.maxConcurrency : 2
 
 const HANDOFF = (ref) => `Handoff to reviewer — story ${ref} ready for review.`
 
@@ -125,7 +135,7 @@ if (!REPO || !CLI) return { error: 'missing-args', need: ['targetRepoRoot', 'cli
 // resume); fall back to minting one via the CLI for a standalone run.
 const SU = A.sessionUlid || (await seam(`node ${CLI} mintSessionUlid`, 'mint', true)).sessionUlid
 if (!SU) return { error: 'no-session-ulid' }
-log(`drain session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' : MAX} maxRework=${MAX_REWORK} maxResume=${MAX_RESUME}`)
+log(`drain session=${SU} repo=${REPO} maxStories=${MAX === Infinity ? 'unbounded' : MAX} maxRework=${MAX_REWORK} maxResume=${MAX_RESUME} maxConcurrency=${MAX_CONCURRENCY}`)
 
 // Persona system prompts — these carry the evidence-only discipline (Story 8.3):
 // agents produce code / a PR / a transcript; the TOOLS own the backlog ledger.
@@ -294,21 +304,82 @@ for (const o of orphans) {
   await processStory({ ref, title, manifestPath, resumeAtReview: !!prNumber, resumePrNumber: prNumber || null, ph: 'recover', tag: ':resume' })
 }
 
-// ── MAIN DRAIN ─────────────────────────────────────────────────────────────
+// ── MAIN DRAIN (concurrent — Story 8.22) ────────────────────────────────────
+// The loop is no longer strictly serial: up to MAX_CONCURRENCY workers each run
+// the SAME claim→processStory cycle at once, so a backlog drains in parallel
+// wall-clock time. Concurrency changes THROUGHPUT only, never correctness — the
+// guarantees that hold are exactly the serial loop's:
+//
+//  • Each story is processed exactly once. claimNextStory is an atomic
+//    to-do→in-progress rename (single-syscall) — one worker wins each ref, the
+//    loser gets a clean miss — so two workers can never hand out the same story.
+//  • At most MAX_CONCURRENCY stories are in flight. A worker only starts a new
+//    story after its previous one settles; with W workers, at most W are live.
+//  • The maxStories cap is honoured run-wide. `claimsStarted` is reserved with a
+//    SYNCHRONOUS check-and-increment (no `await` between the read and the bump),
+//    and the Workflow runtime is single-threaded cooperative async, so two
+//    workers can never both reserve the final slot.
+//  • Per-worker failure is isolated. Each worker body is wrapped so a throw lands
+//    that one story in `blocked` (its reason preserved) and never aborts the run
+//    or disturbs a concurrently-running sibling — exactly the per-item isolation
+//    a substrate `parallel`/`pipeline` would give; hand-rolled here because the
+//    drain script reaches its seams through injected globals, not a pool import.
+//  • The drain reason is derived ONCE from the first terminal claim outcome
+//    (queue-drained / cap / claim error), under a guard, not from whichever
+//    worker finishes last — so the honest-exit surface (Story 8.14) is unchanged.
+//
+// Result buckets stay the in-place append-only `.push()`es processStory already
+// does: append is atomic under the single-threaded runtime (no torn writes), so
+// no worker's outcome can be lost or double-counted.
 phase('drain')
-for (let i = 0; ; i++) {
-  // Optional safety cap — its OWN exit reason, not a queue state. Dead when MAX
-  // is Infinity (the default unbounded drain).
-  if (i >= MAX) { drainedReason = 'max-stories-reached'; break }
-  // CLAIM — atomic to-do -> in-progress; deps satisfied from done/ only.
-  // 'queue-drained' is the happy unattended path; any other non-spawn-dev outcome
-  // (waiting-on-in-progress, parse/claim error) is surfaced verbatim.
-  const claim = await seam(`node ${CLI} claimNextStory --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, `claim:${i}`)
-  if (!claim || claim.next !== 'spawn-dev') { drainedReason = claim?.next || claim?._parseError || 'claim-failed'; break }
-  const { ref, title, manifestPath } = claim
-  log(`claimed ${ref} — ${title}`)
-  await processStory({ ref, title, manifestPath })
+let claimsStarted = 0 // claims reserved this run (caps the run at MAX claims)
+let stop = false // set the moment any worker observes a terminal claim outcome
+// Record the first terminal claim outcome as the drain reason; later workers'
+// outcomes are ignored so the reason is derived once, not last-writer-wins.
+let reasonRecorded = false
+const recordReason = (r) => { if (!reasonRecorded) { reasonRecorded = true; drainedReason = r; stop = true } }
+
+async function drainWorker(workerId) {
+  for (;;) {
+    // Reserve a claim slot SYNCHRONOUSLY (no await between the read and the bump)
+    // so concurrent workers can never both take the final slot. A terminal flag
+    // or the cap stops this worker; it then drains its already-claimed work and
+    // returns — siblings still in flight keep going.
+    if (stop) return
+    if (claimsStarted >= MAX) { recordReason('max-stories-reached'); return }
+    const claimIdx = claimsStarted++
+    // CLAIM — atomic to-do -> in-progress; deps satisfied from done/ only.
+    // 'queue-drained' is the happy unattended path; any other non-spawn-dev
+    // outcome (waiting-on-in-progress, parse/claim error) is surfaced verbatim.
+    const claim = await seam(`node ${CLI} claimNextStory --json '${J({ targetRepoRoot: REPO, sessionUlid: SU })}'`, `claim:${claimIdx}`)
+    if (!claim || claim.next !== 'spawn-dev') { recordReason(claim?.next || claim?._parseError || 'claim-failed'); return }
+    const { ref, title, manifestPath } = claim
+    log(`claimed ${ref} — ${title} (worker ${workerId})`)
+    // PER-WORKER ISOLATION: a throw inside processStory (a seam hard-rejection, a
+    // build crash, any unexpected error) must land THIS story in blocked with its
+    // reason and never abort the run or poison a sibling. processStory already
+    // buckets every *expected* outcome itself; this catch is the backstop for an
+    // UNEXPECTED throw so the no-silent-failures surface holds even then.
+    try {
+      await processStory({ ref, title, manifestPath })
+    } catch (e) {
+      // Preserve the failure REASON (the error message — what an operator needs)
+      // up front, with a short stack tail for context. Capturing .message first
+      // (not slicing the tail of .stack) keeps the reason from being truncated
+      // away when the stack is long.
+      const msg = String(e && e.message ? e.message : e)
+      const stackTail = String((e && e.stack) || '').slice(-200)
+      blocked.push({ ref, blocked_by: 'worker-threw', tail: msg, stackTail })
+      log(`worker ${workerId} story ${ref} threw — bucketed blocked (${msg.slice(0, 120)}), run continues`)
+    }
+  }
 }
+
+// Spawn the bounded pool and wait for every worker to settle. allSettled (not
+// all) is belt-and-braces: even a worker that somehow rejects past its own catch
+// cannot reject the pool and abort the run.
+const workerCount = Math.max(1, Math.min(MAX_CONCURRENCY, MAX === Infinity ? MAX_CONCURRENCY : MAX))
+await Promise.allSettled(Array.from({ length: workerCount }, (_, w) => drainWorker(w)))
 
 // The return object IS the no-silent-failures surface: every ref lands in exactly
 // one of completed / merged / pausedForHuman / blocked, with a drain reason.
