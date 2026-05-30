@@ -54,6 +54,16 @@ export const RuleSchema = z
      * `false`/absent does not constrain the match.
      */
     additive_only: z.boolean().optional(),
+    /**
+     * Path-match strictness modifier. By default `path_patterns` matches if AT
+     * LEAST ONE changed file matches a pattern (correct for `high` rules — one
+     * risky file ⇒ high). When `true`, the rule matches only if EVERY changed
+     * file matches a pattern (and there is at least one) — the conservative
+     * semantic for `low` rules, so a single non-matching file (e.g. code
+     * alongside docs) disqualifies the `low` classification. Only meaningful
+     * with `path_patterns`.
+     */
+    all_paths_match: z.boolean().optional(),
   })
   .strict()
   .refine(
@@ -63,6 +73,10 @@ export const RuleSchema = z
       rule.diff_size_thresholds !== undefined ||
       rule.additive_only !== undefined,
     { message: "rule declares no signal fields" },
+  )
+  .refine(
+    (rule) => rule.all_paths_match !== true || rule.path_patterns !== undefined,
+    { message: "all_paths_match requires path_patterns" },
   );
 
 export const RiskTieringSpecSchema = z

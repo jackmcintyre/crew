@@ -1,5 +1,5 @@
 ---
-version: "1.2.0"
+version: "1.3.0"
 fallback_tier: medium
 tiers:
   low:
@@ -7,6 +7,7 @@ tiers:
       path_patterns:
         - "docs/**"
         - "**/*.md"
+      all_paths_match: true
       path_excludes:
         - ".github/**"
         - "**/package.json"

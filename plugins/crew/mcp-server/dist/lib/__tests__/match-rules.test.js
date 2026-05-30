@@ -195,6 +195,38 @@ describe("matchRule — additive_only", () => {
 // ---------------------------------------------------------------------------
 // path_excludes guard (subtractive)
 // ---------------------------------------------------------------------------
+describe("matchRule — all_paths_match (low-tier strictness)", () => {
+    const rule = {
+        id: "low.docs-only",
+        path_patterns: ["docs/**", "**/*.md"],
+        all_paths_match: true,
+    };
+    it("matches when EVERY changed file matches a pattern", () => {
+        expect(matchRule(rule, {
+            changedPaths: ["docs/a.md", "README.md", "docs/sub/b.md"],
+            detectedChangeTypes: [],
+            diffSize: 10,
+        }).matched).toBe(true);
+    });
+    it("does NOT match when even one file is outside the patterns (code alongside docs)", () => {
+        expect(matchRule(rule, {
+            changedPaths: ["docs/a.md", "src/index.ts"],
+            detectedChangeTypes: [],
+            diffSize: 10,
+        }).matched).toBe(false);
+    });
+    it("does NOT match an empty changed-path set", () => {
+        expect(matchRule(rule, { changedPaths: [], detectedChangeTypes: [], diffSize: 0 }).matched).toBe(false);
+    });
+    it("without the flag, the same patterns match on ANY single file (default semantic)", () => {
+        const anyRule = { id: "x", path_patterns: ["docs/**", "**/*.md"] };
+        expect(matchRule(anyRule, {
+            changedPaths: ["docs/a.md", "src/index.ts"],
+            detectedChangeTypes: [],
+            diffSize: 10,
+        }).matched).toBe(true);
+    });
+});
 describe("matchRule — path_excludes", () => {
     const rule = {
         id: "low.additive-only",
