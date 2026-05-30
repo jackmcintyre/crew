@@ -38,6 +38,10 @@ Scope: author a real low-risk bootstrap story (via `bmad-create-story`), prime i
 
 Scope: `plugins/crew/mcp-server/src/adapters/native/index.ts` — `listNativeStoryFiles` silently drops every `.md` whose name doesn't match the ULID pattern, so a misnamed story vanishes and a directory of only-misnamed files scans to zero with no signal (the `nothingMatched` gap). Surface the unmatched basenames so the scan can report them loudly instead of returning a silent all-zero. Pure, additive, unit-testable. Second Stage-1 dogfood story — re-validates the autonomous loop + CI after the base-branch fix (#191).
 
+## Story 8.11: One-line summary of an auto-merge gate outcome
+
+Scope: a new self-contained pure helper `plugins/crew/mcp-server/src/lib/summarise-gate-outcome.ts` — `summariseGateOutcome(outcome)` renders a plain `{ ref, prNumber, decision, reason, merged }` into a single operator-readable line. New module + unit test only; nothing existing modified. The **Stage-2-for-code proof** re-run after the source-only diff-size fix (#200): a purely-additive code helper that should now classify `low.additive-only`, CI-gate green, and auto-merge with zero humans. Vitest-verified.
+
 ## Story 8.10: Plain-language explanation of auto-merge gate reasons
 
 Scope: a new self-contained pure helper `plugins/crew/mcp-server/src/lib/explain-gate-reason.ts` — `explainGateReason(reason: string): string` maps each auto-merge gate reason literal to a one-line operator explanation, with a safe fallback for unknown reasons. New module + unit test only; nothing existing modified. The **Stage-2-for-CODE guinea pig**: the first real code the loop builds, verifies, CI-gates, and auto-merges with zero humans — purely-additive → `low.additive-only`. Vitest-verified.
