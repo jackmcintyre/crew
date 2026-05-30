@@ -1189,49 +1189,6 @@ export class StoryNotInDoneStateError extends DomainError {
     }
 }
 /**
- * The MCP daemon has become unreachable mid-cycle. Thrown from the
- * prose-layer wrapper used by `/crew:start`'s inner cycle whenever an MCP
- * call surfaces the SDK's "tools no longer available" / "MCP server has
- * disconnected" error class.
- *
- * Possible causes (all handled the same way — halt cleanly, surface the
- * orphan on next restart):
- *   • Daemon process OOM-killed or crashed (uncaught exception).
- *   • Operator killed the daemon manually.
- *   • OS reboot / logout during a long-running cycle.
- *   • Pre-5.33 hosts: SIGTERM cascade on subagent `Task` return killing
- *     BOTH MCP children. This was the original trigger when the seam was
- *     built (Story 5.30 RCA — 8/8 paired SIGTERMs across 4 incidents in
- *     `~/.crew/mcp-lifecycle.log`). Stories 5.32 + 5.33 close the cascade
- *     cause; this class still handles the residual causes above.
- *
- * Catch-site (SKILL.md prose): emit the verbatim halt line
- *   [mcp-disconnected] MCP daemon disconnected mid-cycle — ...
- * and stop. No further MCP calls; the in-progress manifest is left for
- * Story 5.20's orphan-recovery branch on the next restart.
- *
- * Deterministic seam: the typed error class is the contract — the prose
- * layer's catch-site keys off the class name, not the SDK's error text.
- * Future reviewers can grep `McpDisconnectedError` to find every catch.
- *
- * Stories: 5.30 (seam introduced), 5.33 (reframed cause-agnostic).
- */
-export class McpDisconnectedError extends DomainError {
-    methodName;
-    causeMessage;
-    ref;
-    constructor(opts) {
-        const refSuffix = opts.ref ? ` ref=${opts.ref}` : "";
-        super(`MCP daemon unavailable mid-cycle. ` +
-            `methodName=${opts.methodName}, cause=${opts.causeMessage}${refSuffix}. ` +
-            `See ~/.crew/mcp-lifecycle.log for daemon lifecycle evidence. ` +
-            `(Story 5.30 — mcp-disconnect-halt-seam; reframed 5.33)`);
-        this.methodName = opts.methodName;
-        this.causeMessage = opts.causeMessage;
-        this.ref = opts.ref;
-    }
-}
-/**
  * A retro proposal (or the file-level wrapper) failed Zod schema validation —
  * unknown discriminator literal, missing required field for a variant, path
  * traversal in a `skill-create`/`skill-revise` `proposed_path`, malformed ULID

@@ -1,68 +1,45 @@
 /**
- * Daemon entrypoint — spawned by the mcp-proxy shim (NOT by Claude Code directly).
+ * Stdio entrypoint referenced by `.claude-plugin/plugin.json#mcpServers`.
  *
- * Story 5.32 — Path D2 detached-proxy build.
- * Story 5.33 — per-connection Server so sequential proxy reconnects work.
+ * Story 5.25 — Always-on MCP lifecycle logging + server-initiated keepalive.
  *
- * Until 5.32 the manifest pointed `mcpServers.crew.command` at this file via
- * `node`. The host SIGTERMed the daemon's process group whenever any subagent
- * Task returned (the cascade RCA — 8/8 paired SIGTERMs in
- * `~/.crew/mcp-lifecycle.log`). Story 5.32 inserts a proxy shim at
- * `plugins/crew/mcp-proxy/bin/mcp-proxy.js` between the host and this daemon;
- * the shim becomes the host's stdio child and spawns this daemon detached, in
- * its own process group, so the cascade SIGTERM no longer reaches it.
+ * Story 5.12's module-level setInterval keep-alive was reverted here because
+ * it fought the MCP stdio transport spec: per spec, stdin-close IS the
+ * client's shutdown signal, and the kept-alive child gained nothing because
+ * Claude Code has no reconnect mechanism (#36308 / #43177 / #57207). The
+ * 5.12 keep-alive produced a zombie process that SIGTERM eventually reached
+ * anyway.
  *
- * Transport change: this daemon no longer reads/writes JSON-RPC over stdio.
- * It listens on a per-user unix socket at `~/.crew/mcp-daemon.sock` and wraps
- * each accepted connection in a `SocketServerTransport`. The proxy
- * byte-forwards JSON-RPC frames between Claude Code's stdio and the socket.
- *
- * What stays from Story 5.25 (always-on lifecycle logging):
- *   • Crash-resilience handlers (uncaughtException, unhandledRejection, stdout
- *     EPIPE — though stdout is unused once detached).
- *   • Signal handlers (SIGTERM/SIGINT/SIGHUP) — these now only fire when an
- *     operator explicitly kills the daemon (e.g., `kill $(cat ~/.crew/mcp-daemon.pid)`).
- *   • Server-initiated keepalive ping (now per-connection — see main()).
- *
- * What 5.32 changed:
- *   • StdioServerTransport → SocketServerTransport (per connection).
- *   • Stdin.end/close handlers removed: the daemon is detached, stdio is
- *     `'ignore'` in the proxy's spawn opts; there is no stdin to listen on.
- *   • PID file written to `~/.crew/mcp-daemon.pid` after socket bind so
- *     subsequent proxy shims can detect the running daemon (Q4 hybrid pattern).
- *
- * What 5.33 changed:
- *   • Server instance is now per-connection (not a module-scope singleton).
- *     The MCP SDK's Protocol is single-transport by design — calling
- *     `Server.connect()` twice on the same instance throws "Already connected
- *     to a transport". Pre-5.33 the daemon shared one Server across every
- *     accepted socket, so the second Claude Code session always failed to
- *     connect. See `onConnection` in main() and upstream typescript-sdk
- *     issue #1405 for the canonical per-session pattern.
+ * The durable mechanism (this file) is:
+ *   • Server-initiated keepalive pings (AC2) — prevent the parent's idle
+ *     timer from firing in the first place; the client auto-pongs per spec.
+ *   • Persistent lifecycle log (AC1) — every process/transport event is
+ *     written to ~/.crew/mcp-lifecycle.log so disconnects are observable.
+ *   • Crash-resilience handlers (AC3) — uncaughtException, unhandledRejection,
+ *     stdout EPIPE are logged but do not crash the server.
+ *   • Signal handlers (AC3) — SIGTERM/SIGINT/SIGHUP log before exiting with
+ *     the conventional exit codes (143/130/129).
+ *   • stdin listeners (AC4) — log-only; no shutdown suppression.
  *
  * References:
- *   - Story spec:  _bmad-output/implementation-artifacts/5-32-d2-build-detached-proxy-and-parent-owned-daemon.md
- *   - Spike:       _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
+ *   - Story spec:  _bmad-output/implementation-artifacts/5-25-always-on-mcp-lifecycle-logging.md
  *   - Postmortem:  _bmad-output/postmortems/2026-05-25-dogfood-rollback.md § L1 defect #1
  *   - Memory:      project_mcp_server_silent_disconnect
- *   - Upstream:    https://github.com/modelcontextprotocol/typescript-sdk/issues/1405
  */
-import * as fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "./server.js";
 import { registerAllTools } from "./tools/register.js";
 import { createLifecycleLog } from "./lib/lifecycle-log.js";
 import { getPluginVersion } from "./lib/plugin-version.js";
-import { startSocketServer } from "./lib/socket-server.js";
-import { SocketServerTransport } from "./lib/socket-transport.js";
 // ---------------------------------------------------------------------------
-// Lifecycle log: instantiated at module load so crash-resilience handlers can
-// use it immediately (before main() runs).
+// Task 2: Instantiate the lifecycle log at module load (before any imports
+// that could fail) so crash-resilience handlers can use it immediately.
 // ---------------------------------------------------------------------------
 const lifecycle = createLifecycleLog();
 // ---------------------------------------------------------------------------
-// Crash-resilience handlers (AC3 of 5.25 — still load-bearing under D2).
+// Task 2.2 / 2.3 / 2.4: Crash-resilience handlers (AC3)
+// Install at module load — before main() — so they catch synchronous init
+// failures too. These handlers do NOT call process.exit().
 // ---------------------------------------------------------------------------
 process.on("uncaughtException", (err) => {
     lifecycle.log("uncaughtException", {
@@ -77,8 +54,9 @@ process.on("unhandledRejection", (reason) => {
         stack: reason instanceof Error ? reason.stack : undefined,
     });
 });
-// Stdout is no longer used for IPC under D2, but the listener is still
-// installed in case any logging accidentally writes to it.
+// Catches EPIPE when the parent closes its read end of the pipe.
+// Without this handler, Node's default behaviour is to emit an unhandled
+// 'error' event, which crashes the process.
 process.stdout.on("error", (err) => {
     lifecycle.log("stdout.error", {
         code: err.code,
@@ -86,116 +64,104 @@ process.stdout.on("error", (err) => {
     });
 });
 // ---------------------------------------------------------------------------
-// Signal handlers — the daemon's only clean-shutdown trigger now that stdio
-// is detached. Operators kill the daemon via `kill $(cat ~/.crew/mcp-daemon.pid)`.
+// Task 3: Signal and exit logging (AC1, AC3)
+// Adding ANY signal listener prevents Node's default termination for that
+// signal, so we must call process.exit() explicitly with the conventional
+// exit code (128 + signal number).
 // ---------------------------------------------------------------------------
-let pidFileWritten = null;
-function cleanupPidFile() {
-    if (pidFileWritten) {
-        try {
-            fs.unlinkSync(pidFileWritten);
-        }
-        catch {
-            /* ignore — file may already be gone */
-        }
-        pidFileWritten = null;
-    }
-}
+// Signal handlers use logSync to guarantee the line lands on disk before
+// process.exit() terminates the process. Async stream.write() may not flush
+// in time; appendFileSync is synchronous and therefore reliable here.
 process.on("SIGTERM", () => {
     lifecycle.logSync("signal", { name: "SIGTERM" });
-    cleanupPidFile();
     process.exit(143); // 128 + 15
 });
 process.on("SIGINT", () => {
     lifecycle.logSync("signal", { name: "SIGINT" });
-    cleanupPidFile();
     process.exit(130); // 128 + 2
 });
 process.on("SIGHUP", () => {
     lifecycle.logSync("signal", { name: "SIGHUP" });
-    cleanupPidFile();
     process.exit(129); // 128 + 1
 });
 process.on("beforeExit", (code) => {
     lifecycle.log("beforeExit", { code });
 });
+// exit handler uses logSync so the line lands before the OS reclaims the fd.
 process.on("exit", (code) => {
     lifecycle.logSync("exit", { code });
-    cleanupPidFile();
     lifecycle.close();
 });
 // ---------------------------------------------------------------------------
-// main: boot, bind socket, wire per-connection transport + keepalive.
+// main: boot, connect transport, wire keepalive + stdin shutdown
 // ---------------------------------------------------------------------------
-let connectionCount = 0;
 async function main() {
+    // Task 6.1: Log boot with version info (AC1)
     lifecycle.log("boot", {
         version: getPluginVersion(),
         nodeVersion: process.version,
     });
-    const intervalMs = Number(process.env["CREW_MCP_KEEPALIVE_MS"] ?? 300_000);
-    const { sockPath } = await startSocketServer({
-        onConnection: (socket) => {
-            const connectionId = ++connectionCount;
-            const transport = new SocketServerTransport(socket);
-            let pingTimer;
-            // Set transport.onclose BEFORE server.connect() so the SDK chains it
-            // (Protocol.connect captures the caller's handler and calls it before
-            // its own _onclose() runs — see @modelcontextprotocol/sdk
-            // shared/protocol.js connect()). A handler installed AFTER
-            // server.connect() would OVERWRITE the SDK's chained handler,
-            // preventing _transport from being cleared and breaking sequential
-            // reconnect. Upstream footgun: typescript-sdk issue #1405.
-            transport.onclose = () => {
-                if (pingTimer)
-                    clearInterval(pingTimer);
-                lifecycle.log("transport.onclose", { connectionId });
-            };
-            // Per-connection Server (canonical pattern per typescript-sdk#1405).
-            // The SDK Server wraps a Protocol whose _transport is single-use; the
-            // factory is designed to be called repeatedly (see server.ts header).
-            const server = createServer();
-            registerAllTools(server);
-            server.connect(transport).catch((err) => {
-                lifecycle.log("transport.connect.error", {
-                    connectionId,
-                    message: err.message,
-                });
-            });
-            lifecycle.log("transport.connected", { connectionId });
-            if (intervalMs > 0) {
-                pingTimer = setInterval(() => {
-                    void (async () => {
-                        lifecycle.log("keepalive.sent", { connectionId, intervalMs });
-                        const t0 = Date.now();
-                        try {
-                            await server.ping();
-                            lifecycle.log("keepalive.response", {
-                                connectionId,
-                                latencyMs: Date.now() - t0,
-                            });
-                        }
-                        catch (err) {
-                            lifecycle.log("keepalive.error", {
-                                connectionId,
-                                message: err instanceof Error ? err.message : String(err),
-                            });
-                        }
-                    })();
-                }, intervalMs);
-                pingTimer.unref();
-            }
-            else {
-                lifecycle.log("keepalive.disabled", { connectionId, intervalMs });
-            }
-        },
+    const server = createServer();
+    registerAllTools(server);
+    const transport = new StdioServerTransport();
+    // Task 6.4: Hook transport.onclose to log the event before the SDK's
+    // handler runs. The SDK's Protocol.connect() chains callbacks so both
+    // our hook and the SDK's internal handler fire.
+    const existingOnClose = transport.onclose;
+    transport.onclose = () => {
+        lifecycle.log("transport.onclose");
+        if (existingOnClose)
+            existingOnClose();
+    };
+    await server.connect(transport);
+    // Task 4.3: Logging-only stdin listeners + clean shutdown on end (AC4).
+    // The SDK's StdioServerTransport does NOT listen for stdin 'end'/'close',
+    // so we must handle the clean shutdown ourselves. Per MCP spec, stdin close
+    // is the client's shutdown signal — we honour it by closing the server and
+    // exiting cleanly (code 0). No suppression, no keep-alive zombie.
+    process.stdin.on("end", () => {
+        lifecycle.log("stdin.end");
+        // Close the server (tears down the transport, clears handlers) then exit
+        // cleanly. Use void to avoid unhandled-rejection if close() rejects.
+        void server.close().catch(() => {
+            /* ignore close errors on shutdown */
+        });
+        process.exit(0);
     });
-    // Write the PID file so the proxy shim can detect the running daemon.
-    const home = process.env["HOME"] ?? os.homedir();
-    const pidPath = path.join(home, ".crew", "mcp-daemon.pid");
-    fs.writeFileSync(pidPath, `${process.pid}\n`);
-    pidFileWritten = pidPath;
-    lifecycle.log("socket.bound", { path: sockPath });
+    process.stdin.on("close", () => {
+        lifecycle.log("stdin.close");
+    });
+    // Task 6.2: Log successful transport connection (AC1)
+    lifecycle.log("transport.connected");
+    // Task 5: Server-initiated keepalive ping (AC2)
+    // The SDK's Server class exposes server.ping() which sends a JSON-RPC
+    // ping request. The client (Claude Code) auto-pongs via the SDK's
+    // Protocol class ping-handler. The timer is unref'd so it does NOT
+    // hold the event loop alive after the transport tears down — preventing
+    // the zombie process that Story 5.12's keep-alive introduced.
+    const intervalMs = Number(process.env["CREW_MCP_KEEPALIVE_MS"] ?? 300_000);
+    if (intervalMs > 0) {
+        const pingTimer = setInterval(() => {
+            void sendPing();
+        }, intervalMs);
+        pingTimer.unref(); // critical: must not prevent clean shutdown
+    }
+    else {
+        lifecycle.log("keepalive.disabled", { intervalMs });
+    }
+    async function sendPing() {
+        lifecycle.log("keepalive.sent", { intervalMs });
+        const t0 = Date.now();
+        try {
+            await server.ping();
+            lifecycle.log("keepalive.response", { latencyMs: Date.now() - t0 });
+        }
+        catch (err) {
+            lifecycle.log("keepalive.error", {
+                message: err instanceof Error ? err.message : String(err),
+            });
+        }
+    }
 }
 main().catch((err) => {
     // eslint-disable-next-line no-console
