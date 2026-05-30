@@ -22,8 +22,14 @@
  * - `type` MUST be in the conventional-commits set.
  * - Branch slug MUST be renderable from `ref` + `title`.
  * - Steps execute in strict order: validateType → branchSlug → readManifest →
- *   extractAcs → materialiseWorktree → createBranch → commit → push →
- *   composePrBody → gh pr create → cleanup.
+ *   extractAcs → materialiseWorktree → createBranch → commit → fullBuildGate →
+ *   push → composePrBody → gh pr create → cleanup.
+ * - The full-build gate (Story 8.17) runs the project's full build — the same
+ *   whole-project type-check CI runs (`pnpm build` at `plugins/crew`) — in the
+ *   dev's working directory AFTER the commit and BEFORE `gh pr create`, so a red
+ *   build raises `PrePrBuildFailedError` and NO PR is opened. This is a
+ *   deterministic tool-layer seam: the dev agent cannot skip the build under load
+ *   the way a prose mandate could (the #211 failure class).
  * - The commit stages an EXPLICIT path set (the dev's own changes), never an
  *   indiscriminate `git add .`.
  * - No flags are passed to push or gh pr create beyond the closed v1 signatures.

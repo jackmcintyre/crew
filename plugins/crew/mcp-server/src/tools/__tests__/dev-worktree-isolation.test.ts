@@ -151,6 +151,12 @@ function makeStubExeca(opts: {
         }
         return { stdout: opts.ghStdout ?? FAKE_PR_URL, stderr: "", exitCode: 0 };
       }
+      // Story 8.17: the pre-PR full-build gate spawns `pnpm build`. Stub it to a
+      // pass so the worktree-isolation tests don't spawn a real build (the tmpdir
+      // repo has no plugins/crew tree).
+      if (cmd === "pnpm") {
+        return { stdout: "build ok", stderr: "", exitCode: 0 };
+      }
       // Real git for everything else.
       const result = await realExeca(cmd, args as string[], { ...options, reject: false });
       return {

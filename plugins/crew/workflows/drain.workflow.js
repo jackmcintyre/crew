@@ -127,7 +127,8 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
           `Do NOT gold-plate; do NOT touch the execution manifest or any \`.crew/state\` file (the tools own the ledger).\n\n` +
           `To commit, push, and open the PR, run EXACTLY this (do not alter the path); fill \`body\` and \`summary\` with a real description of your change:\n` +
           `  node ${CLI} runDevTerminalAction --json '${J({ targetRepoRoot: REPO, ref, title, type: 'feat', manifestPath, sessionUlid: SU, baselineDirtyPaths: baseline, body: '<one-paragraph body>', summary: '<one-line summary>' })}'\n` +
-          `Confirm it prints "ok":true and a "prUrl". If it prints an "error", or any crew tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
+          `That tool runs the project's full build itself (the same whole-project build CI runs) before opening the PR and refuses to open one on a red build (Story 8.17), so a red PR can no longer leak — but still build green yourself first. ` +
+          `Confirm it prints "ok":true and a "prUrl". If it prints a PrePrBuildFailedError, the build gate caught a red build — read the captured stderr/stdout in the error, fix the build (including breakage in files your story did not touch), and re-run the tool; do NOT hand off and do NOT emit the gh-recoverable line for a build failure. If it prints any other "error", or any crew tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
           `Otherwise, end your final message with EXACTLY this line and nothing after it:\n${HANDOFF(ref)}`,
         { label: `dev:${ref}:${rw}${tag}`, phase: ph },
       )

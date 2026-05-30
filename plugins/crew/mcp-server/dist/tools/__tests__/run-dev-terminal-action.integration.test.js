@@ -102,6 +102,14 @@ async function setupRepo() {
 }
 function makeStubExeca(opts) {
     return vi.fn(async (cmd, args, options) => {
+        // Story 8.17: the pre-PR full-build gate spawns `pnpm build`. Stub it so
+        // the integration tests never spawn a real build; default to success.
+        if (cmd === "pnpm") {
+            if (opts.buildShouldFail) {
+                return { stdout: "", stderr: "tsc: error TS2339", exitCode: 1 };
+            }
+            return { stdout: "build ok", stderr: "", exitCode: 0 };
+        }
         if (cmd === "gh") {
             if (opts.ghShouldFail) {
                 return { stdout: "", stderr: "gh pr create failed", exitCode: 1 };

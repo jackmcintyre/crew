@@ -586,6 +586,39 @@ export declare class GitPushFailedError extends DomainError {
     });
 }
 /**
+ * The pre-PR build gate (`runDevTerminalAction`) ran the project's full build
+ * — the same whole-project type-check command CI runs — and it exited non-zero.
+ * Thrown AFTER the commit but BEFORE `gh pr create`, so NO pull request is
+ * opened on a red build. Carries the build's `exitCode` and captured
+ * `stdout`/`stderr` so the caller (the drain seam-agent) can surface exactly
+ * what failed, instead of relying on the dev agent to have remembered to run
+ * the build.
+ *
+ * This is the deterministic-seam fix for the #211 failure class (first real
+ * end-to-end drain, 2026-05-30): a story broke an untouched sibling file, the
+ * story-scoped vitest passed in isolation, and a red PR was opened because the
+ * "run the build green first" mandate lived only in agent prose. The gate now
+ * lives in the tool layer where the agent cannot skip it.
+ *
+ * Mirrors `GitPushFailedError`'s shape (typed, carries the subprocess result).
+ *
+ * (Story 8.17)
+ */
+export declare class PrePrBuildFailedError extends DomainError {
+    readonly exitCode: number;
+    readonly buildCommand: string;
+    readonly buildCwd: string;
+    readonly stdout: string;
+    readonly stderr: string;
+    constructor(opts: {
+        exitCode: number;
+        buildCommand: string;
+        buildCwd: string;
+        stdout: string;
+        stderr: string;
+    });
+}
+/**
  * `gh pr create` returned a non-zero exit code, or the stdout did not
  * contain a valid PR URL (starts with `https://github.com/`). Story
  * 4.5 will wrap this in the recoverable-error classifier. (Story 4.4
