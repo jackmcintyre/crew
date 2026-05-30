@@ -136,7 +136,7 @@ development_status:
   8-9-document-provisional-trust-flag: done
   8-10-explain-gate-reason-helper: done
   8-11-summarise-gate-outcome-helper: done
-  8-12-unattended-drain-runbook: ready-for-dev
+  8-12-unattended-drain-runbook: done
   8-13-risk-tiering-worked-examples: ready-for-dev
-  8-14-drain-result-and-exit-reasons: ready-for-dev
+  8-14-drain-result-and-exit-reasons: done
   epic-8-retrospective: optional
