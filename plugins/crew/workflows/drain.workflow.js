@@ -47,16 +47,41 @@ const J = (o) => JSON.stringify(o)
 // MUTATING seams (claim / verdict / gate) leave retryable=false: a garble there
 // safely pauses that one story (no-silent-failure) rather than risk re-applying a
 // mutation the first call may already have landed. Sonnet makes garbles rare to begin with.
-const seam = async (cmd, label, retryable = false) => {
+//
+// `swallow` (Story 8.21) extends the existing "no line, keep going" degrade
+// convention from a *garbled* relay to a *hard rejection* of the underlying
+// courier call (the agent() promise throws/rejects, rather than merely returning
+// a non-JSON line). It is opt-in and scoped EXPLICITLY to pure-observability /
+// read-only seams — only the progress heartbeat passes it. With swallow=true a
+// thrown courier call is converted into the same `_parseError` sentinel a garble
+// produces, so the caller degrades identically (the wrappers skip the line and
+// the story proceeds). The MUTATING seams (claim / verdict / gate) never pass
+// swallow, so a hard rejection there still propagates and fails loud — preserving
+// the no-silent-failure contract (that one story pauses or blocks, never a fake
+// success). The guard lives HERE, gated on this flag, rather than around
+// processStory: wrapping processStory would also swallow load-bearing failures
+// and reintroduce silent-success, which is exactly what this story forbids.
+const seam = async (cmd, label, retryable = false, swallow = false) => {
   const attempts = retryable ? 3 : 1
   let parsed = { _parseError: 'agent-null' }
   for (let a = 0; a < attempts; a++) {
-    const r = await agent(
-      `You are a deterministic command runner. Use the Bash tool to execute the command below EXACTLY as written. ` +
-        `Hard rules: do NOT modify the command, do NOT change or "correct" any path, do NOT cd, do NOT read files, do NOT run anything else. ` +
-        `It prints exactly one line of JSON to stdout — return that line verbatim in the "stdout" field.\n\nCOMMAND:\n${cmd}`,
-      { schema: RawSchema, label, phase: 'drain', model: 'sonnet' },
-    )
+    let r
+    try {
+      r = await agent(
+        `You are a deterministic command runner. Use the Bash tool to execute the command below EXACTLY as written. ` +
+          `Hard rules: do NOT modify the command, do NOT change or "correct" any path, do NOT cd, do NOT read files, do NOT run anything else. ` +
+          `It prints exactly one line of JSON to stdout — return that line verbatim in the "stdout" field.\n\nCOMMAND:\n${cmd}`,
+        { schema: RawSchema, label, phase: 'drain', model: 'sonnet' },
+      )
+    } catch (e) {
+      // HARD rejection of the courier call. For an observability seam we degrade
+      // exactly as for a garble (no line, keep going); for any other (mutating)
+      // seam we re-throw so the failure stays loud and reaches its bucket.
+      if (!swallow) throw e
+      parsed = { _parseError: `seam-threw: ${String(e)}` }
+      log(`seam ${label} hard-failed (observability, swallowed) — no progress line, continuing`)
+      return parsed
+    }
     parsed = r ? safeParse(r.stdout) : { _parseError: 'agent-null' }
     if (!parsed._parseError) return parsed
     if (a < attempts - 1) log(`seam ${label} garbled relay (attempt ${a + 1}/${attempts}) — retrying`)
@@ -78,16 +103,18 @@ const seam = async (cmd, label, retryable = false) => {
 //
 // progressStart(ref, ph) -> the epoch-ms start time (handed back to progressDone)
 // progressDone(ref, ph, startedAtMs) -> emits the elapsed line.
-// Both are read-only/idempotent → retryable. A garbled relay never breaks the
-// run: progressStart falls back to a null start time and progressDone then
-// renders 0ms — the heartbeat degrades gracefully rather than failing the story.
+// Both are read-only/idempotent → retryable, AND swallow (Story 8.21): a garbled
+// relay OR a hard rejection of the underlying courier never breaks the run —
+// progressStart falls back to a null start time and progressDone then renders
+// 0ms. The heartbeat is pure observability, so it degrades to no line on ANY
+// failure (garble or throw) rather than ever failing the story or the drain.
 const progressStart = async (ref, ph) => {
-  const r = await seam(`node ${CLI} drainPhaseStart --json '${J({ ref, phase: ph })}'`, `progress-start:${ref}:${ph}`, true)
+  const r = await seam(`node ${CLI} drainPhaseStart --json '${J({ ref, phase: ph })}'`, `progress-start:${ref}:${ph}`, true, true)
   if (r && !r._parseError && typeof r.line === 'string') log(r.line)
   return r && typeof r.atMs === 'number' ? r.atMs : null
 }
 const progressDone = async (ref, ph, startedAtMs) => {
-  const r = await seam(`node ${CLI} drainPhaseDone --json '${J({ ref, phase: ph, startedAtMs: startedAtMs ?? 0 })}'`, `progress-done:${ref}:${ph}`, true)
+  const r = await seam(`node ${CLI} drainPhaseDone --json '${J({ ref, phase: ph, startedAtMs: startedAtMs ?? 0 })}'`, `progress-done:${ref}:${ph}`, true, true)
   if (r && !r._parseError && typeof r.line === 'string') log(r.line)
 }
 
