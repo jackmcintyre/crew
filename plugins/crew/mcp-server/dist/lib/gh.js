@@ -69,8 +69,13 @@ export async function gh(opts) {
     }
     // Translate kebab-cased subcommand into space-separated gh segments.
     const segments = subcommand.split("-");
-    const result = opts.input !== undefined
-        ? await execaImpl("gh", [...segments, ...args], { input: opts.input })
+    const execaOpts = {};
+    if (opts.input !== undefined)
+        execaOpts.input = opts.input;
+    if (opts.cwd !== undefined)
+        execaOpts.cwd = opts.cwd;
+    const result = Object.keys(execaOpts).length > 0
+        ? await execaImpl("gh", [...segments, ...args], execaOpts)
         : await execaImpl("gh", [...segments, ...args]);
     const stdout = result.stdout ?? "";
     const stderr = result.stderr ?? "";

@@ -107,13 +107,16 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
       reviewerPrompt = reviewerPersona
       log(`${ref} resume-at-review -> PR #${prNumber} (dev already shipped; skipping dev)`)
     } else {
-      // DEV — persona prompt (judgment + evidence-only discipline). v1 is single-story
-      // serial, so the dev runs directly in targetRepoRoot (cwd = REPO): runDevTerminalAction
-      // infers the repo from cwd, so an isolated worktree would mismatch (handoff §6 —
-      // the changes would land in the worktree while git -C targetRepoRoot sees none).
-      // A worktree-per-dev for parallel multi-story drains is a post-Stage-1 follow-up.
-      // It implements against the manifest's ACs, then opens the PR via the one-shot CLI;
-      // the PR number transports via dev-outcome.json (machine-authoritative), not chat.
+      // DEV — persona prompt (judgment + evidence-only discipline). The dev edits
+      // in targetRepoRoot (the workflow runtime pins the subagent's cwd to REPO),
+      // but runDevTerminalAction isolates the GIT WORK PRODUCT (Story 8.16): it
+      // creates a dedicated worktree, transplants ONLY the dev's own changed paths
+      // into it (an explicit set — never `git add .`), and commits/pushes/opens the
+      // PR from there, leaving the orchestrating checkout untouched and never
+      // sweeping a stray uncommitted change into the PR. We snapshot the dirty
+      // paths BEFORE the dev edits so the tool can subtract that baseline.
+      // The PR number transports via dev-outcome.json (machine-authoritative), not chat.
+      const baseline = (await seam(`node ${CLI} snapshotDirtyPaths --json '${J({ targetRepoRoot: REPO })}'`, `baseline:${ref}:${rw}${tag}`, true))?.dirtyPaths || []
       const reworkNote = rw === 0 ? '' :
         `\n\nThis is rework iteration ${rw}: address the reviewer's NEEDS CHANGES feedback on the existing PR (read .crew/state for the recorded verdict), push the fixes, and hand off again.`
       const devFinal = await agent(
@@ -123,7 +126,7 @@ async function processStory({ ref, title, manifestPath, resumeAtReview = false, 
           `Implement the story end-to-end in the target repo at ${REPO} (your current working directory): write real code and tests, and run the project's build/test gates GREEN before opening the PR. ` +
           `Do NOT gold-plate; do NOT touch the execution manifest or any \`.crew/state\` file (the tools own the ledger).\n\n` +
           `To commit, push, and open the PR, run EXACTLY this (do not alter the path); fill \`body\` and \`summary\` with a real description of your change:\n` +
-          `  node ${CLI} runDevTerminalAction --json '${J({ targetRepoRoot: REPO, ref, title, type: 'feat', manifestPath, sessionUlid: SU, body: '<one-paragraph body>', summary: '<one-line summary>' })}'\n` +
+          `  node ${CLI} runDevTerminalAction --json '${J({ targetRepoRoot: REPO, ref, title, type: 'feat', manifestPath, sessionUlid: SU, baselineDirtyPaths: baseline, body: '<one-paragraph body>', summary: '<one-line summary>' })}'\n` +
           `Confirm it prints "ok":true and a "prUrl". If it prints an "error", or any crew tool raises GhRecoverableError, emit the verbatim \`gh-recoverable: ...\` line as your LAST line and stop — do NOT emit the handoff phrase.${reworkNote}\n\n` +
           `Otherwise, end your final message with EXACTLY this line and nothing after it:\n${HANDOFF(ref)}`,
         { label: `dev:${ref}:${rw}${tag}`, phase: ph },

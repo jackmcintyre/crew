@@ -51,6 +51,14 @@ export async function gh(opts: {
   pluginRootOverride?: string;
   /** Optional stdin body piped to the subprocess. Supported by execa natively. */
   input?: string;
+  /**
+   * Optional working directory for the spawned `gh` process. `gh` resolves the
+   * target GitHub repo from its cwd; when the dev operates in an isolated
+   * worktree (Story 8.16) the caller passes the worktree path so `gh pr create`
+   * targets the intended repo rather than the orchestrating checkout. Omitted →
+   * `gh` inherits the parent process cwd (the prior behaviour).
+   */
+  cwd?: string;
 }): Promise<GhCallResult> {
   const { role, permissions, subcommand } = opts;
   const args = opts.args ?? [];
@@ -90,9 +98,12 @@ export async function gh(opts: {
 
   // Translate kebab-cased subcommand into space-separated gh segments.
   const segments = subcommand.split("-");
+  const execaOpts: { input?: string; cwd?: string } = {};
+  if (opts.input !== undefined) execaOpts.input = opts.input;
+  if (opts.cwd !== undefined) execaOpts.cwd = opts.cwd;
   const result =
-    opts.input !== undefined
-      ? await execaImpl("gh", [...segments, ...args], { input: opts.input })
+    Object.keys(execaOpts).length > 0
+      ? await execaImpl("gh", [...segments, ...args], execaOpts)
       : await execaImpl("gh", [...segments, ...args]);
 
   const stdout = result.stdout ?? "";
