@@ -35,5 +35,4 @@ export const WorkspaceConfigSchema = z.object({
   plugin: PluginSettingsSchema,
 });
 
-export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
 export type PluginSettings = z.infer<typeof PluginSettingsSchema>;

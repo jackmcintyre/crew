@@ -63,8 +63,6 @@ export const ValidatePlannerBacklogInputSchema = z.object({
   }),
 });
 
-export type ValidatePlannerBacklogInput = z.infer<typeof ValidatePlannerBacklogInputSchema>;
-
 // ---------------------------------------------------------------------------
 // Output types
 // ---------------------------------------------------------------------------

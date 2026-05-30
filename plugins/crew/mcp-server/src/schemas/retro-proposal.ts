@@ -236,8 +236,6 @@ export const RETRO_PROPOSAL_TYPES = [
   "team-change",
 ] as const;
 
-export type RetroProposalType = (typeof RETRO_PROPOSAL_TYPES)[number];
-
 /**
  * The full retro-proposal discriminated union. AC2: exactly seven
  * variants, closed enum, no `z.string()` fallback.

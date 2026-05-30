@@ -27,8 +27,6 @@ export const MarkWithdrawnInputSchema = z.object({
   ref: z.string().min(1),
 });
 
-export type MarkWithdrawnInput = z.infer<typeof MarkWithdrawnInputSchema>;
-
 export interface MarkWithdrawnOutput {
   ref: string;
   alreadyWithdrawn: boolean;

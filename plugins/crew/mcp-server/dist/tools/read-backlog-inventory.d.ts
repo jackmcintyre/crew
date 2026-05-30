@@ -22,7 +22,6 @@ import { type StateName } from "../state/manifest-state-machine.js";
 export declare const ReadBacklogInventoryInputSchema: z.ZodObject<{
     targetRepoRoot: z.ZodString;
 }, z.core.$strip>;
-export type ReadBacklogInventoryInput = z.infer<typeof ReadBacklogInventoryInputSchema>;
 /** State values for backlog inventory entries. Extends StateName with the native-source-only sentinel. */
 export type InventoryState = StateName | "native-source-only";
 /** A single entry in the backlog inventory. */

@@ -30,8 +30,6 @@ export const ReadBacklogInventoryInputSchema = z.object({
   targetRepoRoot: z.string().min(1),
 });
 
-export type ReadBacklogInventoryInput = z.infer<typeof ReadBacklogInventoryInputSchema>;
-
 /** State values for backlog inventory entries. Extends StateName with the native-source-only sentinel. */
 export type InventoryState = StateName | "native-source-only";
 

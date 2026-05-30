@@ -24,5 +24,3 @@ export const PluginManifestSchema = z
     agents: z.array(z.string()).optional(),
   })
   .strict();
-
-export type PluginManifest = z.infer<typeof PluginManifestSchema>;

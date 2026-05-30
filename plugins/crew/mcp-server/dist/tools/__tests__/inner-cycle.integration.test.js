@@ -480,7 +480,13 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("postReviewerComments");
             expect(toolNames).not.toContain("runDevSession");
             expect(toolNames).toContain("applyReviewerLabels");
-            expect(toolNames.length).toBe(38); // Story 4.12 added recordAgentInvoke (26), recordPrCloseAction (27); Story 4.11 added processReviewerYield (28); Story 4.9b added classifyRiskTier (29); Story 4.10 added computeAgreement (30); Story 4.10b added runAutoMergeGate (31); Story 1.13 added createSmokeScratchRepo (32); Story 5.11 added scanOrphanedInProgress (33), reattachOrphan (34), blockOrphanNoTranscript (35); Story 6.1 added recordStoryRetro (36); Story 6.3 added writeRetroProposal (37); Story 6.2 added gatherRetroInputs (38)
+            // De-cruft 2026-05-30: recordAgentInvoke + recordPrCloseAction were
+            // removed (unwired dead code — registered but never called on any runtime
+            // path; the Story 4.12/5.3 wiring that would have called them was mooted
+            // by the stateless-workflow pivot). 38 → 36.
+            expect(toolNames).not.toContain("recordAgentInvoke");
+            expect(toolNames).not.toContain("recordPrCloseAction");
+            expect(toolNames.length).toBe(36);
         }
         finally {
             await client.close();

@@ -176,11 +176,6 @@ function isKnownBmadStatus(s: string): s is BmadStatus {
   );
 }
 
-// Convenience: skip rule for listSourceStories.
-export function shouldSkipBmadStatus(status: BmadStatus): boolean {
-  return status === "optional";
-}
-
 // Re-export the execution mapping so the adapter has a single import surface.
 export { mapBmadStatusToExecution };
 

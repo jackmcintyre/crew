@@ -51,7 +51,6 @@ export declare const ValidatePlannerBacklogInputSchema: z.ZodObject<{
         state_mutating: z.ZodUnion<readonly [z.ZodBoolean, z.ZodLiteral<"auto">]>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
-export type ValidatePlannerBacklogInput = z.infer<typeof ValidatePlannerBacklogInputSchema>;
 export type ValidatePlannerBacklogOutput = {
     ok: true;
 } | {

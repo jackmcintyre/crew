@@ -797,6 +797,11 @@ export class PersonaFileNotFoundError extends DomainError {
  * and for future callers.
  *
  * Added in Story 4.3.
+ *
+ * @public — intentionally retained. Unused in code today, but the
+ * `/crew:start` SKILL.md documents it as a failure mode and a test asserts
+ * that doc names it, so it is part of the documented contract, not dead code.
+ * The `@public` tag keeps it out of the knip bloat-gate.
  */
 export class HandoffGrammarDriftError extends DomainError {
   readonly ref: string;
@@ -1255,44 +1260,6 @@ export class ShippedRiskTieringDefaultMissingError extends DomainError {
         `This is a plugin-install bug; please file an issue. (FR40a)`,
     );
     this.expectedPath = opts.expectedPath;
-  }
-}
-
-/**
- * `recordAgentInvoke` received a `startedAt` / `completedAt` pair whose
- * derived `runtime_ms` is invalid — either a timestamp is malformed (not
- * parseable as ISO-8601) or `completedAt < startedAt` (negative runtime,
- * e.g. from clock skew on the operator's machine).
- *
- * No telemetry event is written; no substitution or budget check runs.
- * The dev session SKILL.md is expected to propagate this error to chat.
- *
- * Story 4.12 (NFR2/NFR3).
- */
-export class RuntimeBoundsInvalidError extends DomainError {
-  readonly sessionUlid: string;
-  readonly agent: string;
-  readonly startedAt: string;
-  readonly completedAt: string;
-  readonly reason: string;
-
-  constructor(opts: {
-    sessionUlid: string;
-    agent: string;
-    startedAt: string;
-    completedAt: string;
-    reason: string;
-  }) {
-    super(
-      `recordAgentInvoke: invalid runtime bounds for session ${opts.sessionUlid} ` +
-        `agent=${opts.agent} (started=${opts.startedAt}, completed=${opts.completedAt}): ` +
-        `${opts.reason}. (NFR2/NFR3)`,
-    );
-    this.sessionUlid = opts.sessionUlid;
-    this.agent = opts.agent;
-    this.startedAt = opts.startedAt;
-    this.completedAt = opts.completedAt;
-    this.reason = opts.reason;
   }
 }
 

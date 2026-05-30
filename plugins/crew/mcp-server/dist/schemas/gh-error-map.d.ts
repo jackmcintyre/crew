@@ -30,7 +30,6 @@ export declare const GhErrorMapEntrySchema: z.ZodObject<{
         retry: "retry";
     }>;
 }, z.core.$strict>;
-export type GhErrorMapEntry = z.infer<typeof GhErrorMapEntrySchema>;
 /**
  * Top-level shape of `gh-error-map.yaml`.
  *
@@ -47,4 +46,3 @@ export declare const GhErrorMapSchema: z.ZodObject<{
         }>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
-export type GhErrorMap = z.infer<typeof GhErrorMapSchema>;
