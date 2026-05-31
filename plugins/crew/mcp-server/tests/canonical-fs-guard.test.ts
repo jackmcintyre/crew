@@ -78,6 +78,11 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // routes the proposal-file stamp through writeManagedFile and the commit
   // through the git wrapper — it performs no raw fs writes itself.
   path.join(SRC_DIR, "tools", "__tests__", "accept-proposal.test.ts"),
+  // Story 6.7: apply-skill-proposal tests seed skill files + history fixtures
+  // directly to tmpdir via raw fs.writeFile/mkdir (and assert _archived/ moves).
+  // Test file only; the production skill handlers route every write through
+  // writeManagedFile and remove the live file via fs.rm (not a write binding).
+  path.join(SRC_DIR, "tools", "__tests__", "apply-skill-proposal.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

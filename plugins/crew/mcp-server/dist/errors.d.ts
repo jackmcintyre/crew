@@ -1271,3 +1271,33 @@ export declare class LensVerdictFileMalformedError extends DomainError {
         reason: string;
     });
 }
+/**
+ * A `skill-create` (or `skill-supersede` replacement) apply handler refused
+ * because a file already exists at the proposed skill path. Skill creation
+ * never overwrites — a collision means the operator is trying to create a
+ * skill that already lives at that path; they should revise or supersede it
+ * instead. Thrown BEFORE any write so the working tree is left untouched.
+ *
+ * Story 6.7 — skill proposal application.
+ */
+export declare class SkillAlreadyExistsError extends DomainError {
+    readonly skillPath: string;
+    constructor(opts: {
+        skillPath: string;
+    });
+}
+/**
+ * A `skill-revise`, `skill-retire`, or `skill-supersede` apply handler refused
+ * because the targeted skill file does not exist at the live path. You cannot
+ * revise, retire, or supersede a skill that was never created (or has already
+ * been archived). Thrown BEFORE any write so the working tree is left
+ * untouched.
+ *
+ * Story 6.7 — skill proposal application.
+ */
+export declare class SkillNotFoundError extends DomainError {
+    readonly skillPath: string;
+    constructor(opts: {
+        skillPath: string;
+    });
+}

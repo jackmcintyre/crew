@@ -15,6 +15,7 @@ export const CANONICAL_PATH_GLOBS: readonly string[] = [
   ".crew/state/**",
   ".crew/telemetry/**",
   ".crew/retro-proposals/**",
+  ".crew/skills/**",
   ".crew/sprint-history/**",
   ".crew/sessions/**",
   "team/**",

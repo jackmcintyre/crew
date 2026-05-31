@@ -9,14 +9,13 @@
  * stamp, and records telemetry. All kind-specific behaviour lives behind this
  * handler interface.
  *
- * **This story ships ONLY the gate machinery.** The production registry is
- * deliberately EMPTY — every kind fails closed via
- * `ProposalKindNotApplicableYetError` (AC6). The real handlers are registered
- * by later stories:
+ * **Story 6.4 shipped the gate machinery with an EMPTY production registry.**
+ * Each kind's real handler is registered by its story; an unregistered kind
+ * still fails closed via `ProposalKindNotApplicableYetError` (AC6). Status:
  *
- *   - `rule` / `rule-retirement`                      → Story 6.5
  *   - `skill-create` / `skill-revise` /
- *     `skill-supersede` / `skill-retire`              → Story 6.7
+ *     `skill-supersede` / `skill-retire`              → Story 6.7 (REGISTERED)
+ *   - `rule` / `rule-retirement`                      → Story 6.5
  *   - `team-change`                                   → Story 6.10
  *   - persona-append (when 6.9 routes through here)   → Story 6.9
  *
@@ -75,12 +74,23 @@ export interface ProposalApplyHandler {
  */
 export type ProposalApplyRegistry = Map<RetroProposal["type"], ProposalApplyHandler>;
 /**
- * The PRODUCTION registry — empty in Story 6.4 by design (AC6). Later stories
- * register their handlers into this map. The gate defaults to this registry
- * when no `handlers` injection is provided.
+ * The PRODUCTION registry. The gate defaults to this registry when no
+ * `handlers` injection is provided.
  *
- * It is intentionally a fresh empty map (not a shared mutable singleton) per
- * import so a test that mutates a registry never leaks into production.
+ * Registered handlers:
+ *   - `skill-create` / `skill-revise` /
+ *     `skill-supersede` / `skill-retire`              → Story 6.7
+ *
+ * Still fail closed (no handler) until their story registers them:
+ *   - `rule` / `rule-retirement`                      → Story 6.5
+ *   - `team-change`                                   → Story 6.10
+ *   - persona-append (when 6.9 routes through here)   → Story 6.9
+ *
+ * It is intentionally a fresh map (not a shared mutable singleton) per import so
+ * a test that mutates a registry never leaks into production. The `skill-*`
+ * handlers use the default `Date` clock; tests that need a deterministic
+ * `introduced_at` / `retired_at` build their own registry from
+ * `createSkillProposalHandlers({ now })` and inject it.
  */
 export declare function createProductionRegistry(): ProposalApplyRegistry;
 /**
