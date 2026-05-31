@@ -106,8 +106,8 @@ development_status:
   6-5-rule-registry-parser-and-apply-rule-proposal: ready-for-dev
   6-5b-regenerate-standards-version-bump-and-10-cap-re-enforcement: ready-for-dev
   6-6-promotion-threshold-and-rule-retirement: ready-for-dev
-  6-7-skill-proposal-application-create-revise-supersede-retire: backlog
-  6-8-skill-invoke-telemetry-and-skill-effectiveness-helper: backlog
+  6-7-skill-proposal-application-create-revise-supersede-retire: ready-for-dev
+  6-8-skill-invoke-telemetry-and-skill-effectiveness-helper: ready-for-dev
   6-14-hand-editable-persona-files-defaults-template-minimal-valid: backlog  # tracked 2026-05-31 (operator decision); usability prereq for 6.9 — author + slot before 6.9
   6-9-persona-knowledge-append-via-proposed-md-and-accept-proposal: backlog
   6-10-team-change-proposals-and-apply-team-change: backlog
