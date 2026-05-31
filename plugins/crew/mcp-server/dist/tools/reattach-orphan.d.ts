@@ -18,6 +18,11 @@
  */
 export interface ReattachOrphanResult {
     chatLog: string[];
+    /**
+     * The story's crash-resume count AFTER this reattach (post-increment). The
+     * autonomous drain reads this to cap repeated resumptions of a doomed story.
+     */
+    resumeAttempts: number;
 }
 export interface ReattachOrphanOptions {
     targetRepoRoot: string;

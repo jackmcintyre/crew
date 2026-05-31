@@ -74,7 +74,17 @@ Lands: `plugins/<plugin>/example/` (BMad-shaped: primed `to-do/` queue, `docs/st
 
 ---
 
+## Epic 8: Stateless Workflow Substrate — Stage-1 Dogfood
+
+**Goal:** crew autonomously builds crew. The pivot's Stage-1 proof-point: one fully-autonomous stateless `drain` workflow run on crew's own repo takes a real low-risk story claim→dev→reviewer→green PR with zero human up to the green PR (a human merges). Delivers the stateless orchestration substrate (one-shot CLI seam-agents, no daemon) plus the three unblock-everything fixes.
+
+**Source of truth:** `_bmad-output/planning-artifacts/sprint-change-proposal-2026-05-29-workflow-pivot.md`. Supersedes the Epic 5 daemon/`/watch` orchestration line. Stories 8.1–8.6 (proposal M0–M5): commit-scope fix, reviewer AC-regex fix, agent-discipline, CLI shim, drain workflow, bootstrap + dogfood run.
+
+**Status (2026-05-29 pivot):** active — the soonest proof-point. The full A–G epic re-sequence and the archive of superseded Epic-5 planning files follow once Stage 1 lands. Per the never-hand-write rule, the story blocks in `epic-8-*.md` are thin stubs; `/ship-story`→`bmad-create-story` authors each full spec.
+
+---
+
 **Dependency flow:**
-E1 (foundation) → E2 (hire) ↔ E3 (backlog) → E4 (dev loop) → E5 (orchestration) ↔ E6 (calibration) → E7 (canary).
+E1 (foundation) → E2 (hire) ↔ E3 (backlog) → E4 (dev loop) → E5 (orchestration) ↔ E6 (calibration) → E7 (canary). **E8 (stateless substrate + Stage-1 dogfood)** supersedes the E5 daemon/`/watch` line and is the active proof-point workstream; it reuses the E2–E6 tool layer.
 
 E2 and E3 are independent of each other (you can hire without a backlog; you can scan a backlog without hiring) but both are prerequisites for E4. E5 and E6 are independent of each other but both consume manifests + telemetry produced by E4.

@@ -179,6 +179,26 @@ describe("gitCommit — conventional shape (Task 2.3)", () => {
         expect(result.commitSha).toBe("abc123");
         expect(spy).toHaveBeenCalledTimes(3);
     });
+    it("Story 8.1: accepts real story refs in scope (bmad:<id>, native:<ULID>)", async () => {
+        // Regression (spike 2026-05-29): the prior `[a-z0-9-]+` scope rejected every
+        // real ref — colon, uppercase (Crockford ULID), and dot are all valid scope chars.
+        for (const subject of [
+            "feat(bmad:1.1): widen commit-scope regex",
+            "fix(native:01HZ4MVSR41WKARM9Q9F8E7XYZ): handle edge case",
+            "chore(bmad:6.2.0): bump",
+        ]) {
+            const spy = makeConventionalSpy();
+            const result = await gitCommit({
+                targetRepoRoot: "/tmp/repo",
+                paths: ["src/foo.ts"],
+                message: subject,
+                role: "generalist-dev",
+                messageShape: "conventional",
+                execaImpl: spy,
+            });
+            expect(result.commitSha).toBe("abc123");
+        }
+    });
     it("Task 2.3: adds -m body flag when body is provided", async () => {
         const spy = makeConventionalSpy();
         await gitCommit({

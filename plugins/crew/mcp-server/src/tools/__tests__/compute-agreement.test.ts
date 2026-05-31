@@ -601,8 +601,10 @@ describe("AC4o — MCP tool registration smoke", () => {
     registerAllTools(fakeServer as unknown as Parameters<typeof registerAllTools>[0]);
     expect(registeredTools).toContain("computeAgreement");
     expect(registeredTools).toContain("runAutoMergeGate");
-    // Story 5.11 added scanOrphanedInProgress (33), reattachOrphan (34), blockOrphanNoTranscript (35); Story 6.1 added recordStoryRetro (36).
-    expect(registeredTools.length).toBe(36);
+    // Story 5.11 added scanOrphanedInProgress (33), reattachOrphan (34), blockOrphanNoTranscript (35); Story 6.1 added recordStoryRetro (36); Story 6.3 added writeRetroProposal (37); Story 6.2 added gatherRetroInputs (38).
+    // De-cruft 2026-05-30: removed recordAgentInvoke + recordPrCloseAction (unwired dead code). 38 → 36.
+    // Story 6.4 added acceptProposal. 36 → 37.
+    expect(registeredTools.length).toBe(37);
   });
 });
 

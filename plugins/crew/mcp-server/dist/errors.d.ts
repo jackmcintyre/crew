@@ -515,6 +515,11 @@ export declare class PersonaFileNotFoundError extends DomainError {
  * and for future callers.
  *
  * Added in Story 4.3.
+ *
+ * @public — intentionally retained. Unused in code today, but the
+ * `/crew:start` SKILL.md documents it as a failure mode and a test asserts
+ * that doc names it, so it is part of the documented contract, not dead code.
+ * The `@public` tag keeps it out of the knip bloat-gate.
  */
 export declare class HandoffGrammarDriftError extends DomainError {
     readonly ref: string;
@@ -577,6 +582,39 @@ export declare class GitPushFailedError extends DomainError {
     readonly stderr: string;
     constructor(opts: {
         branchName: string;
+        stderr: string;
+    });
+}
+/**
+ * The pre-PR build gate (`runDevTerminalAction`) ran the project's full build
+ * — the same whole-project type-check command CI runs — and it exited non-zero.
+ * Thrown AFTER the commit but BEFORE `gh pr create`, so NO pull request is
+ * opened on a red build. Carries the build's `exitCode` and captured
+ * `stdout`/`stderr` so the caller (the drain seam-agent) can surface exactly
+ * what failed, instead of relying on the dev agent to have remembered to run
+ * the build.
+ *
+ * This is the deterministic-seam fix for the #211 failure class (first real
+ * end-to-end drain, 2026-05-30): a story broke an untouched sibling file, the
+ * story-scoped vitest passed in isolation, and a red PR was opened because the
+ * "run the build green first" mandate lived only in agent prose. The gate now
+ * lives in the tool layer where the agent cannot skip it.
+ *
+ * Mirrors `GitPushFailedError`'s shape (typed, carries the subprocess result).
+ *
+ * (Story 8.17)
+ */
+export declare class PrePrBuildFailedError extends DomainError {
+    readonly exitCode: number;
+    readonly buildCommand: string;
+    readonly buildCwd: string;
+    readonly stdout: string;
+    readonly stderr: string;
+    constructor(opts: {
+        exitCode: number;
+        buildCommand: string;
+        buildCwd: string;
+        stdout: string;
         stderr: string;
     });
 }
@@ -836,31 +874,6 @@ export declare class ShippedRiskTieringDefaultMissingError extends DomainError {
     });
 }
 /**
- * `recordAgentInvoke` received a `startedAt` / `completedAt` pair whose
- * derived `runtime_ms` is invalid — either a timestamp is malformed (not
- * parseable as ISO-8601) or `completedAt < startedAt` (negative runtime,
- * e.g. from clock skew on the operator's machine).
- *
- * No telemetry event is written; no substitution or budget check runs.
- * The dev session SKILL.md is expected to propagate this error to chat.
- *
- * Story 4.12 (NFR2/NFR3).
- */
-export declare class RuntimeBoundsInvalidError extends DomainError {
-    readonly sessionUlid: string;
-    readonly agent: string;
-    readonly startedAt: string;
-    readonly completedAt: string;
-    readonly reason: string;
-    constructor(opts: {
-        sessionUlid: string;
-        agent: string;
-        startedAt: string;
-        completedAt: string;
-        reason: string;
-    });
-}
-/**
  * `computeAgreement` was called with an invalid `lastNVerdicts` value — zero,
  * negative, non-integer, `NaN`, or `Infinity`. Raised BEFORE any filesystem
  * read so the caller receives a rich, actionable message rather than a generic
@@ -1018,5 +1031,118 @@ export declare class StoryNotInDoneStateError extends DomainError {
     constructor(opts: {
         ref: string;
         foundIn: "to-do" | "blocked" | "in-progress";
+    });
+}
+/**
+ * A retro proposal (or the file-level wrapper) failed Zod schema validation —
+ * unknown discriminator literal, missing required field for a variant, path
+ * traversal in a `skill-create`/`skill-revise` `proposed_path`, malformed ULID
+ * `id`, non-UTC `created_at`, etc.
+ *
+ * Mirrors `MalformedExecutionManifestError`'s shape. Named so the MCP boundary
+ * maps Zod failures to a typed envelope downstream tooling (Epic 6b's apply
+ * paths) can pattern-match against.
+ *
+ * Thrown by `parseRetroProposalFile` in `schemas/retro-proposal.ts` — every
+ * caller MUST go through that helper.
+ *
+ * (Story 6.3 AC2 / FR59)
+ */
+export declare class MalformedRetroProposalError extends DomainError {
+    readonly yamlPath: string;
+    readonly zodMessage: string;
+    readonly schemaModule: string;
+    constructor(opts: {
+        yamlPath: string;
+        zodMessage: string;
+        schemaModule: string;
+    });
+}
+/**
+ * `acceptProposal`'s id locator scanned every `.crew/retro-proposals/*.md`
+ * file and found no proposal whose `id` matches the requested id. Names
+ * the id and how many files were scanned so the operator can tell an
+ * empty/absent proposals dir apart from a genuine miss.
+ *
+ * (Story 6.4 AC1)
+ */
+export declare class ProposalNotFoundError extends DomainError {
+    readonly proposalId: string;
+    readonly filesScanned: number;
+    constructor(opts: {
+        proposalId: string;
+        filesScanned: number;
+    });
+}
+/**
+ * `acceptProposal`'s id locator found the same proposal id in two distinct
+ * proposal files. Proposal ids are minted unique (ULIDs), so a collision is
+ * a bug — never a silent pick-first. Names both files so the operator can
+ * remove or fix the duplicate.
+ *
+ * (Story 6.4 AC1)
+ */
+export declare class AmbiguousProposalIdError extends DomainError {
+    readonly proposalId: string;
+    readonly matchingFiles: readonly string[];
+    constructor(opts: {
+        proposalId: string;
+        matchingFiles: readonly string[];
+    });
+}
+/**
+ * `acceptProposal` dispatched a located proposal to the handler registry but
+ * found no registered handler for the proposal's kind. Each kind maps to the
+ * story that will ship its apply path so the message is actionable. Raised
+ * BEFORE any preview is rendered or any state is touched — the gate fails
+ * closed rather than half-applying an un-handled kind.
+ *
+ * In this story (6.4) the production registry is empty by design — every
+ * kind fails closed here. The first real handler arrives in Story 6.5.
+ *
+ * (Story 6.4 AC6)
+ */
+export declare class ProposalKindNotApplicableYetError extends DomainError {
+    readonly kind: string;
+    readonly story: string;
+    constructor(opts: {
+        kind: string;
+        story: string;
+    });
+}
+/**
+ * `writeRetroProposal` refused to overwrite an existing proposal file —
+ * proposals are immutable artifacts keyed by their ISO-8601 timestamp.
+ * A collision means the caller (the retro-analyst subagent) re-used a
+ * timestamp from a prior cycle, which is a bug in the caller, not a
+ * legitimate retry surface.
+ *
+ * (Story 6.3 AC1 / FR58)
+ */
+export declare class RetroProposalAlreadyExistsError extends DomainError {
+    readonly absPath: string;
+    readonly isoTimestamp: string;
+    constructor(opts: {
+        absPath: string;
+        isoTimestamp: string;
+    });
+}
+/**
+ * `materialiseDevStoryWorktree` failed to stand up the dev's isolated worktree
+ * on the drain path. Raised on a non-zero `git status` (snapshotting the dev's
+ * changed paths) or a failed `git worktree add` — both are structural failures
+ * that must halt the dev step rather than silently fall back to committing in
+ * the orchestrating checkout.
+ *
+ * (Story 8.16)
+ */
+export declare class DevStoryWorktreeError extends DomainError {
+    readonly ref: string;
+    readonly phase: "status" | "worktree-add";
+    readonly underlyingMessage: string;
+    constructor(opts: {
+        ref: string;
+        phase: "status" | "worktree-add";
+        underlyingMessage: string;
     });
 }

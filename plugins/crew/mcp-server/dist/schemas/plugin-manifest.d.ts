@@ -16,4 +16,3 @@ export declare const PluginManifestSchema: z.ZodObject<{
     skills: z.ZodOptional<z.ZodArray<z.ZodString>>;
     agents: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strict>;
-export type PluginManifest = z.infer<typeof PluginManifestSchema>;

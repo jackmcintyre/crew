@@ -20,9 +20,15 @@
  * are Epic 5 concerns.
  *
  * FR19 — atomic complete, FR14a — hand-edit guard.
+ *
+ * **Story 5.29 — sidecar baseline.** The hand-edit guard reads its baseline
+ * from the claim-time sidecar at `.crew/state/in-progress/<ref>.snapshot.yaml`,
+ * not by re-reading the source story. After successful transition to `done/`,
+ * `completeStory` removes the sidecar (best-effort).
+ *
  * See also: `moveBetweenStates` (manifest-state-machine.ts),
  *           `detectInProgressHandEdit` (manifest-state-machine.ts),
- *           `deriveSourceBaseline` (state/derive-source-baseline.ts).
+ *           `removeInProgressSnapshot` (manifest-state-machine.ts).
  */
 /**
  * Atomically complete a claimed story.

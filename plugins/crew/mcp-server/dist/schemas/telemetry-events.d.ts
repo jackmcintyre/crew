@@ -146,6 +146,41 @@ export declare const YieldHandoffEventSchema: z.ZodObject<{
         domain: z.ZodString;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/**
+ * `retro.proposal.applied` — emitted by the `/accept-proposal` gate
+ * (`acceptProposal`) on a successful confirmed apply (Story 6.4 AC5). Exactly
+ * one event per apply; NONE on preview, on a declined apply, on an idempotent
+ * no-op, or on a fail-closed unregistered kind.
+ *
+ * - `id`              — the proposal's ULID.
+ * - `proposal_type`   — the proposal's kind (one of the seven retro-proposal
+ *                       discriminator literals).
+ * - `applied_sha`     — the commit sha from the git wrapper.
+ * - `idempotency_key` — the proposal's stable id (mirrors the `applied` block).
+ *
+ * No body/diff/contents strings (NFR14) — only surfacing fields.
+ */
+export declare const RetroProposalAppliedEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"retro.proposal.applied">;
+    data: z.ZodObject<{
+        id: z.ZodString;
+        proposal_type: z.ZodEnum<{
+            rule: "rule";
+            "rule-retirement": "rule-retirement";
+            "skill-create": "skill-create";
+            "skill-retire": "skill-retire";
+            "skill-revise": "skill-revise";
+            "skill-supersede": "skill-supersede";
+            "team-change": "team-change";
+        }>;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     ts: z.ZodString;
     session_id: z.ZodString;
@@ -223,9 +258,27 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
         to_role: z.ZodString;
         domain: z.ZodString;
     }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"retro.proposal.applied">;
+    data: z.ZodObject<{
+        id: z.ZodString;
+        proposal_type: z.ZodEnum<{
+            rule: "rule";
+            "rule-retirement": "rule-retirement";
+            "skill-create": "skill-create";
+            "skill-retire": "skill-retire";
+            "skill-revise": "skill-revise";
+            "skill-supersede": "skill-supersede";
+            "team-change": "team-change";
+        }>;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>;
 }, z.core.$strict>], "type">;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
 export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;
 export type ReviewerVerdictMergeActionEvent = z.infer<typeof ReviewerVerdictMergeActionEventSchema>;
-export type DevBudgetExceededEvent = z.infer<typeof DevBudgetExceededEventSchema>;
-export type YieldHandoffEvent = z.infer<typeof YieldHandoffEventSchema>;

@@ -44,7 +44,15 @@ function makeManifestYaml(ref, opts = {}) {
     if (!opts.omitClaimedBy) {
         manifest["claimed_by"] = opts.claimed_by ?? CURRENT_SESSION_ULID;
     }
+    if (opts.drain_resume_attempts !== undefined) {
+        manifest["drain_resume_attempts"] = opts.drain_resume_attempts;
+    }
     return yamlStringify(manifest, { lineWidth: 0 });
+}
+async function seedDevOutcome(stateRoot, sessionUlid, prNumber) {
+    const outcomePath = path.join(stateRoot, "sessions", sessionUlid, "dev-outcome.json");
+    await fs.mkdir(path.dirname(outcomePath), { recursive: true });
+    await fs.writeFile(outcomePath, JSON.stringify({ prUrl: `https://x/pull/${prNumber}`, prNumber, branch: "b", commitSha: "abc123" }), "utf8");
 }
 async function seedInProgressManifest(stateRoot, ref, opts) {
     const dir = path.join(stateRoot, "in-progress");
@@ -108,6 +116,40 @@ describe("scanOrphanedInProgress — current-session manifest (5e fixture)", () 
             sessionUlid: CURRENT_SESSION_ULID,
         });
         expect(result.orphans).toEqual([]);
+    });
+});
+// ---------------------------------------------------------------------------
+// Crash-recovery fields: title, prNumber (from the stale session's
+// dev-outcome.json), and resumeAttempts (from the manifest).
+// ---------------------------------------------------------------------------
+describe("scanOrphanedInProgress — crash-recovery fields", () => {
+    it("recovers prNumber from the stale session's dev-outcome.json and reports title + resumeAttempts", async () => {
+        const ref = "native:01JVWX2STALE0000000000009";
+        await seedInProgressManifest(stateRoot, ref, {
+            claimed_by: STALE_ULID_A,
+            drain_resume_attempts: 2,
+        });
+        await seedDevOutcome(stateRoot, STALE_ULID_A, 42);
+        const result = await scanOrphanedInProgress({
+            targetRepoRoot: tmpDir,
+            sessionUlid: CURRENT_SESSION_ULID,
+        });
+        expect(result.orphans).toHaveLength(1);
+        expect(result.orphans[0].prNumber).toBe(42);
+        expect(result.orphans[0].title).toBe("Test story");
+        expect(result.orphans[0].resumeAttempts).toBe(2);
+    });
+    it("reports prNumber: null when the dev never opened a PR (no dev-outcome.json) and resumeAttempts: 0 when unset", async () => {
+        const ref = "native:01JVWX2STALE0000000000010";
+        await seedInProgressManifest(stateRoot, ref, { claimed_by: STALE_ULID_A });
+        // No dev-outcome.json seeded for STALE_ULID_A.
+        const result = await scanOrphanedInProgress({
+            targetRepoRoot: tmpDir,
+            sessionUlid: CURRENT_SESSION_ULID,
+        });
+        expect(result.orphans).toHaveLength(1);
+        expect(result.orphans[0].prNumber).toBeNull();
+        expect(result.orphans[0].resumeAttempts).toBe(0);
     });
 });
 // ---------------------------------------------------------------------------
@@ -194,5 +236,38 @@ describe("scanOrphanedInProgress — absent claimed_by skipped silently", () => 
         });
         expect(result.orphans).toHaveLength(1);
         expect(result.orphans[0].ref).toBe(refOrphan);
+    });
+});
+// ---------------------------------------------------------------------------
+// (h) Claim-time `<ref>.snapshot.yaml` sidecar is skipped, not parsed
+// ---------------------------------------------------------------------------
+describe("scanOrphanedInProgress — claim-time snapshot sidecar skipped", () => {
+    // Test seam: avoid a real `gh pr list` call for the orphan's hasOpenPR probe.
+    const noOpenPrExeca = (async () => ({ stdout: "[]" }));
+    // The sidecar mirrors only the operator-editable fields (no ref/status/adapter),
+    // matching what claim-story.ts writes at `<ref>.snapshot.yaml` (Story 5.29).
+    function makeSnapshotYaml() {
+        return yamlStringify({
+            source_hash: SOURCE_HASH,
+            title: "Test story",
+            narrative: "As a dev, I want to test orphan scan.",
+            acceptance_criteria: [
+                { text: "Given AC, when done, then works.", kind: "integration" },
+            ],
+        }, { lineWidth: 0 });
+    }
+    it("skips the sidecar and still returns the real orphan (does not throw)", async () => {
+        const ref = "native:01JVWX2STALE0000000000003";
+        await seedInProgressManifest(stateRoot, ref, { claimed_by: STALE_ULID_A });
+        // Seed the sidecar baseline next to the live manifest.
+        await fs.writeFile(path.join(stateRoot, "in-progress", `${ref}.snapshot.yaml`), makeSnapshotYaml(), "utf8");
+        const result = await scanOrphanedInProgress({
+            targetRepoRoot: tmpDir,
+            sessionUlid: CURRENT_SESSION_ULID,
+            execaImpl: noOpenPrExeca,
+        });
+        expect(result.orphans).toHaveLength(1);
+        expect(result.orphans[0].ref).toBe(ref);
+        expect(result.orphans[0].staleUlid).toBe(STALE_ULID_A);
     });
 });

@@ -144,4 +144,23 @@ export declare function findPackageRoot(opts: {
 } | {
     ok: false;
 };
+/**
+ * A path is "generated" — its line count reflects compiled/locked output, not
+ * authored source, so it must not inflate the risk-tier diff-size measurement.
+ * Covers committed build output under any `dist/` directory and the common
+ * dependency lockfiles.
+ *
+ * @internal — exported for unit tests.
+ */
+export declare function isGeneratedDiffPath(p: string): boolean;
+/**
+ * Count the lines added + removed in a unified diff (excludes +++ / --- file
+ * headers), attributing each line to its file and SKIPPING generated files
+ * (see `isGeneratedDiffPath`). crew commits compiled `dist/`, which would
+ * otherwise ~double a source change's line count and defeat the risk-tier
+ * diff-size cap — this measures authored-source risk, not build output.
+ *
+ * @internal — exported for unit tests.
+ */
+export declare function computeDiffSize(diff: string): number;
 export declare function runReviewerSession(opts: RunReviewerSessionOptions): Promise<ReviewerSessionResult>;

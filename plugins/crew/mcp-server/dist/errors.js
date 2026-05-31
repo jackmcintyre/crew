@@ -625,6 +625,11 @@ export class PersonaFileNotFoundError extends DomainError {
  * and for future callers.
  *
  * Added in Story 4.3.
+ *
+ * @public — intentionally retained. Unused in code today, but the
+ * `/crew:start` SKILL.md documents it as a failure mode and a test asserts
+ * that doc names it, so it is part of the documented contract, not dead code.
+ * The `@public` tag keeps it out of the knip bloat-gate.
  */
 export class HandoffGrammarDriftError extends DomainError {
     ref;
@@ -702,6 +707,46 @@ export class GitPushFailedError extends DomainError {
             `The local branch is left in place for operator recovery. ` +
             `(Story 4.4 AC1e)`);
         this.branchName = opts.branchName;
+        this.stderr = opts.stderr;
+    }
+}
+/**
+ * The pre-PR build gate (`runDevTerminalAction`) ran the project's full build
+ * — the same whole-project type-check command CI runs — and it exited non-zero.
+ * Thrown AFTER the commit but BEFORE `gh pr create`, so NO pull request is
+ * opened on a red build. Carries the build's `exitCode` and captured
+ * `stdout`/`stderr` so the caller (the drain seam-agent) can surface exactly
+ * what failed, instead of relying on the dev agent to have remembered to run
+ * the build.
+ *
+ * This is the deterministic-seam fix for the #211 failure class (first real
+ * end-to-end drain, 2026-05-30): a story broke an untouched sibling file, the
+ * story-scoped vitest passed in isolation, and a red PR was opened because the
+ * "run the build green first" mandate lived only in agent prose. The gate now
+ * lives in the tool layer where the agent cannot skip it.
+ *
+ * Mirrors `GitPushFailedError`'s shape (typed, carries the subprocess result).
+ *
+ * (Story 8.17)
+ */
+export class PrePrBuildFailedError extends DomainError {
+    exitCode;
+    buildCommand;
+    buildCwd;
+    stdout;
+    stderr;
+    constructor(opts) {
+        super(`pre-PR build gate failed: '${opts.buildCommand}' (cwd: ${opts.buildCwd}) ` +
+            `exited with code ${opts.exitCode}. No pull request was opened. ` +
+            `Fix the build and re-run — the gate runs the project's full build ` +
+            `(the same whole-project type-check CI runs), so it catches breakage in ` +
+            `files the story did not touch. ` +
+            `stderr: ${opts.stderr || "(empty)"}. ` +
+            `stdout: ${opts.stdout || "(empty)"}. (Story 8.17)`);
+        this.exitCode = opts.exitCode;
+        this.buildCommand = opts.buildCommand;
+        this.buildCwd = opts.buildCwd;
+        this.stdout = opts.stdout;
         this.stderr = opts.stderr;
     }
 }
@@ -1000,34 +1045,6 @@ export class ShippedRiskTieringDefaultMissingError extends DomainError {
     }
 }
 /**
- * `recordAgentInvoke` received a `startedAt` / `completedAt` pair whose
- * derived `runtime_ms` is invalid — either a timestamp is malformed (not
- * parseable as ISO-8601) or `completedAt < startedAt` (negative runtime,
- * e.g. from clock skew on the operator's machine).
- *
- * No telemetry event is written; no substitution or budget check runs.
- * The dev session SKILL.md is expected to propagate this error to chat.
- *
- * Story 4.12 (NFR2/NFR3).
- */
-export class RuntimeBoundsInvalidError extends DomainError {
-    sessionUlid;
-    agent;
-    startedAt;
-    completedAt;
-    reason;
-    constructor(opts) {
-        super(`recordAgentInvoke: invalid runtime bounds for session ${opts.sessionUlid} ` +
-            `agent=${opts.agent} (started=${opts.startedAt}, completed=${opts.completedAt}): ` +
-            `${opts.reason}. (NFR2/NFR3)`);
-        this.sessionUlid = opts.sessionUlid;
-        this.agent = opts.agent;
-        this.startedAt = opts.startedAt;
-        this.completedAt = opts.completedAt;
-        this.reason = opts.reason;
-    }
-}
-/**
  * `computeAgreement` was called with an invalid `lastNVerdicts` value — zero,
  * negative, non-integer, `NaN`, or `Infinity`. Raised BEFORE any filesystem
  * read so the caller receives a rich, actionable message rather than a generic
@@ -1209,5 +1226,138 @@ export class StoryNotInDoneStateError extends DomainError {
             `(Story 6.1)`);
         this.ref = opts.ref;
         this.foundIn = opts.foundIn;
+    }
+}
+/**
+ * A retro proposal (or the file-level wrapper) failed Zod schema validation —
+ * unknown discriminator literal, missing required field for a variant, path
+ * traversal in a `skill-create`/`skill-revise` `proposed_path`, malformed ULID
+ * `id`, non-UTC `created_at`, etc.
+ *
+ * Mirrors `MalformedExecutionManifestError`'s shape. Named so the MCP boundary
+ * maps Zod failures to a typed envelope downstream tooling (Epic 6b's apply
+ * paths) can pattern-match against.
+ *
+ * Thrown by `parseRetroProposalFile` in `schemas/retro-proposal.ts` — every
+ * caller MUST go through that helper.
+ *
+ * (Story 6.3 AC2 / FR59)
+ */
+export class MalformedRetroProposalError extends DomainError {
+    yamlPath;
+    zodMessage;
+    schemaModule;
+    constructor(opts) {
+        super(`Retro proposal payload is malformed at '${opts.yamlPath}': ${opts.zodMessage}. ` +
+            `See ${opts.schemaModule} for the canonical schema.`);
+        this.yamlPath = opts.yamlPath;
+        this.zodMessage = opts.zodMessage;
+        this.schemaModule = opts.schemaModule;
+    }
+}
+/**
+ * `acceptProposal`'s id locator scanned every `.crew/retro-proposals/*.md`
+ * file and found no proposal whose `id` matches the requested id. Names
+ * the id and how many files were scanned so the operator can tell an
+ * empty/absent proposals dir apart from a genuine miss.
+ *
+ * (Story 6.4 AC1)
+ */
+export class ProposalNotFoundError extends DomainError {
+    proposalId;
+    filesScanned;
+    constructor(opts) {
+        super(`No retro proposal with id '${opts.proposalId}' found ` +
+            `(scanned ${opts.filesScanned} proposal file${opts.filesScanned === 1 ? "" : "s"} ` +
+            `under .crew/retro-proposals/). Check the id against the proposal markdown file, ` +
+            `or run /crew:retro to produce proposals first. (Story 6.4 AC1)`);
+        this.proposalId = opts.proposalId;
+        this.filesScanned = opts.filesScanned;
+    }
+}
+/**
+ * `acceptProposal`'s id locator found the same proposal id in two distinct
+ * proposal files. Proposal ids are minted unique (ULIDs), so a collision is
+ * a bug — never a silent pick-first. Names both files so the operator can
+ * remove or fix the duplicate.
+ *
+ * (Story 6.4 AC1)
+ */
+export class AmbiguousProposalIdError extends DomainError {
+    proposalId;
+    matchingFiles;
+    constructor(opts) {
+        super(`Proposal id '${opts.proposalId}' matched in multiple proposal files: ` +
+            `[${opts.matchingFiles.join(", ")}]. Proposal ids are minted unique — ` +
+            `a collision is a bug, not a legitimate pick-first. Remove or fix the ` +
+            `duplicate. (Story 6.4 AC1)`);
+        this.proposalId = opts.proposalId;
+        this.matchingFiles = [...opts.matchingFiles];
+    }
+}
+/**
+ * `acceptProposal` dispatched a located proposal to the handler registry but
+ * found no registered handler for the proposal's kind. Each kind maps to the
+ * story that will ship its apply path so the message is actionable. Raised
+ * BEFORE any preview is rendered or any state is touched — the gate fails
+ * closed rather than half-applying an un-handled kind.
+ *
+ * In this story (6.4) the production registry is empty by design — every
+ * kind fails closed here. The first real handler arrives in Story 6.5.
+ *
+ * (Story 6.4 AC6)
+ */
+export class ProposalKindNotApplicableYetError extends DomainError {
+    kind;
+    story;
+    constructor(opts) {
+        super(`Accepting a proposal of kind '${opts.kind}' is not supported yet — ` +
+            `its apply path ships in ${opts.story}. No file was written, no commit ` +
+            `was made, and the proposal was not stamped. (Story 6.4 AC6)`);
+        this.kind = opts.kind;
+        this.story = opts.story;
+    }
+}
+/**
+ * `writeRetroProposal` refused to overwrite an existing proposal file —
+ * proposals are immutable artifacts keyed by their ISO-8601 timestamp.
+ * A collision means the caller (the retro-analyst subagent) re-used a
+ * timestamp from a prior cycle, which is a bug in the caller, not a
+ * legitimate retry surface.
+ *
+ * (Story 6.3 AC1 / FR58)
+ */
+export class RetroProposalAlreadyExistsError extends DomainError {
+    absPath;
+    isoTimestamp;
+    constructor(opts) {
+        super(`writeRetroProposal refused: a proposal already exists at '${opts.absPath}' ` +
+            `(isoTimestamp='${opts.isoTimestamp}'). Proposals are immutable — collisions ` +
+            `indicate the caller re-used a timestamp. (Story 6.3 AC1)`);
+        this.absPath = opts.absPath;
+        this.isoTimestamp = opts.isoTimestamp;
+    }
+}
+/**
+ * `materialiseDevStoryWorktree` failed to stand up the dev's isolated worktree
+ * on the drain path. Raised on a non-zero `git status` (snapshotting the dev's
+ * changed paths) or a failed `git worktree add` — both are structural failures
+ * that must halt the dev step rather than silently fall back to committing in
+ * the orchestrating checkout.
+ *
+ * (Story 8.16)
+ */
+export class DevStoryWorktreeError extends DomainError {
+    ref;
+    phase;
+    underlyingMessage;
+    constructor(opts) {
+        super(`materialiseDevStoryWorktree: failed to isolate the dev's worktree for ` +
+            `'${opts.ref}' at phase '${opts.phase}': ${opts.underlyingMessage}. ` +
+            `The dev step has been halted — it must not fall back to committing in ` +
+            `the orchestrating checkout. (Story 8.16)`);
+        this.ref = opts.ref;
+        this.phase = opts.phase;
+        this.underlyingMessage = opts.underlyingMessage;
     }
 }

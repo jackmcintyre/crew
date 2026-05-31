@@ -28,7 +28,7 @@ import * as path from "node:path";
 import { promises as fs } from "node:fs";
 import { stringify as yamlStringify } from "yaml";
 import { fileURLToPath } from "node:url";
-import { runAutoMergeGate, AutoMergeGateResultSchema, } from "../run-auto-merge-gate.js";
+import { runAutoMergeGate, AutoMergeGateResultSchema, classifyCiRollup, } from "../run-auto-merge-gate.js";
 import { registerAllTools } from "../register.js";
 import { GhSubcommandDeniedError, AutoMergeGateThresholdInvalidError } from "../../errors.js";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
@@ -48,13 +48,6 @@ const DEFAULT_LABELS_RESPONSE = JSON.stringify([
     { id: 1, name: "needs-human", color: "e4e669" },
 ]);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SKILL_FILE = path.resolve(HERE, "..", // src/tools/
-"..", // src/
-"..", // mcp-server/
-"..", // plugins/crew/
-"..", // plugins/
-"..", // repo root (worktree)
-"plugins", "crew", "skills", "start", "SKILL.md");
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -285,9 +278,247 @@ function baseOpts(override = {}) {
         ref: REF,
         sessionUlid: SESSION_ULID,
         pluginRootOverride: pluginRoot,
+        // Default the CI gate to green so existing auto-merge assertions hold; the
+        // CI-gating tests override this to exercise failed / pending-timeout.
+        ciGateImpl: async () => "green",
         ...override,
     };
 }
+// ---------------------------------------------------------------------------
+// Stage-2: cold-start provisional trust + tier-from-reviewer-result fallback
+// ---------------------------------------------------------------------------
+/** Minimal reviewer-result reader seam carrying the fields the gate reads. */
+function makeReviewerResultWithTier(tier, overrides = {}) {
+    return async () => ({
+        ref: overrides.ref ?? REF,
+        recommendedVerdict: overrides.recommendedVerdict ?? "READY FOR MERGE",
+        riskTier: {
+            tier,
+            matched_rule: "test-rule",
+            evidence: { paths: [], change_types: [], diff_size: 10 },
+        },
+    });
+}
+describe("Stage-2 — provisional trust + reviewer-result tier fallback", () => {
+    it("manifest lacks risk_tier + reviewer-result says low + provisional_trust → auto-merges", async () => {
+        // No risk_tier on the manifest — the gate must fall back to reviewer-result.
+        await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+        const { impl: fakeExeca, calls } = makeMergeExeca();
+        const result = await runAutoMergeGate(baseOpts({
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(null), // cold start, no history
+            readReviewerResultImpl: makeReviewerResultWithTier("low"),
+            provisionalTrustOverride: true,
+        }));
+        expect(result.risk_tier).toBe("low");
+        expect(result.decision).toBe("auto-merge");
+        expect(result.reason).toBe("low-risk-provisional-trust");
+        expect(result.merged).toBe(true);
+        const mergeCalls = calls.filter(c => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "merge");
+        expect(mergeCalls).toHaveLength(1);
+    });
+    it("low tier (via fallback) + null history + provisional_trust OFF → pauses (insufficient-data)", async () => {
+        await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+        const { impl: fakeExeca } = makePauseExeca();
+        const result = await runAutoMergeGate(baseOpts({
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(null),
+            readReviewerResultImpl: makeReviewerResultWithTier("low"),
+            provisionalTrustOverride: false,
+        }));
+        expect(result.risk_tier).toBe("low");
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("low-risk-insufficient-data");
+        expect(result.merged).toBe(false);
+    });
+    it("reviewer-result says medium + provisional_trust ON → STILL pauses (flag never relaxes medium)", async () => {
+        await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+        const { impl: fakeExeca } = makePauseExeca();
+        const result = await runAutoMergeGate(baseOpts({
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(null),
+            readReviewerResultImpl: makeReviewerResultWithTier("medium"),
+            provisionalTrustOverride: true,
+        }));
+        expect(result.risk_tier).toBe("medium");
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("medium-risk");
+        expect(result.merged).toBe(false);
+    });
+    it("fallback IGNORES tier when reviewer-result verdict is not green → pauses (no-tier-no-signal)", async () => {
+        await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+        const { impl: fakeExeca } = makePauseExeca();
+        const result = await runAutoMergeGate(baseOpts({
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(null),
+            // tier says low, but the verdict is NOT green — the gate must not trust it.
+            readReviewerResultImpl: makeReviewerResultWithTier("low", {
+                recommendedVerdict: "NEEDS CHANGES",
+            }),
+            provisionalTrustOverride: true,
+        }));
+        expect(result.risk_tier).toBeNull();
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("no-tier-no-signal");
+        expect(result.merged).toBe(false);
+    });
+    it("fallback IGNORES tier when reviewer-result ref does not match the gated ref → pauses", async () => {
+        await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID });
+        const { impl: fakeExeca } = makePauseExeca();
+        const result = await runAutoMergeGate(baseOpts({
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(null),
+            // A stale/cross-story result lingering in the session dir for a different ref.
+            readReviewerResultImpl: makeReviewerResultWithTier("low", {
+                ref: "native:01HZSOMEOTHERSTORY000000000",
+            }),
+            provisionalTrustOverride: true,
+        }));
+        expect(result.risk_tier).toBeNull();
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("no-tier-no-signal");
+        expect(result.merged).toBe(false);
+    });
+    it("manifest risk_tier wins over reviewer-result (manifest low, fallback not consulted)", async () => {
+        await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+        const { impl: fakeExeca } = makeMergeExeca();
+        let fallbackConsulted = false;
+        const result = await runAutoMergeGate(baseOpts({
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(null),
+            readReviewerResultImpl: async () => {
+                fallbackConsulted = true;
+                return null;
+            },
+            provisionalTrustOverride: true,
+        }));
+        expect(result.risk_tier).toBe("low");
+        expect(result.decision).toBe("auto-merge");
+        expect(result.reason).toBe("low-risk-provisional-trust");
+        expect(fallbackConsulted).toBe(false);
+    });
+});
+// ---------------------------------------------------------------------------
+// Stage-2 CI-gating: never auto-merge a PR whose CI is not green
+// ---------------------------------------------------------------------------
+describe("classifyCiRollup", () => {
+    it("all checks SUCCESS (CheckRun) → green", () => {
+        expect(classifyCiRollup([
+            { status: "COMPLETED", conclusion: "SUCCESS", name: "build" },
+            { status: "COMPLETED", conclusion: "SKIPPED", name: "lint" },
+        ])).toBe("green");
+    });
+    it("any failing check → failed", () => {
+        expect(classifyCiRollup([
+            { status: "COMPLETED", conclusion: "SUCCESS", name: "build" },
+            { status: "COMPLETED", conclusion: "FAILURE", name: "test" },
+        ])).toBe("failed");
+    });
+    it("any in-progress check → pending", () => {
+        expect(classifyCiRollup([
+            { status: "IN_PROGRESS", name: "build" },
+        ])).toBe("pending");
+    });
+    it("empty rollup → pending (checks not registered yet, conservatively not green)", () => {
+        expect(classifyCiRollup([])).toBe("pending");
+    });
+    it("StatusContext state SUCCESS → green, FAILURE → failed, PENDING → pending", () => {
+        expect(classifyCiRollup([{ state: "SUCCESS", context: "ci" }])).toBe("green");
+        expect(classifyCiRollup([{ state: "FAILURE", context: "ci" }])).toBe("failed");
+        expect(classifyCiRollup([{ state: "PENDING", context: "ci" }])).toBe("pending");
+    });
+    // Allowlist guards (code-review): non-success non-failure states must NOT green-wash.
+    it("SKIPPED / NEUTRAL completed checks count as pass → green", () => {
+        expect(classifyCiRollup([
+            { status: "COMPLETED", conclusion: "SUCCESS", name: "build" },
+            { status: "COMPLETED", conclusion: "SKIPPED", name: "optional" },
+            { status: "COMPLETED", conclusion: "NEUTRAL", name: "advisory" },
+        ])).toBe("green");
+    });
+    it("COMPLETED check with UNKNOWN conclusion → pending (not green)", () => {
+        expect(classifyCiRollup([
+            { status: "COMPLETED", conclusion: "SOME_FUTURE_VALUE", name: "x" },
+        ])).toBe("pending");
+    });
+    it("COMPLETED check with no conclusion → pending (not green)", () => {
+        expect(classifyCiRollup([{ status: "COMPLETED", name: "x" }])).toBe("pending");
+    });
+    it("sparse / unrecognized-shape item → pending, and never green-washes a sibling", () => {
+        expect(classifyCiRollup([{ __typename: "Unknown" }])).toBe("pending");
+        // a passing check + a sparse item must NOT be green (the sparse item is unproven)
+        expect(classifyCiRollup([
+            { status: "COMPLETED", conclusion: "SUCCESS" },
+            { __typename: "Unknown" },
+        ])).toBe("pending");
+    });
+    it("lowercase/odd failure value is NOT treated as failure but is NOT green either (pending)", () => {
+        expect(classifyCiRollup([{ status: "COMPLETED", conclusion: "failure" }])).toBe("pending");
+    });
+});
+describe("Stage-2 CI gate — non-green CI blocks the auto-merge", () => {
+    it("risk says auto-merge but CI failed → pause-needs-human (ci-not-green), label applied, NOT merged", async () => {
+        await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+        const { impl: fakeExeca, calls } = makePauseExeca();
+        const result = await runAutoMergeGate(baseOpts({
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(makeMetric(0.95)), // risk gate would auto-merge
+            ciGateImpl: async () => "failed",
+        }));
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("ci-not-green");
+        expect(result.merged).toBe(false);
+        expect(result.labelsApplied).toEqual(["needs-human"]);
+        // no pr merge call happened
+        const mergeCalls = calls.filter(c => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "merge");
+        expect(mergeCalls).toHaveLength(0);
+    });
+    it("CI still pending at timeout → pause-needs-human (ci-not-green), NOT merged", async () => {
+        await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+        const { impl: fakeExeca } = makePauseExeca();
+        const result = await runAutoMergeGate(baseOpts({
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(makeMetric(0.95)),
+            ciGateImpl: async () => "pending-timeout",
+        }));
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("ci-not-green");
+        expect(result.merged).toBe(false);
+    });
+    it("CI green → merge proceeds (gate fires only on green)", async () => {
+        await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "low" });
+        const { impl: fakeExeca } = makeMergeExeca();
+        const result = await runAutoMergeGate(baseOpts({
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(makeMetric(0.95)),
+            ciGateImpl: async () => "green",
+        }));
+        expect(result.decision).toBe("auto-merge");
+        expect(result.merged).toBe(true);
+    });
+    it("CI gate does NOT run when the risk gate already pauses (medium)", async () => {
+        await seedDoneManifest(targetRepoRoot, { ref: REF, sessionUlid: SESSION_ULID, risk_tier: "medium" });
+        const { impl: fakeExeca } = makePauseExeca();
+        let ciConsulted = false;
+        const result = await runAutoMergeGate(baseOpts({
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(makeMetric(0.95)),
+            ciGateImpl: async () => { ciConsulted = true; return "green"; },
+        }));
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.reason).toBe("medium-risk");
+        expect(ciConsulted).toBe(false);
+    });
+});
 // ---------------------------------------------------------------------------
 // (5d) (a) Auto-merge fires
 // ---------------------------------------------------------------------------
@@ -451,37 +682,11 @@ describe("AC5(e) — low + insufficient-data pauses", () => {
         expect(result.decision).toBe("auto-merge");
     });
 });
-// ---------------------------------------------------------------------------
-// (5i) (f) Manual-merge override (structural SKILL.md check)
-// ---------------------------------------------------------------------------
-describe("AC5(f) — manual-merge override (structural SKILL.md check)", () => {
-    it("SKILL.md contains runAutoMergeGate invocation", async () => {
-        const raw = await fs.readFile(SKILL_FILE, "utf8");
-        expect(raw).toContain("runAutoMergeGate");
-    });
-    it("runAutoMergeGate appears under done-ready-for-merge branch only (not under done-blocked-*)", async () => {
-        const raw = await fs.readFile(SKILL_FILE, "utf8");
-        // Strip the YAML frontmatter (everything between the opening --- and closing ---)
-        // so we're only searching the body prose, not the allowed_tools list.
-        const bodyMatch = /^---\n[\s\S]*?\n---\n([\s\S]*)$/m.exec(raw);
-        expect(bodyMatch, "SKILL.md must have valid YAML front-matter").not.toBeNull();
-        const body = bodyMatch[1];
-        // Find the done-ready-for-merge section in the body
-        const readyForMergeIdx = body.indexOf("done-ready-for-merge");
-        expect(readyForMergeIdx).toBeGreaterThan(-1);
-        // Find done-blocked sections in the body
-        // Story 5.21: done-blocked-no-session-result removed; use done-blocked-reviewer-blocked as the sibling anchor.
-        const blockedNeedsChangesIdx = body.indexOf("done-blocked-reviewer-needs-changes");
-        const blockedBlockedIdx = body.indexOf("done-blocked-reviewer-blocked");
-        // runAutoMergeGate invocation (prose) should appear after done-ready-for-merge
-        const gateIdx = body.indexOf("runAutoMergeGate(");
-        expect(gateIdx).toBeGreaterThan(-1);
-        expect(gateIdx).toBeGreaterThan(readyForMergeIdx);
-        // runAutoMergeGate invocation should appear BEFORE the blocked sections
-        const firstBlockedIdx = Math.min(blockedNeedsChangesIdx, blockedBlockedIdx);
-        expect(gateIdx).toBeLessThan(firstBlockedIdx);
-    });
-});
+// Note: the former AC5(f)/AC5(i) "structural SKILL.md check" tests (which read
+// skills/start/SKILL.md to assert the orchestration prose invoked runAutoMergeGate
+// under the right branch) were removed when /crew:start was retired — the drain
+// workflow is the orchestration now, and the gate TOOL is covered by the cases
+// above + below. (daemon-retirement, 2026-05-30)
 // ---------------------------------------------------------------------------
 // (5j) (g) No-tier pause (legacy manifest)
 // ---------------------------------------------------------------------------
@@ -521,20 +726,6 @@ describe("AC5(h) — boundary: ratio exactly equals threshold (>= semantics)", (
     });
 });
 // ---------------------------------------------------------------------------
-// (5l) (i) SKILL.md content-structure: literal invocation anchor
-// ---------------------------------------------------------------------------
-describe("AC5(i) — SKILL.md contains literal runAutoMergeGate invocation anchor", () => {
-    it("prose under done-ready-for-merge contains the tool invocation with the required argument keys", async () => {
-        const raw = await fs.readFile(SKILL_FILE, "utf8");
-        // Strip frontmatter so we're checking the prose body, not the allowed_tools list
-        const bodyMatch = /^---\n[\s\S]*?\n---\n([\s\S]*)$/m.exec(raw);
-        expect(bodyMatch).not.toBeNull();
-        const body = bodyMatch[1];
-        // Regex that allows whitespace flex but pins the tool name and argument keys
-        expect(body).toMatch(/runAutoMergeGate\s*\(\s*\{[^}]*targetRepoRoot[^}]*prNumber[^}]*ref[^}]*sessionUlid[^}]*\}\s*\)/);
-    });
-});
-// ---------------------------------------------------------------------------
 // (5m) (j) MCP tool registration smoke
 // ---------------------------------------------------------------------------
 describe("AC5(j) — MCP tool registration smoke", () => {
@@ -547,8 +738,10 @@ describe("AC5(j) — MCP tool registration smoke", () => {
         };
         registerAllTools(fakeServer);
         expect(registeredTools).toContain("runAutoMergeGate");
-        // Story 5.11 added scanOrphanedInProgress (33), reattachOrphan (34), blockOrphanNoTranscript (35); Story 6.1 added recordStoryRetro (36).
-        expect(registeredTools.length).toBe(36);
+        // Story 5.11 added scanOrphanedInProgress (33), reattachOrphan (34), blockOrphanNoTranscript (35); Story 6.1 added recordStoryRetro (36); Story 6.3 added writeRetroProposal (37); Story 6.2 added gatherRetroInputs (38).
+        // De-cruft 2026-05-30: removed recordAgentInvoke + recordPrCloseAction (unwired dead code). 38 → 36.
+        // Story 6.4 added acceptProposal. 36 → 37.
+        expect(registeredTools.length).toBe(37);
     });
 });
 // ---------------------------------------------------------------------------
@@ -630,6 +823,7 @@ describe("AC5(m) — pr-merge denied without permission entry in gh_allow", () =
             execaImpl: fakeExeca,
             computeAgreementImpl: makeAgreementImpl(makeMetric(0.8)),
             thresholdOverride: 0.8,
+            ciGateImpl: async () => "green",
         })).rejects.toThrow(GhSubcommandDeniedError);
     });
 });
@@ -700,10 +894,69 @@ describe("threshold_used is stamped in result", () => {
             loadWorkspaceConfigImpl: async () => ({
                 agreement_threshold: 0.9,
                 orchestration_interval_seconds: 120,
+                provisional_trust: false,
             }),
         }));
         expect(result.threshold_used).toBe(0.9);
         // 0.85 < 0.9 → pause
         expect(result.decision).toBe("pause-needs-human");
+    });
+});
+// ---------------------------------------------------------------------------
+// Story 5.34 — AC2: regression guard against mock-masking gap.
+//
+// These tests load the REAL generalist-dev.yaml via the production
+// loadRolePermissions path (pluginRootOverride points at the live
+// plugins/crew/ directory, not a hand-built temp fixture).  The gh
+// shell-out is still faked so no real `gh` subprocess runs.
+//
+// Drives BOTH gate branches to confirm neither throws GhSubcommandDeniedError
+// for repo-view, api, or pr-merge after the AC1 allowlist fix.
+// ---------------------------------------------------------------------------
+const REAL_PLUGIN_ROOT = path.resolve(HERE, "..", "..", "..", "..");
+describe("Story 5.34 — AC2: real generalist-dev permissions, both gate branches", () => {
+    it("pause-needs-human branch — repo-view and api are allowed (no GhSubcommandDeniedError)", async () => {
+        await seedDoneManifest(targetRepoRoot, {
+            ref: REF,
+            sessionUlid: SESSION_ULID,
+            risk_tier: "medium", // medium → always pause-needs-human
+        });
+        const { impl: fakeExeca } = makePauseExeca();
+        // Must not throw GhSubcommandDeniedError for repo-view or api
+        const result = await runAutoMergeGate({
+            targetRepoRoot,
+            prNumber: PR_NUMBER,
+            ref: REF,
+            sessionUlid: SESSION_ULID,
+            pluginRootOverride: REAL_PLUGIN_ROOT, // ← production permissions, not a fixture
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(makeMetric(1.0)),
+        });
+        expect(result.decision).toBe("pause-needs-human");
+        expect(result.merged).toBe(false);
+        expect(result.labelsApplied).toEqual(["needs-human"]);
+    });
+    it("auto-merge branch — pr-merge is allowed (no GhSubcommandDeniedError)", async () => {
+        await seedDoneManifest(targetRepoRoot, {
+            ref: REF,
+            sessionUlid: SESSION_ULID,
+            risk_tier: "low", // low + met threshold → auto-merge
+        });
+        const { impl: fakeExeca } = makeMergeExeca();
+        // Must not throw GhSubcommandDeniedError for pr-merge
+        const result = await runAutoMergeGate({
+            targetRepoRoot,
+            prNumber: PR_NUMBER,
+            ref: REF,
+            sessionUlid: SESSION_ULID,
+            pluginRootOverride: REAL_PLUGIN_ROOT, // ← production permissions, not a fixture
+            dryRun: false,
+            execaImpl: fakeExeca,
+            computeAgreementImpl: makeAgreementImpl(makeMetric(0.9)), // above default 0.8 threshold
+            ciGateImpl: async () => "green",
+        });
+        expect(result.decision).toBe("auto-merge");
+        expect(result.merged).toBe(true);
     });
 });

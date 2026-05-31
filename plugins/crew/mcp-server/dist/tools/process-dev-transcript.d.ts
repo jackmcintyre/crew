@@ -40,6 +40,10 @@ export type ProcessDevTranscriptResult = {
 } | {
     next: "done-blocked-gh-needs-human";
     chatLog: string[];
+} | {
+    next: "done-needs-human-decision";
+    question: string;
+    chatLog: string[];
 };
 export interface ProcessDevTranscriptOptions {
     targetRepoRoot: string;

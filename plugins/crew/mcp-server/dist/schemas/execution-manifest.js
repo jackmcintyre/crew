@@ -131,6 +131,14 @@ export const ExecutionManifestSchema = z
      *   - `reviewer-grammar`             — Story 4.3 RESERVED (no live writer; kept
      *                                      as forward-compat reservation per 4.3 rationale)
      *   - `deps-drift`                   — Story 5.13 NEW (scan-sources deps-drift gate)
+     *   - `needs-human-decision`         — Story 8.19 (process-dev-transcript): the
+     *                                      dev hit a genuine decision a human must
+     *                                      make to proceed correctly. NOT a hard
+     *                                      block — the story pauses into the
+     *                                      human-needed surface carrying the
+     *                                      verbatim question; the manifest is
+     *                                      stamped so its paused-for-human state is
+     *                                      durable and distinct from a generic block.
      *
      * See `_bmad-output/implementation-artifacts/5-13-*.md § AC2` for the
      * full closed-enum rationale and migration table.
@@ -152,6 +160,7 @@ export const ExecutionManifestSchema = z
         "orphan-no-transcript",
         "reviewer-grammar",
         "deps-drift",
+        "needs-human-decision",
     ])
         .optional(),
     /**
@@ -189,6 +198,19 @@ export const ExecutionManifestSchema = z
      * Added in Story 4.3 (FR28).
      */
     rework_count: z.number().int().nonnegative().optional(),
+    /**
+     * Count of times the autonomous drain has re-claimed this story after a
+     * prior run left it orphaned in `in-progress/` (a crash/interruption).
+     * `undefined` ≡ `0`. Incremented in-place by `reattachOrphan` each time the
+     * drain auto-resumes the orphan. The drain caps resumes on this count so a
+     * genuinely-broken story cannot loop forever — past the cap it is blocked
+     * (`orphan-no-transcript`) for a human instead of re-resumed.
+     *
+     * Distinct from `rework_count` (NEEDS CHANGES rounds within one session);
+     * this counts crash-resumptions across sessions. Added in the crash-recovery
+     * change (drain auto-resume).
+     */
+    drain_resume_attempts: z.number().int().nonnegative().optional(),
     /**
      * Risk tier verdict from the classifier (Story 4.9b — FR40a, Pattern §11).
      * Written by `postReviewerComments` after a successful POST/PATCH.

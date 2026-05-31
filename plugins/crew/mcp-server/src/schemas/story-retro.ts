@@ -43,8 +43,6 @@ export const LESSON_KINDS = [
   "discipline",
 ] as const;
 
-export type LessonKind = (typeof LESSON_KINDS)[number];
-
 /**
  * Schema for a single retro lesson.
  *
@@ -73,8 +71,6 @@ export const LessonSchema = z
       });
     }
   });
-
-export type Lesson = z.infer<typeof LessonSchema>;
 
 /**
  * Schema for the full retro payload accepted by `recordStoryRetro`.

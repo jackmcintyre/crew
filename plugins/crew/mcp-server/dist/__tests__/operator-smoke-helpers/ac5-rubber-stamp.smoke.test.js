@@ -28,7 +28,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promises as fs, mkdtempSync, rmSync } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { parse as yamlParse } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { reviewerResultFilePath } from "../../lib/read-reviewer-result-file.js";
+import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
+import { writeInProgressSnapshot } from "../../state/manifest-state-machine.js";
 import { processDevTranscript } from "../../tools/process-dev-transcript.js";
 import { processReviewerTranscript } from "../../tools/process-reviewer-transcript.js";
 import { runReviewerSession } from "../../tools/run-reviewer-session.js";
@@ -121,6 +125,18 @@ beforeEach(async () => {
         `withdrawn: false`,
         `claimed_by: "${SESSION_ULID}"`,
     ].join("\n"));
+    // Story 5.29: seed the claim-time sidecar so completeStory's hand-edit guard
+    // has a baseline to compare against.
+    {
+        const raw = await fs.readFile(manifestPath, "utf8");
+        const parsed = yamlParse(raw);
+        const manifest = parseExecutionManifest(parsed, { absPath: manifestPath });
+        await writeInProgressSnapshot({
+            targetRepoRoot: tmpRoot,
+            ref: SMOKE_STORY_REF,
+            manifest,
+        });
+    }
     // docs/standards.md
     await fs.mkdir(path.join(tmpRoot, "docs"), { recursive: true });
     await atomicWriteFile(path.join(tmpRoot, "docs", "standards.md"), SMOKE_STANDARDS);
@@ -335,8 +351,9 @@ describe("AC5 (user-surface): rubber-stamp failure mode is closed by runReviewer
         // -----------------------------------------------------------------------
         // Step 3 (revision 2): The reviewer-result.json was already written by
         // runReviewerSession above. Verify the file exists with the correct shape.
+        // (Story 8.15: reviewer-result.json is namespaced per story ref.)
         // -----------------------------------------------------------------------
-        const resultFilePath = `${tmpRoot}/.crew/state/sessions/${SESSION_ULID}/reviewer-result.json`;
+        const resultFilePath = reviewerResultFilePath(tmpRoot, SESSION_ULID, SMOKE_STORY_REF);
         const resultFileRaw = await fs.readFile(resultFilePath, "utf8");
         const resultFileParsed = JSON.parse(resultFileRaw);
         // Revision 2: file carries NEEDS CHANGES because AC1 failed (artifact missing).
@@ -403,7 +420,8 @@ describe("AC5 negative sanity: if artifact exists, READY FOR MERGE is not blocke
         // Revision 2: the file-based verdict is READY FOR MERGE (artifact present, no manual checks)
         expect(sessionResult.recommendedVerdict).toBe("READY FOR MERGE");
         // The persisted reviewer-result.json also reflects READY FOR MERGE
-        const resultFilePath = `${tmpRoot}/.crew/state/sessions/${SESSION_ULID}/reviewer-result.json`;
+        // (Story 8.15: reviewer-result.json is namespaced per story ref.)
+        const resultFilePath = reviewerResultFilePath(tmpRoot, SESSION_ULID, SMOKE_STORY_REF);
         const resultFileRaw = await fs.readFile(resultFilePath, "utf8");
         const resultFileParsed = JSON.parse(resultFileRaw);
         expect(resultFileParsed.recommendedVerdict).toBe("READY FOR MERGE");

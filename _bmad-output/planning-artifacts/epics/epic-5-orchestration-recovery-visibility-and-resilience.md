@@ -598,6 +598,35 @@ vitest: plugins/crew/mcp-server/tests/build-watch-determinism.test.ts
 **AC4:** Root cause and design choice documented in the story's Dev Notes. The note names (a) why the bare `tsc --watch` path bypassed the 5.24 fix, (b) why the chosen seam (wrapper script vs. tsc programmatic API vs. fs.watch on `dist/`) was picked, and (c) what edge cases were considered (orphan child processes, debouncing rapid edits, normaliser concurrency with mid-emit tsc writes). Technical specifics required — one paragraph minimum.
 artifact: _bmad-output/implementation-artifacts/5-28-build-watch-normaliser-chaining.md
 
+## Story 5.29: Hand-edit check uses manifest-only baseline (not live source story)
+
+> Added 2026-05-28 as follow-up to PR #176 close-out. `processReviewerTranscript` refused READY FOR MERGE because `deriveSourceBaseline` re-reads the live source story, which the dev legitimately edited (`implementation_notes`). Every Epic 6a close-out repeats this until fixed.
+> Source: `_bmad-output/implementation-artifacts/5-29-hand-edit-check-manifest-only-baseline.md`.
+
+As a dev/reviewer agent and the operator orchestrating them,
+I want the in-progress hand-edit check to compare the on-disk in-progress manifest against a baseline captured at claim time, not against the current source story file,
+So that the legitimate dev workflow of filling `## Implementation Notes` in the source story stops tripping `InProgressHandEditError` and blocking every successful close-out.
+
+**Context:** `detectInProgressHandEdit`'s baseline is currently derived from the live source story (via `deriveSourceBaseline` → `activeAdapter.readSourceStory`). When the dev edits the source story's Implementation Notes section during a story — which the placeholder text instructs them to do — the next `claimStory`/`completeStory` call sees `source_hash` and `implementation_notes` drift between the captured manifest and the recomputed source baseline, throws `InProgressHandEditError`, and refuses to advance. The fix narrows the check to manifest-only fields: snapshot the manifest at claim time (sidecar `in-progress/<ref>.snapshot.yaml`), compare manifest-to-sidecar at completion. Source-story tamper detection by re-reading the live source is removed from the in-progress guard. PR #176 (bmad:6.1) hit this defect on close-out and had to be operator-overridden.
+
+**Acceptance Criteria:**
+
+**AC1:** `detectInProgressHandEdit` compares the on-disk in-progress manifest against a baseline that was snapshotted at claim time (sidecar file or persisted on the manifest) and no longer re-reads the source story file to rebuild the baseline. `deriveSourceBaseline` is either removed at the in-progress check call sites (`claimStory` re-entry path, `completeStory`) or its return value is replaced by a manifest-snapshot loader. Source-hash drift between the in-progress manifest and the current source story is no longer a hand-edit signal.
+artifact: plugins/crew/mcp-server/src/state/manifest-state-machine.ts
+artifact: plugins/crew/mcp-server/src/tools/complete-story.ts
+artifact: plugins/crew/mcp-server/src/tools/claim-story.ts
+
+**AC2 (integration — regression):** A vitest test exercises the end-to-end dev-fills-implementation_notes path: claimed manifest in `in-progress/` with `implementation_notes` captured at claim time, then simulate the dev's edit by rewriting the source story file's `## Implementation Notes` section. Call `completeStory` (or `processReviewerTranscript` → `completeStory`). Assert the call succeeds (no `InProgressHandEditError`), the manifest moves from `in-progress/` to `done/`, and no source-file drift is reported. This is the regression guard for PR #176's defect.
+vitest: plugins/crew/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
+
+**AC3 (integration — no false negatives):** A vitest test confirms operator manifest-tampering is still detected after the narrowing. Hand-edit the in-progress manifest file directly (flip `withdrawn`, reorder `acceptance_criteria`, change `title`) while leaving the source story file untouched. Call `claimStory` re-entry or `completeStory`. Assert `InProgressHandEditError` is thrown with the correct `changedFields` array. Existing c1–c3 hand-edit cases (`title`, `acceptance_criteria`, `withdrawn`) each remain detected.
+vitest: plugins/crew/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
+
+**AC4:** `detectInProgressHandEdit` JSDoc is updated to reflect the new contract ("compares the on-disk in-progress manifest against the claim-time manifest snapshot; does not consult the source story file"). The Story 3.7 caller contract reference is updated to point at this story. `deriveSourceBaseline` either has its JSDoc updated to note it is no longer used by the in-progress guard (if retained for other reasons) or is removed entirely if no remaining call sites exist. The c4 case in the existing test file (`source hash drift detected`) is updated or removed so the test name no longer implies source-file drift detection from the in-progress guard.
+artifact: plugins/crew/mcp-server/src/state/manifest-state-machine.ts
+artifact: plugins/crew/mcp-server/src/state/derive-source-baseline.ts
+artifact: plugins/crew/mcp-server/src/state/__tests__/detect-in-progress-hand-edit.test.ts
+
 ## Story 5.30: MCP cascade halt seam in `/crew:start` + lifecycle-log diagnostic fields
 
 > Added 2026-05-28 after RCA confirmed Claude Code's `Task`-return SIGTERM cascade kills the parent MCP child paired with the subagent's child (8/8 paired SIGTERMs across 4 incidents in `~/.crew/mcp-lifecycle.log`).
@@ -636,21 +665,75 @@ So that **the next reliability investment is grounded in concrete evidence (mani
 
 **Acceptance Criteria:**
 
-**AC1 (spike notes file exists with all five answers):** A notes file at `_bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md` exists and answers all five investigation questions below, each with concrete evidence (a URL with quoted excerpt, a runnable repro snippet with observed output, or a quoted fragment of an existing source file). The notes file's top section names the spike's verdict in one of three forms: `proceed-with-d2`, `pivot-to-path-b`, or `blocked-escalate-to-jack` with the named blocker.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+**AC1 (spike notes file exists with all five answers):** A notes file at `_bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md` exists and answers all five investigation questions below, each with concrete evidence (a URL with quoted excerpt, a runnable repro snippet with observed output, or a quoted fragment of an existing source file). The notes file's top section names the spike's verdict in one of three forms: `proceed-with-d2`, `pivot-to-path-b`, or `blocked-escalate-to-jack` with the named blocker.
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 **AC2 (manifest support — Q1):** The notes file answers: does Claude Code's plugin manifest at `plugins/crew/.claude-plugin/plugin.json` support pointing `mcpServers.*.command` at an arbitrary stdio shim (e.g., a one-line bash script that `exec`s the real server) and have the host treat the shim as the MCP child? Evidence: either (a) a quoted excerpt from Claude Code's MCP docs (https://code.claude.com/docs/en/mcp.md) confirming the manifest treats `command` as an arbitrary executable path, OR (b) a runnable repro outside this repo (a tiny test plugin with a shell shim) showing MCP tools list correctly through the shim. The notes record the verdict as `manifest-supports-shim: yes | no | unclear-with-caveats`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 **AC3 (OS-level detachment — Q2):** The notes file answers: does `spawn(..., { detached: true, stdio: 'ignore' })` from a Node child actually survive a SIGTERM to its grandparent's process group on darwin? Evidence: a 20–40 line standalone Node repro outside this repo (not in `plugins/crew/`) that (a) spawns a "real server" child with `detached: true` + `stdio: 'ignore'`, (b) sends `SIGTERM` to the parent's process group via `process.kill(-pgid, 'SIGTERM')`, and (c) observes the detached child's pid is still alive 2s later (`process.kill(pid, 0)` returns truthy). The notes include the repro source verbatim and the observed terminal output. Records verdict as `detached-survives-sigterm: yes | no | partial-with-caveats`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 **AC4 (JSON-RPC framing — Q3):** The notes file answers: what's the cleanest framing for the shim's stdio→unix-socket bridge? The shim must forward JSON-RPC frames between Claude Code (stdio) and the daemon (unix socket). The notes identify any framing gotchas (chunked frames across socket reads, large payloads >64KB exceeding default buffer sizes, partial reads requiring buffering, line-delimited vs Content-Length framing) and recommend one framing approach with rationale. Evidence: either (a) a quoted reference to the MCP SDK's transport framing (`@modelcontextprotocol/sdk` source or docs via Context7), OR (b) a quoted note from the spike's investigation of the existing `plugins/crew/mcp-server/src/index.ts` stdio transport setup. Records verdict as `framing-approach: <named approach>` (e.g., `line-delimited-json`, `content-length-prefixed`).
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 **AC5 (lockfile + stale-daemon detection — Q4):** The notes file answers: what's the right pattern for "is a daemon already running, or do I need to spawn one"? The notes evaluate at minimum two patterns — (a) PID file + `kill(pid, 0)` check, and (b) optimistic socket-connect probe — and recommend one with rationale covering: stale-PID handling on crash, race condition on first two concurrent shim spawns, cross-session correctness when multiple Claude Code instances run. Evidence: either a quoted reference from a well-known daemon's source (sshd, pgsql, redis), or a short pseudocode sketch validated against the four edge cases above. Records verdict as `daemon-liveness-pattern: <pidfile-with-kill-zero | socket-connect-probe | hybrid>`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
 
 **AC6 (auth / multi-user safety — Q5):** The notes file answers: does the unix socket need a per-connection token, or is filesystem permission (`0600` on the socket path under `~/.crew/`) sufficient for the darwin reference platform? The notes identify the threat model (other unprivileged processes on the same machine; not a network adversary — unix sockets are local-only), evaluate filesystem-permission-only vs token-handshake-on-connect, and recommend one with rationale. Evidence: either a quoted reference from unix-socket auth best-practices (e.g., man 2 socket section on `SO_PEERCRED` / macOS equivalents) or a quoted note on equivalent patterns in adjacent local-IPC daemons. Records verdict as `socket-auth: <filesystem-permission-only | token-handshake | other>`.
-artifact: _bmad-output/implementation-artifacts/spikes/5-31-d2-feasibility-notes.md
+artifact: _bmad-output/implementation-artifacts/spikes/d2-feasibility-notes.md
+
+## Story 5.32: Path D2 build — detached proxy + parent-owned MCP daemon
+
+> Added 2026-05-28 as the v1.1 reliability build that retires Story 5.30's restart-per-cascade UX cost. Story 5.31's spike returned `proceed-with-d2` with green evidence across Q1–Q5; this story implements the patterns the spike locked in.
+> Risk tier: **medium** — changes the boot path of the entire MCP server.
+
+As a **plugin operator running `/crew:start` cycles with subagent fan-out**,
+I want **the MCP server to survive the SIGTERM cascade that the Claude Code host fires when a subagent `Task` returns, by relocating the real server into its own process group behind a stdio proxy shim**,
+So that **`/crew:start` no longer halts on every subagent return, the verbatim `[mcp-cascade-halted]` line shipped by Story 5.30 never appears for cascade reasons in steady state, and one Claude Code session can drain the backlog without per-story restarts**.
+
+**Context:** Story 5.30 ships the halt seam (Path A — "accept + document"). Story 5.31's spike de-risked D2: `manifest-supports-shim: yes`, `detached-survives-sigterm: yes`, `framing-approach: line-delimited-json`, `daemon-liveness-pattern: hybrid`, `socket-auth: filesystem-permission-only`. Verdict `proceed-with-d2` with concrete evidence (URL+quote for Q1, runnable repro+observed output for Q2, SDK source quotes for Q3, edge-case matrix + redis source for Q4, threat model + ssh-agent/gpg-agent/docker reference for Q5). This story builds: (a) a Node proxy shim that the plugin manifest points at instead of `node …/dist/index.js`, (b) per-user unix socket transport at `~/.crew/mcp-daemon.sock` with mode 0600, (c) hybrid daemon-liveness (PID file + `kill(0)` + connect-probe + flock for spawn race), (d) plugin manifest updated to point at the proxy. The proxy spawns the real server `detached: true, stdio: 'ignore'` so it ends up in its own pgid (Q2's repro confirmed it reparents to ppid=1 after parent SIGTERM); the shim then byte-forwards stdio↔socket. When the host SIGTERMs its pgid at subagent `Task` return, the shim dies; the daemon survives; the next subagent's MCP traffic reconnects via the same socket. The build estimate from the RCA memo is 2–3 engineering days, now de-risked by the spike.
+
+**Acceptance Criteria:**
+
+**AC1 (proxy shim spawn — detached child + JSON-RPC initialize forward):** A vitest unit test asserts the proxy shim's spawn path. Given a fake stdio pair (in-memory streams), when the proxy starts with no daemon present, it (a) spawns a child process via `child_process.spawn` with `detached: true` and `stdio: 'ignore'`, (b) calls `child.unref()`, (c) writes a JSON-RPC `initialize` request through stdio and confirms it reaches the daemon via the unix socket, (d) the spawned child's pid is recorded in the PID file. Test must inject the daemon binary path (env var or constructor arg) so the test daemon is a tiny vitest fixture, not the real MCP server.
+vitest: plugins/crew/mcp-server/src/__tests__/proxy-spawn.test.ts
+
+**AC2 (lockfile lifecycle — spawn, reuse, respawn-on-stale):** A vitest unit test exercises three flows against the proxy's daemon-acquisition logic: (a) no PID file exists → proxy spawns daemon, writes PID file, connects socket; (b) PID file exists and `kill(pid, 0)` returns truthy AND connect-probe succeeds → proxy reuses, no spawn; (c) PID file exists but `kill(pid, 0)` returns ESRCH (stale PID, daemon crashed) → proxy unlinks PID + socket, spawns new daemon. Each branch asserts the observed action (spawn count, PID-file contents, connect attempts) against a vitest mock of `child_process.spawn`, `process.kill`, and `net.connect`. The flock-based concurrent-spawn race (per Q4 hybrid recommendation) is exercised by a fourth case asserting that two concurrent acquire calls result in one spawn, one wait-and-reuse.
+vitest: plugins/crew/mcp-server/src/__tests__/proxy-lockfile.test.ts
+
+**AC3 (end-to-end — daemon survives proxy SIGTERM):** A vitest integration test under `tests/` (not `src/__tests__/`) drives the real proxy script (`plugins/crew/mcp-proxy/bin/mcp-proxy.js`) against the real built MCP daemon (`plugins/crew/mcp-server/dist/index.js`). The test (a) starts the proxy with stdio piped, (b) sends one JSON-RPC `initialize` request, awaits the response, (c) captures the daemon's pid from the PID file, (d) sends `SIGTERM` to the proxy via `process.kill(proxy.pid, 'SIGTERM')`, (e) waits 2 seconds, (f) asserts `process.kill(daemonPid, 0)` returns truthy (daemon alive) and the daemon's ppid is now 1 (reparented to init). Cleanup: SIGKILL the daemon at test end. Test is darwin-only (`describe.skipIf(process.platform !== 'darwin')`); Linux/Windows are out of scope for v1.1 per the spike's platform scoping.
+vitest: plugins/crew/mcp-server/tests/proxy-daemon-survives-sigterm.integration.test.ts
+
+**AC4 (plugin manifest points at proxy):** `plugins/crew/.claude-plugin/plugin.json` is updated so `mcpServers.crew.command` is `${CLAUDE_PLUGIN_ROOT}/mcp-proxy/bin/mcp-proxy.js` (no `args`, no `node` wrapper — the shim file begins with a `#!/usr/bin/env node` shebang and is executable). The `cwd` field stays as `${CLAUDE_PLUGIN_ROOT}`. The manifest file's structure is otherwise unchanged.
+artifact: plugins/crew/.claude-plugin/plugin.json
+
+**AC5 (proxy script exists, executable, shebang):** The file `plugins/crew/mcp-proxy/bin/mcp-proxy.js` exists, begins with `#!/usr/bin/env node`, and has mode `0755` (executable bit set; `fs.statSync(path).mode & 0o111` is truthy). The source is checked in under `plugins/crew/mcp-proxy/src/` (TypeScript) and built/normalised into `plugins/crew/mcp-proxy/bin/` per the existing `mcp-server/scripts/normalise-dist.mjs` pattern. The committed `bin/mcp-proxy.js` is the runtime artefact the manifest points at.
+artifact: plugins/crew/mcp-proxy/bin/mcp-proxy.js
+
+**AC6 (unix socket bound at mode 0600 under ~/.crew/):** A vitest unit test asserts the daemon's socket-binding path. When the daemon starts, it (a) creates `~/.crew/` with mode `0700` if missing, (b) binds the unix socket at `~/.crew/mcp-daemon.sock`, (c) `fs.statSync(socketPath).mode & 0o777` equals `0o600`. The test uses a temp `HOME` env override (`process.env.HOME = tmpdir`) so the real `~/.crew/` is not touched. Per Q5's verdict (`socket-auth: filesystem-permission-only`), no token-handshake is implemented; the daemon optionally verifies peer EUID via `getsockopt(LOCAL_PEEREUID)` as defence-in-depth (covered by the same test asserting the verify hook is wired, even if the verify call is a no-op on platforms without the API).
+vitest: plugins/crew/mcp-server/src/__tests__/daemon-socket-mode.test.ts
+
+## Story 5.34: Auto-merge gate: grant generalist-dev the repo-view + api gh subcommands
+
+> Added 2026-05-29 after the bmad:6.3 close-out failure: the reattached orphan reviewed READY FOR MERGE, then `runAutoMergeGate` died on a `repo-view` denial; story 6.3 still landed in `done/` and PR #180 was merged manually.
+> Source: `_bmad-output/implementation-artifacts/5-34-auto-merge-gate-gh-allowlist-repo-view-api.md`.
+
+As the operator orchestrating `/crew:start` and the generalist-dev agent that runs the auto-merge gate,
+I want `generalist-dev`'s gh allowlist to include the `repo-view` and `api` subcommands that `runAutoMergeGate` actually invokes,
+So that the auto-merge gate stops throwing `GhSubcommandDeniedError (NFR17)` on its `pause-needs-human` branch and can complete the merge/label decision it was built to make, instead of dying silently after a clean review on every story.
+
+**Context:** `runAutoMergeGate` (`plugins/crew/mcp-server/src/tools/run-auto-merge-gate.ts`) defaults to role `generalist-dev` (`const role = opts.role ?? "generalist-dev"`) and loads that role's permissions via the production `loadRolePermissions` path. On its `auto-merge` branch it calls `gh pr merge` (subcommand `pr-merge`). On its `pause-needs-human` branch it first calls `gh repo view --json owner,name` (subcommand `repo-view`) to resolve owner/repo, then `gh api POST /repos/<owner>/<repo>/issues/<prNumber>/labels` (subcommand `api`) to apply the `needs-human` label. But `plugins/crew/permissions/generalist-dev.yaml` has `gh_allow: [pr-create, pr-view, pr-comment, pr-merge]` — it is missing both `repo-view` and `api`. So the gate throws `GhSubcommandDeniedError` and is blocked for every story. (`generalist-reviewer.yaml` has `[pr-diff, pr-view, api, repo-view]`, which is why reviewer-side tools like `postReviewerComments`/`applyReviewerLabels` work — they run as the reviewer role.) The defect was latent since the auto-merge gate shipped (PR #154) and was masked because the gate's vitest tests mock the gh layer AND their in-test permission fixtures include `repo-view`, so the real-allowlist gap never surfaced. It was discovered 2026-05-29 draining story bmad:6.3. The fix adds `repo-view` and `api` to the real `generalist-dev.yaml` allowlist (keeping the existing four) and adds regression coverage that exercises the REAL loaded role allowlist — not a mock fixture — so the mock-masking gap that hid this cannot recur.
+
+**Acceptance Criteria:**
+
+**AC1:** `plugins/crew/permissions/generalist-dev.yaml`'s `gh_allow` list contains both `repo-view` and `api`, in addition to the existing `pr-create`, `pr-view`, `pr-comment`, and `pr-merge` entries. No existing entry is removed and no other field of the file is changed. This is a deterministic content-structure check against the production permission file.
+artifact: plugins/crew/permissions/generalist-dev.yaml
+
+**AC2 (integration — regression):** A vitest test drives `runAutoMergeGate` down BOTH the `pause-needs-human` branch and the `auto-merge` branch, loading the REAL `generalist-dev` role permissions via the production `loadRolePermissions` path (NOT a hand-built or mock `gh_allow` array), with the gh shell-out itself faked or run in dry-run. It asserts that neither path throws `GhSubcommandDeniedError` for `repo-view`, `api`, or `pr-merge`. This is the regression guard for the 2026-05-29 bmad:6.3 close-out failure.
+vitest: plugins/crew/mcp-server/src/tools/__tests__/run-auto-merge-gate.test.ts
+
+**AC3 (regression):** A vitest test loads the real `generalist-dev.yaml` via `loadRolePermissions({ role: "generalist-dev" })` and asserts its `gh_allow` is a superset of every gh subcommand `runAutoMergeGate` can invoke (`pr-merge`, `repo-view`, `api`). The test reads the PRODUCTION permission file, not a fixture, so the mock-masking gap that hid this defect cannot recur.
+vitest: plugins/crew/mcp-server/src/state/__tests__/load-role-permissions.test.ts
+
 

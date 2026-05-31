@@ -6,6 +6,9 @@ import { buildPersonaSpawnPrompt } from "./build-persona-spawn-prompt.js";
 import { claimStory } from "./claim-story.js";
 import { completeStory } from "./complete-story.js";
 import { recordStoryRetro } from "./record-story-retro.js";
+import { writeRetroProposal } from "./write-retro-proposal.js";
+import { acceptProposal } from "./accept-proposal.js";
+import { gatherRetroInputs } from "./gather-retro-inputs.js";
 import { listClaimableTodos } from "./list-claimable-todos.js";
 import { mintSessionUlid } from "./mint-session-ulid.js";
 import { getStatus, renderStatus } from "./get-status.js";
@@ -28,8 +31,6 @@ import { runDevTerminalAction } from "./run-dev-terminal-action.js";
 import { runReviewerSession } from "./run-reviewer-session.js";
 import { postReviewerComments } from "./post-reviewer-comments.js";
 import { applyReviewerLabels } from "./apply-reviewer-labels.js";
-import { recordAgentInvoke } from "./record-agent-invoke.js";
-import { recordPrCloseAction } from "./record-pr-close-action.js";
 import { processReviewerYield } from "./process-reviewer-yield.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
 import { computeAgreement, AgreementMetricResultSchema } from "./compute-agreement.js";
@@ -600,6 +601,187 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     },
   });
 
+  // Story 6.3 — writeRetroProposal: emit a single immutable retro-proposal
+  // markdown file at <target-repo>/.crew/retro-proposals/<isoTimestamp>.md.
+  // Carries a YAML frontmatter block (source of truth for apply-time
+  // re-validation in Epic 6b) plus an operator-readable rendered body.
+  // Refuses collisions — proposals are immutable artifacts keyed by ISO
+  // timestamp. FR58, FR59.
+  server.registerTool({
+    name: "writeRetroProposal",
+    description:
+      "Write a single immutable retro-proposal markdown file under " +
+      "<target-repo>/.crew/retro-proposals/<isoTimestamp>.md. The file carries a YAML " +
+      "frontmatter block (validated via RetroProposalFileSchema; source of truth for " +
+      "Epic 6b apply-time re-validation) plus a rendered Markdown body with one H2 per " +
+      "proposal. Refuses collisions with RetroProposalAlreadyExistsError (proposals are " +
+      "immutable). Refuses malformed payloads with MalformedRetroProposalError — closed " +
+      "discriminated union over seven types (rule, rule-retirement, skill-create, " +
+      "skill-revise, skill-supersede, skill-retire, team-change). Story 6.3 (FR58, FR59).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        isoTimestamp: { type: "string" },
+        proposals: { type: "array" },
+        cycleWindow: {
+          // null or { from, to } — surfaced as plain object so the JSON-schema
+          // hint isn't too tight; Zod inside the handler is the real gate.
+          type: ["object", "null"],
+        },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "isoTimestamp", "proposals"],
+    },
+    handler: async (args) => {
+      try {
+        const parsed = z
+          .object({
+            targetRepoRoot: z.string().min(1),
+            isoTimestamp: z.string().min(1),
+            proposals: z.array(z.unknown()),
+            cycleWindow: z
+              .object({ from: z.string(), to: z.string() })
+              .strict()
+              .nullable()
+              .optional(),
+            role: z.string().optional(),
+          })
+          .parse(args);
+        const result = await writeRetroProposal(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 6.4 — acceptProposal: the /accept-proposal <id> diff-then-confirm gate
+  // (FR61, NFR10). Two-phase, deterministic seam: a preview call (confirm absent)
+  // returns the handler's diff with NO mutation; a confirm call (confirm: true)
+  // runs the registered handler, commits the handler's changed paths + the
+  // proposal-file `applied` stamp in a single git-wrapper commit, emits one
+  // retro.proposal.applied telemetry event, and returns the sha. Re-running an
+  // already-applied id is an idempotent no-op (already-applied). In Story 6.4
+  // the production handler registry is EMPTY — every kind fails closed with
+  // ProposalKindNotApplicableYetError (the first real handler ships in Story 6.5).
+  server.registerTool({
+    name: "acceptProposal",
+    description:
+      "The /accept-proposal <id> diff-then-confirm gate (Story 6.4, FR61, NFR10). " +
+      "Two-phase, deterministic: called without confirm it returns { status: 'preview', diff } " +
+      "with NO file write, commit, or telemetry; called with confirm:true it runs the registered " +
+      "per-kind apply handler, commits the handler's changed paths + the proposal-file `applied` " +
+      "stamp in a SINGLE git-wrapper commit, emits one retro.proposal.applied telemetry event, " +
+      "and returns { status: 'applied', appliedSha, idempotencyKey }. Re-running an already-applied " +
+      "id (even with confirm:true) is an idempotent no-op returning { status: 'already-applied', " +
+      "appliedSha, appliedAt } — no handler call, no write, no commit, no telemetry. " +
+      "Throws ProposalNotFoundError (id matched no proposal across all files), " +
+      "AmbiguousProposalIdError (id matched in two files — a bug, ids are unique), and " +
+      "ProposalKindNotApplicableYetError (no registered handler for the kind — fail-closed; in " +
+      "Story 6.4 the production registry is empty so every kind fails closed). Story 6.4.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        proposalId: { type: "string" },
+        confirm: { type: "boolean" },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "proposalId"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          proposalId: z.string().min(1),
+          confirm: z.boolean().optional(),
+          role: z.string().optional(),
+        })
+        .parse(args);
+      try {
+        const result = await acceptProposal(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 6.2 — gatherRetroInputs: assemble the deterministic input bundle the
+  // /crew:retro skill hands to the retro-analyst subagent. Pure read across the
+  // cycle's done manifests, telemetry, prior proposals, and (when present) the
+  // rule registry. No writes, no network. FR56.
+  server.registerTool({
+    name: "gatherRetroInputs",
+    description:
+      "Assemble the deterministic retro input bundle for the /crew:retro skill " +
+      "(Story 6.2, FR56). Returns { doneManifests, telemetrySummary, priorProposals, " +
+      "ruleRegistry }: every done/ manifest (alphabetical, parseExecutionManifest-validated; " +
+      "MalformedExecutionManifestError propagates), every telemetry event for the current " +
+      "cycle window (malformed lines skipped + counted as telemetrySummary.skipped_count), " +
+      "prior retro-proposal paths { path, iso_timestamp } sorted ascending (contents NOT " +
+      "loaded), and the parsed docs/discipline-rules.yaml registry (or null when absent — " +
+      "absence is not an error). Pure read; no writes, no network.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+      },
+      required: ["targetRepoRoot"],
+    },
+    handler: async (args) => {
+      try {
+        const parsed = z
+          .object({ targetRepoRoot: z.string().min(1) })
+          .parse(args);
+        const result = await gatherRetroInputs(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
   // Story 4.2 — mintSessionUlid: pure ULID minting for the /crew:start skill.
   // The skill MUST NOT ask the LLM to generate a ULID — this tool delegates
   // minting to the `ulid` npm package so the result is deterministic.
@@ -902,6 +1084,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         summary: { type: "string" },
         manifestPath: { type: "string" },
         sessionUlid: { type: "string" },
+        base: { type: "string" },
       },
       required: [
         "targetRepoRoot",
@@ -925,6 +1108,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           summary: z.string(),
           manifestPath: z.string().min(1),
           sessionUlid: z.string().min(1),
+          base: z.string().min(1).optional(),
         })
         .parse(args);
       try {
@@ -961,15 +1145,17 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       properties: {
         targetRepoRoot: { type: "string" },
         sessionUlid: { type: "string" },
+        ref: { type: "string" },
         role: { type: "string" },
       },
-      required: ["targetRepoRoot", "sessionUlid"],
+      required: ["targetRepoRoot", "sessionUlid", "ref"],
     },
     handler: async (args) => {
       const parsed = z
         .object({
           targetRepoRoot: z.string().min(1),
           sessionUlid: z.string().min(1),
+          ref: z.string().min(1),
           role: z.string().optional(),
         })
         .parse(args);
@@ -1008,16 +1194,18 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
       properties: {
         targetRepoRoot: { type: "string" },
         sessionUlid: { type: "string" },
+        ref: { type: "string" },
         verdictOverride: { type: "string", enum: ["reviewer-failure"] },
         role: { type: "string" },
       },
-      required: ["targetRepoRoot", "sessionUlid"],
+      required: ["targetRepoRoot", "sessionUlid", "ref"],
     },
     handler: async (args) => {
       const parsed = z
         .object({
           targetRepoRoot: z.string().min(1),
           sessionUlid: z.string().min(1),
+          ref: z.string().min(1),
           verdictOverride: z.literal("reviewer-failure").optional(),
           role: z.string().optional(),
         })
@@ -1031,112 +1219,6 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         if (err instanceof DomainError) {
           return {
             content: [{ type: "text" as const, text: err.message }],
-            isError: true,
-          };
-        }
-        throw err;
-      }
-    },
-  });
-
-  // Story 4.12 — recordAgentInvoke: record a completed agent-subagent invocation,
-  // enforce the 8-min reviewer hard cap (NFR2), and emit dev.budget_exceeded when
-  // cumulative dev runtime crosses 30 min (NFR3). (FR65, NFR2, NFR3)
-  server.registerTool({
-    name: "recordAgentInvoke",
-    description:
-      "Record a completed agent-subagent invocation (FR65). Emits an `agent.invoke` telemetry event. " +
-      "For `generalist-reviewer` invocations exceeding 8 min (NFR2): substitutes the verdict comment " +
-      "with a failure body, applies `needs-human`, and returns `{ kind: 'reviewer-timed-out' }` — " +
-      "the story is NOT marked failed. " +
-      "For `generalist-dev` invocations when cumulative story runtime crosses 30 min (NFR3): emits " +
-      "`dev.budget_exceeded` and returns `{ kind: 'dev-budget-exceeded' }`. " +
-      "Returns `{ kind: 'ok' }` on the common path. Story 4.12.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        sessionUlid: { type: "string" },
-        agent: { type: "string" },
-        storyId: { type: "string" },
-        startedAt: { type: "string" },
-        completedAt: { type: "string" },
-        tokensIn: { type: "number" },
-        tokensOut: { type: "number" },
-        targetRepoRoot: { type: "string" },
-      },
-      required: ["sessionUlid", "agent", "startedAt", "completedAt", "targetRepoRoot"],
-    },
-    handler: async (args) => {
-      const parsed = z
-        .object({
-          sessionUlid: z.string().min(1),
-          agent: z.string().min(1),
-          storyId: z.string().optional(),
-          startedAt: z.string().min(1),
-          completedAt: z.string().min(1),
-          tokensIn: z.number().int().nonnegative().optional(),
-          tokensOut: z.number().int().nonnegative().optional(),
-          targetRepoRoot: z.string().min(1),
-        })
-        .parse(args);
-      try {
-        const result = await recordAgentInvoke(parsed);
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result) }],
-        };
-      } catch (err) {
-        if (err instanceof DomainError) {
-          return {
-            content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
-            isError: true,
-          };
-        }
-        throw err;
-      }
-    },
-  });
-
-  // Story 4.12 — recordPrCloseAction: write a retroactive `reviewer.verdict.merge_action`
-  // event when a PR is closed. Join key for compute-agreement (Story 4.10): (pr_number, session_id).
-  server.registerTool({
-    name: "recordPrCloseAction",
-    description:
-      "Write a `reviewer.verdict.merge_action` event when a PR is closed (FR66). " +
-      "Join key for Story 4.10 compute-agreement: (prNumber, sessionUlid). " +
-      "No deduplication — caller (Story 5.3's polling loop) is responsible for dedup. " +
-      "Returns `{ kind: 'ok' }`. Story 4.12.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        sessionUlid: { type: "string" },
-        storyId: { type: "string" },
-        prNumber: { type: "number" },
-        mergeAction: { type: "string", enum: ["merged", "closed-unmerged", "still-open"] },
-        resolvedAt: { type: "string" },
-        targetRepoRoot: { type: "string" },
-      },
-      required: ["sessionUlid", "prNumber", "mergeAction", "targetRepoRoot"],
-    },
-    handler: async (args) => {
-      const parsed = z
-        .object({
-          sessionUlid: z.string().min(1),
-          storyId: z.string().optional(),
-          prNumber: z.number().int().positive(),
-          mergeAction: z.enum(["merged", "closed-unmerged", "still-open"]),
-          resolvedAt: z.string().optional(),
-          targetRepoRoot: z.string().min(1),
-        })
-        .parse(args);
-      try {
-        const result = await recordPrCloseAction(parsed);
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result) }],
-        };
-      } catch (err) {
-        if (err instanceof DomainError) {
-          return {
-            content: [{ type: "text" as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
             isError: true,
           };
         }

@@ -38,7 +38,11 @@ export type ProcessDevTranscriptResult =
   | { next: "done-handoff-but-no-review-yet"; chatLog: string[] } // v1: unreachable; declared for ABI stability
   | { next: "done-blocked-gh-defer"; chatLog: string[] }
   | { next: "done-blocked-gh-retry"; chatLog: string[] }
-  | { next: "done-blocked-gh-needs-human"; chatLog: string[] };
+  | { next: "done-blocked-gh-needs-human"; chatLog: string[] }
+  // Story 8.19: the dev hit a genuine decision a human must make to proceed
+  // correctly. This is NOT a hard block and NOT a successful handoff — the story
+  // pauses into the human-needed surface carrying the verbatim question text.
+  | { next: "done-needs-human-decision"; question: string; chatLog: string[] };
 
 // ---------------------------------------------------------------------------
 // Options
@@ -58,6 +62,20 @@ export interface ProcessDevTranscriptOptions {
 
 const RECOVERABLE_ERROR_RE =
   /^gh-recoverable: class=(defer|retry|needs-human) subcommand=([a-z0-9-]+) exit=(\d+)/m;
+
+// ---------------------------------------------------------------------------
+// Needs-human-decision locked phrase regex
+// (Story 8.19 AC1)
+// The dev emits this as its last line — instead of the handoff phrase — when it
+// hits a genuine decision a human must make to proceed correctly (distinct from
+// a normal handoff, a domain-yield, and a hard block). The rest of the line, up
+// to the end of line, is the verbatim question text the operator must answer.
+// A blank/whitespace-only question does NOT qualify (guards against the dev
+// using this as a no-question escape hatch) — it falls through to the handoff
+// parse, which then blocks on grammar drift rather than silently pausing.
+// ---------------------------------------------------------------------------
+
+const NEEDS_HUMAN_DECISION_RE = /^needs-human-decision:[ \t]*(\S.*\S|\S)[ \t]*$/m;
 
 // ---------------------------------------------------------------------------
 // PR URL extraction regex
@@ -103,6 +121,37 @@ export async function processDevTranscript(
     "in-progress",
     `${ref}.yaml`,
   );
+
+  // ---------------------------------------------------------------------------
+  // Step 0: Check for the locked needs-human-decision marker line FIRST.
+  // (Story 8.19 AC1)
+  // This is checked before the recoverable-error marker and before the handoff
+  // parse because it is a deliberate signal the dev emits INSTEAD of the handoff
+  // phrase when it hits a genuine decision a human must make. It must not be
+  // confused with a hard block (it carries a concrete question and pauses into
+  // the human-needed surface, not the blocked bucket) nor with a successful
+  // handoff (no PR is opened). We stamp a descriptive `blocked_by` so the
+  // manifest reflects the paused-for-human state rather than a generic block,
+  // and return the question text verbatim for the operator-facing surface.
+  // ---------------------------------------------------------------------------
+
+  const needsHumanMatch = NEEDS_HUMAN_DECISION_RE.exec(devTranscript);
+
+  if (needsHumanMatch !== null) {
+    const question = needsHumanMatch[1]!.trim();
+
+    const currentManifest = await readManifest(manifestPath);
+    await writeManifest(manifestPath, {
+      ...currentManifest,
+      blocked_by: "needs-human-decision",
+    });
+
+    chatLog.push(
+      `needs human decision — story ${ref} paused for a human. question: ${question}`,
+    );
+
+    return { next: "done-needs-human-decision", question, chatLog };
+  }
 
   // ---------------------------------------------------------------------------
   // Step 1: Check for the locked recoverable-error marker line FIRST.

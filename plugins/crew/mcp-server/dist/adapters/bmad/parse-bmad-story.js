@@ -159,10 +159,6 @@ function isKnownBmadStatus(s) {
         s === "approved" ||
         s === "review");
 }
-// Convenience: skip rule for listSourceStories.
-export function shouldSkipBmadStatus(status) {
-    return status === "optional";
-}
 // Re-export the execution mapping so the adapter has a single import surface.
 export { mapBmadStatusToExecution };
 function splitTopLevelSections(lines, startIdx) {

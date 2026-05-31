@@ -39,14 +39,17 @@ describe("createLifecycleLog", () => {
   let tmpDir: string;
   let originalLifecycleLog: string | undefined;
   let originalDiag: string | undefined;
+  let originalSessionUlid: string | undefined;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
     originalLifecycleLog = process.env["CREW_MCP_LIFECYCLE_LOG"];
     originalDiag = process.env["CREW_MCP_DIAG"];
+    originalSessionUlid = process.env["CREW_SESSION_ULID"];
     // Clear env vars so tests are isolated
     delete process.env["CREW_MCP_LIFECYCLE_LOG"];
     delete process.env["CREW_MCP_DIAG"];
+    delete process.env["CREW_SESSION_ULID"];
   });
 
   afterEach(() => {
@@ -60,6 +63,11 @@ describe("createLifecycleLog", () => {
       delete process.env["CREW_MCP_DIAG"];
     } else {
       process.env["CREW_MCP_DIAG"] = originalDiag;
+    }
+    if (originalSessionUlid === undefined) {
+      delete process.env["CREW_SESSION_ULID"];
+    } else {
+      process.env["CREW_SESSION_ULID"] = originalSessionUlid;
     }
     // Clean up tmp dir
     try {
@@ -205,6 +213,108 @@ describe("createLifecycleLog", () => {
     const lines = readLogLines(nestedPath);
     expect(lines).toHaveLength(1);
     expect(lines[0]!["event"]).toBe("boot");
+  });
+
+  // -------------------------------------------------------------------------
+  // Story 5.30 — ppid + pgid mandatory; sessionUlid optional via env var
+  // -------------------------------------------------------------------------
+
+  it("(5.30) writes ppid on every line", async () => {
+    const logPath = path.join(tmpDir, "ppid.log");
+    const logger = createLifecycleLog({ path: logPath });
+
+    logger.log("boot");
+    logger.log("transport.connected");
+    logger.log("tool.call", { name: "claimNextStory" });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    logger.close();
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+    const lines = readLogLines(logPath);
+    expect(lines.length).toBeGreaterThanOrEqual(3);
+    for (const line of lines) {
+      expect(typeof line["ppid"]).toBe("number");
+      expect(line["ppid"]).toBe(process.ppid);
+    }
+  });
+
+  it("(5.30) writes pgid on every line on POSIX (undefined on win32)", async () => {
+    const logPath = path.join(tmpDir, "pgid.log");
+    const logger = createLifecycleLog({ path: logPath });
+
+    logger.log("boot");
+    logger.log("signal", { name: "SIGTERM" });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    logger.close();
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+    const lines = readLogLines(logPath);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    const isPosix = os.platform() !== "win32";
+    for (const line of lines) {
+      if (isPosix) {
+        expect(typeof line["pgid"]).toBe("number");
+      } else {
+        // On Windows, pgid is omitted from the line entirely.
+        expect(line).not.toHaveProperty("pgid");
+      }
+    }
+  });
+
+  it("(5.30) writes sessionUlid when CREW_SESSION_ULID is set, omits it otherwise", async () => {
+    // Case A — env var absent (the test's beforeEach already deletes it)
+    const logPathA = path.join(tmpDir, "nosession.log");
+    const loggerA = createLifecycleLog({ path: logPathA });
+    loggerA.log("boot");
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    loggerA.close();
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+    const linesA = readLogLines(logPathA);
+    expect(linesA).toHaveLength(1);
+    expect(linesA[0]!).not.toHaveProperty("sessionUlid");
+
+    // Case B — env var present
+    process.env["CREW_SESSION_ULID"] = "01TESTULID000000000000000000";
+    const logPathB = path.join(tmpDir, "withsession.log");
+    const loggerB = createLifecycleLog({ path: logPathB });
+    loggerB.log("boot");
+    loggerB.log("tool.call", { name: "claimNextStory" });
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    loggerB.close();
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+    const linesB = readLogLines(logPathB);
+    expect(linesB).toHaveLength(2);
+    for (const line of linesB) {
+      expect(line["sessionUlid"]).toBe("01TESTULID000000000000000000");
+    }
+  });
+
+  it("(5.30) ppid/pgid/sessionUlid appear on logSync output too", () => {
+    const logPath = path.join(tmpDir, "sync.log");
+    process.env["CREW_SESSION_ULID"] = "01TESTULIDSYNC00000000000000";
+    const logger = createLifecycleLog({ path: logPath });
+
+    // Synchronous append — used in signal handlers
+    logger.logSync("signal", { name: "SIGTERM" });
+    logger.logSync("exit", { code: 0 });
+
+    const lines = readLogLines(logPath);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    const isPosix = os.platform() !== "win32";
+    for (const line of lines) {
+      expect(typeof line["ppid"]).toBe("number");
+      expect(line["ppid"]).toBe(process.ppid);
+      expect(line["sessionUlid"]).toBe("01TESTULIDSYNC00000000000000");
+      if (isPosix) {
+        expect(typeof line["pgid"]).toBe("number");
+      }
+    }
+
+    logger.close();
   });
 
   it("appends to existing log file (does not truncate)", async () => {

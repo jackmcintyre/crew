@@ -59,6 +59,7 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
         "gh-needs-human": "gh-needs-human";
         "gh-retry": "gh-retry";
         "handoff-grammar": "handoff-grammar";
+        "needs-human-decision": "needs-human-decision";
         "orphan-no-transcript": "orphan-no-transcript";
         "planning-discipline": "planning-discipline";
         "reviewer-grammar": "reviewer-grammar";
@@ -75,6 +76,7 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     }, z.core.$strip>>>;
     claimed_by: z.ZodOptional<z.ZodString>;
     rework_count: z.ZodOptional<z.ZodNumber>;
+    drain_resume_attempts: z.ZodOptional<z.ZodNumber>;
     risk_tier: z.ZodOptional<z.ZodEnum<{
         high: "high";
         low: "low";
@@ -106,11 +108,6 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     duration_seconds: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strict>;
 export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
-/**
- * The closed `blocked_by` enum type — Story 5.13 AC2.
- * Thirteen members; see JSDoc on the `blocked_by` field above.
- */
-export type BlockedBy = NonNullable<ExecutionManifest["blocked_by"]>;
 /**
  * Canonical reader for execution manifests.
  *

@@ -1,7 +1,7 @@
 # Story 6.2: `/crew:retro` skill and retro-analyst subagent
 
 story_shape: substrate
-Status: ready-for-dev
+Status: done
 
 ## Story
 

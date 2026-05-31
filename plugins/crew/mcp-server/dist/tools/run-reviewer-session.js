@@ -41,6 +41,7 @@ import { gh } from "../lib/gh.js";
 import { extractAcsFromSpec } from "../lib/extract-acs-from-spec.js";
 import { slugifyStandardsCriterion } from "../lib/slugify-standards-criterion.js";
 import { atomicWriteFile } from "../lib/managed-fs.js";
+import { reviewerResultFilePath } from "../lib/read-reviewer-result-file.js";
 import { DuplicateStandardsCriterionIdError } from "../errors.js";
 import { getPluginRoot } from "../lib/plugin-root.js";
 import { materialisePrBranchWorktree } from "../lib/materialise-pr-branch-worktree.js";
@@ -258,19 +259,67 @@ function collectChangedPathsFromDiff(diff) {
     return result;
 }
 /**
- * Count the total lines added + removed in a unified diff (excludes +++ / --- headers).
+ * A path is "generated" — its line count reflects compiled/locked output, not
+ * authored source, so it must not inflate the risk-tier diff-size measurement.
+ * Covers committed build output under any `dist/` directory and the common
+ * dependency lockfiles.
  *
- * @internal
+ * @internal — exported for unit tests.
  */
-function computeDiffSize(diff) {
+export function isGeneratedDiffPath(p) {
+    if (/(^|\/)dist\//.test(p))
+        return true;
+    const base = p.split("/").pop() ?? "";
+    return base === "pnpm-lock.yaml" || base === "package-lock.json" || base === "yarn.lock";
+}
+/**
+ * Count the lines added + removed in a unified diff (excludes +++ / --- file
+ * headers), attributing each line to its file and SKIPPING generated files
+ * (see `isGeneratedDiffPath`). crew commits compiled `dist/`, which would
+ * otherwise ~double a source change's line count and defeat the risk-tier
+ * diff-size cap — this measures authored-source risk, not build output.
+ *
+ * @internal — exported for unit tests.
+ */
+export function computeDiffSize(diff) {
     let count = 0;
+    let excluded = false;
     for (const line of diff.split("\n")) {
+        if (line.startsWith("diff --git ")) {
+            // New file section. Derive the path from the `b/<path>` token (falls back
+            // to `a/<path>` for deletions) and decide whether to skip its lines.
+            const m = /\sb\/(.+)$/.exec(line) ?? /\sa\/(.+?)\s+b\//.exec(line);
+            excluded = m ? isGeneratedDiffPath(m[1].trim()) : false;
+            continue;
+        }
+        if (excluded)
+            continue;
         if ((line.startsWith("+") && !line.startsWith("+++")) ||
             (line.startsWith("-") && !line.startsWith("---"))) {
             count++;
         }
     }
     return count;
+}
+/**
+ * True iff a unified diff is additive-only: every changed file is a brand-new
+ * file addition. Modified, deleted, and renamed files are all non-additive.
+ *
+ * Each file section in `git diff` starts with `diff --git ...`; an added file
+ * declares `new file mode ...`. A section without that marker is a modify
+ * (or a delete/rename, which carry their own markers) — any such section makes
+ * the whole diff non-additive. An empty/unparseable diff is conservatively
+ * non-additive (returns `false`).
+ *
+ * Stage-2 part C — feeds the `additive_only` risk-tier signal.
+ *
+ * @internal
+ */
+function isAdditiveOnlyDiff(diff) {
+    const sections = diff.split(/^diff --git /m).slice(1);
+    if (sections.length === 0)
+        return false;
+    return sections.every((section) => /^new file mode /m.test(section));
 }
 export async function runReviewerSession(opts) {
     const { targetRepoRoot, sessionUlid, ref, prNumber, role = "generalist-reviewer", pluginRootOverride, } = opts;
@@ -403,6 +452,7 @@ export async function runReviewerSession(opts) {
                 changedPaths,
                 commitMessages,
                 diffSize,
+                additiveOnly: isAdditiveOnlyDiff(prDiff),
             });
             // Attach to result file as riskTier block (drop story_id — file already has ref)
             const { story_id: _dropped, ...block } = classificationResult;
@@ -430,10 +480,16 @@ export async function runReviewerSession(opts) {
     // Only the verdict-relevant projection is persisted — heavy fields
     // (sourceStory, prDiff) stay in-memory only.
     // The parent directory is created if absent.
+    //
+    // Story 8.15: the result is namespaced per story ref within the session dir
+    // (`<sessionUlid>/<sanitised-ref>/reviewer-result.json`) so a multi-story
+    // drain — which shares one session ULID across stories — cannot have a later
+    // story overwrite an earlier story's verdict. The path is derived via the
+    // shared `reviewerResultFilePath` helper, the same derivation every reader
+    // uses, so writer and readers always agree.
     // -------------------------------------------------------------------------
-    const sessionDir = path.join(targetRepoRoot, ".crew", "state", "sessions", sessionUlid);
-    await fs.mkdir(sessionDir, { recursive: true });
-    const resultFilePath = path.join(sessionDir, "reviewer-result.json");
+    const resultFilePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
+    await fs.mkdir(path.dirname(resultFilePath), { recursive: true });
     const fileProjection = {
         sessionUlid,
         ref,

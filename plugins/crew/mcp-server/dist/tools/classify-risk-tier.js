@@ -92,6 +92,7 @@ const TIER_ORDER = ["high", "medium", "low"];
  */
 export async function classifyRiskTier(opts) {
     const { targetRepoRoot, pluginRoot, storyId, changedPaths, commitMessages, diffSize } = opts;
+    const additiveOnly = opts.additiveOnly ?? false;
     // Step 1: Load spec (propagates errors verbatim)
     const spec = await lookupRiskTieringSpec({ targetRepoRoot, pluginRoot });
     // Step 2: Detect change types
@@ -104,6 +105,7 @@ export async function classifyRiskTier(opts) {
                 changedPaths,
                 detectedChangeTypes,
                 diffSize,
+                additiveOnly,
             });
             if (!matched)
                 continue;

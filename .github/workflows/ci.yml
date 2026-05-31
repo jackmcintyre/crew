@@ -37,6 +37,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: plugins/crew/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - name: Bloat gate — fail on dead files, unused exports, or unused deps (knip)
+        run: pnpm knip
       - run: pnpm build
       - name: Auto-commit rebuilt dist if dirty (PR only)
         if: github.event_name == 'pull_request'

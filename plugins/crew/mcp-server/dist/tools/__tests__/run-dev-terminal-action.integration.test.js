@@ -102,6 +102,14 @@ async function setupRepo() {
 }
 function makeStubExeca(opts) {
     return vi.fn(async (cmd, args, options) => {
+        // Story 8.17: the pre-PR full-build gate spawns `pnpm build`. Stub it so
+        // the integration tests never spawn a real build; default to success.
+        if (cmd === "pnpm") {
+            if (opts.buildShouldFail) {
+                return { stdout: "", stderr: "tsc: error TS2339", exitCode: 1 };
+            }
+            return { stdout: "build ok", stderr: "", exitCode: 0 };
+        }
         if (cmd === "gh") {
             if (opts.ghShouldFail) {
                 return { stdout: "", stderr: "gh pr create failed", exitCode: 1 };
@@ -155,6 +163,7 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         // (3a) tool returns { ok: true, branch, commitSha, prUrl }
@@ -198,6 +207,7 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         // Check the git commit body via log
@@ -223,9 +233,53 @@ describe("runDevTerminalAction — happy path (AC3a)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         expect(result.prUrl).toBe(customUrl);
+    });
+});
+describe("runDevTerminalAction — PR base branch", () => {
+    /** Helper: pull the value following `--base` out of the stubbed gh call. */
+    function baseArgFromSpy(spy) {
+        const ghCall = spy.mock.calls.find(([cmd]) => cmd === "gh");
+        expect(ghCall).toBeDefined();
+        const ghArgs = ghCall[1];
+        const baseIdx = ghArgs.indexOf("--base");
+        return baseIdx === -1 ? undefined : ghArgs[baseIdx + 1];
+    }
+    it("defaults the PR base to `dev` when no base is supplied", async () => {
+        const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+        await runDevTerminalAction({
+            targetRepoRoot: ctx.repoRoot,
+            ref: REF,
+            title: TITLE,
+            type: TYPE,
+            body: BODY,
+            summary: SUMMARY,
+            manifestPath: ctx.manifestPath,
+            sessionUlid: SESSION_ULID,
+            worktree: false,
+            execaImpl: spy,
+        });
+        expect(baseArgFromSpy(spy)).toBe("dev");
+    });
+    it("honours an explicit base branch override", async () => {
+        const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
+        await runDevTerminalAction({
+            targetRepoRoot: ctx.repoRoot,
+            ref: REF,
+            title: TITLE,
+            type: TYPE,
+            body: BODY,
+            summary: SUMMARY,
+            manifestPath: ctx.manifestPath,
+            sessionUlid: SESSION_ULID,
+            worktree: false,
+            base: "main",
+            execaImpl: spy,
+        });
+        expect(baseArgFromSpy(spy)).toBe("main");
     });
 });
 describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
@@ -240,6 +294,7 @@ describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
             summary: "summary",
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         expect(result.branch).toMatch(/^story\/[a-z0-9-]+$/);
@@ -257,6 +312,7 @@ describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
             summary: "summary",
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         const afterRef = result.branch.slice("story/1-1-x-".length);
@@ -273,6 +329,7 @@ describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
             summary: "summary",
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         expect(result.branch).toMatch(/^story\/[a-z0-9-]+$/);
@@ -290,6 +347,7 @@ describe("runDevTerminalAction — commit type validation (AC3c)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         })).rejects.toBeInstanceOf(ConventionalCommitTypeUnknownError);
         expect(spy).not.toHaveBeenCalled();
@@ -310,6 +368,7 @@ describe("runDevTerminalAction — body wrap (AC3d)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         const logResult = await realExeca("git", ["-C", ctx.repoRoot, "log", "-1", "--pretty=%b"], { reject: false });
@@ -333,6 +392,7 @@ describe("runDevTerminalAction — body wrap (AC3d)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         const logResult = await realExeca("git", ["-C", ctx.repoRoot, "log", "-1", "--pretty=%b"], { reject: false });
@@ -435,6 +495,7 @@ describe("runDevTerminalAction — push failure (AC3f)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         })).rejects.toBeInstanceOf(GitPushFailedError);
     });
@@ -450,6 +511,7 @@ describe("runDevTerminalAction — push failure (AC3f)", () => {
                 summary: SUMMARY,
                 manifestPath: ctx.manifestPath,
                 sessionUlid: SESSION_ULID,
+                worktree: false,
                 execaImpl: spy,
             });
         }
@@ -476,6 +538,7 @@ describe("runDevTerminalAction — gh pr create failure (AC3g)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         })).rejects.toBeInstanceOf(GhPrCreateFailedError);
     });
@@ -490,6 +553,7 @@ describe("runDevTerminalAction — gh pr create failure (AC3g)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         })).rejects.toBeInstanceOf(GhPrCreateFailedError);
     });
@@ -507,6 +571,7 @@ describe("runDevTerminalAction — manifest not mutated (AC3h)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         const after = await fs.readFile(ctx.manifestPath, "utf8");
@@ -525,6 +590,7 @@ describe("runDevTerminalAction — ACs checklist mirroring (AC3i)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         const ghCall = spy.mock.calls.find(([cmd]) => cmd === "gh");
@@ -550,6 +616,7 @@ describe("runDevTerminalAction — ACs checklist mirroring (AC3i)", () => {
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         const ghCall = spy.mock.calls.find(([cmd]) => cmd === "gh");
@@ -577,6 +644,7 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         // Confirm successful result
@@ -603,6 +671,7 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         });
         const devOutcomePath = path.join(ctx.repoRoot, ".crew", "state", "sessions", SESSION_ULID, "dev-outcome.json");
@@ -623,6 +692,7 @@ describe("runDevTerminalAction — dev-outcome.json write (Story 4.8b AC5a)", ()
             summary: SUMMARY,
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
+            worktree: false,
             execaImpl: spy,
         })).rejects.toBeInstanceOf(GhPrCreateFailedError);
     });

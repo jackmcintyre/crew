@@ -23,6 +23,7 @@ import { parse as yamlParse } from "yaml";
 import { execa as defaultExeca } from "execa";
 import { parseExecutionManifest } from "../schemas/execution-manifest.js";
 import { buildBranchSlug } from "../lib/pr-body.js";
+import { readDevOutcomeFile } from "../lib/read-dev-outcome-file.js";
 /**
  * Scan `<targetRepoRoot>/.crew/state/in-progress/` for orphaned manifests.
  *
@@ -51,8 +52,15 @@ export async function scanOrphanedInProgress(opts) {
         }
         throw err;
     }
-    // Filter to .yaml files and sort alphabetically.
-    const yamlEntries = entries.filter((f) => f.endsWith(".yaml")).sort();
+    // Filter to manifest .yaml files and sort alphabetically. Exclude the
+    // claim-time sidecar baselines written by claim-story.ts at
+    // `<ref>.snapshot.yaml` (Story 5.29) — those mirror only the operator-editable
+    // fields and are NOT full execution manifests, so feeding them to
+    // parseExecutionManifest throws MalformedExecutionManifestError and blocks the
+    // entire orphan-recovery path.
+    const yamlEntries = entries
+        .filter((f) => f.endsWith(".yaml") && !f.endsWith(".snapshot.yaml"))
+        .sort();
     const orphans = [];
     for (const entry of yamlEntries) {
         const absPath = path.join(inProgressDir, entry);
@@ -116,13 +124,27 @@ export async function scanOrphanedInProgress(opts) {
             // blockOrphanNoTranscript behaviour). Do NOT throw.
             hasOpenPR = false;
         }
+        // Recover the PR number (if any) from the stale session's dev-outcome.json
+        // so the drain can resume at review without re-running dev. Defensive: a
+        // malformed/absent outcome file must NOT abort the whole scan — treat as null.
+        let prNumber = null;
+        try {
+            const outcome = await readDevOutcomeFile(targetRepoRoot, staleUlid);
+            prNumber = outcome?.prNumber ?? null;
+        }
+        catch {
+            prNumber = null;
+        }
         orphans.push({
             ref: manifest.ref,
+            title: manifest.title,
             staleUlid,
             manifestPath: absPath,
             transcriptPath,
             hasTranscript,
             hasOpenPR,
+            prNumber,
+            resumeAttempts: manifest.drain_resume_attempts ?? 0,
         });
     }
     return { orphans };

@@ -16,4 +16,6 @@ gh_allow:
   - pr-view
   - pr-comment
   - pr-merge
+  - repo-view
+  - api
 gh_allow_args: {}

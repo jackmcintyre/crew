@@ -95,8 +95,8 @@ import { ReviewerFirstCallSkippedError } from "../errors.js";
 export async function processReviewerTranscript(opts) {
     const { targetRepoRoot, ref, sessionUlid, manifestPath } = opts;
     const chatLog = [];
-    // Read the persisted reviewer-result.json file.
-    const resultFile = await readReviewerResultFile(targetRepoRoot, sessionUlid);
+    // Read the persisted reviewer-result.json file (Story 8.15: per-ref path).
+    const resultFile = await readReviewerResultFile(targetRepoRoot, sessionUlid, ref);
     if (resultFile === null) {
         // File absent — reviewer skipped runReviewerSession.
         // Story 5.21 (reviewer-first-call-seam): stamp the manifest then throw a

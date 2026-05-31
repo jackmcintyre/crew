@@ -25,7 +25,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promises as fs, mkdtempSync, rmSync } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { parse as yamlParse } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
+import { writeInProgressSnapshot } from "../../state/manifest-state-machine.js";
 import { processDevTranscript } from "../../tools/process-dev-transcript.js";
 import { processReviewerTranscript } from "../../tools/process-reviewer-transcript.js";
 import { runReviewerSession } from "../../tools/run-reviewer-session.js";
@@ -159,6 +162,19 @@ beforeEach(async () => {
       `claimed_by: "${SESSION_ULID}"`,
     ].join("\n"),
   );
+
+  // Story 5.29: seed the claim-time sidecar so completeStory's hand-edit guard
+  // has a baseline to compare against.
+  {
+    const raw = await fs.readFile(manifestPath, "utf8");
+    const parsed = yamlParse(raw) as Record<string, unknown>;
+    const manifest = parseExecutionManifest(parsed, { absPath: manifestPath });
+    await writeInProgressSnapshot({
+      targetRepoRoot: tmpRoot,
+      ref: SMOKE_STORY_REF,
+      manifest,
+    });
+  }
 
   // docs/standards.md
   await fs.mkdir(path.join(tmpRoot, "docs"), { recursive: true });
@@ -401,6 +417,7 @@ describe("AC5 (user-surface): applyReviewerLabels applies reviewed-by-agent + ne
       const postResult = await postReviewerComments({
         targetRepoRoot: tmpRoot,
         sessionUlid: SESSION_ULID,
+        ref: SMOKE_STORY_REF,
         execaImpl: postStub,
         pluginRootOverride: pluginRoot,
         pluginVersionOverride: SMOKE_PLUGIN_VERSION,
@@ -457,6 +474,7 @@ describe("AC5 (user-surface): applyReviewerLabels applies reviewed-by-agent + ne
       const labelsResult = await applyReviewerLabels({
         targetRepoRoot: tmpRoot,
         sessionUlid: SESSION_ULID,
+        ref: SMOKE_STORY_REF,
         pluginRootOverride: pluginRoot,
         execaImpl: labelsStub,
       });

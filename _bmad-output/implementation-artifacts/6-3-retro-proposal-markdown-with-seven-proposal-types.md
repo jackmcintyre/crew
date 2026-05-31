@@ -307,4 +307,12 @@ Standard: rebuild and stage `dist/` in the same commit. Verify deterministic dis
 
 ## Dev Notes
 
-*(Dev fills this in during implementation — any deviation from the binding schema shape above, decisions about `skill-supersede` nesting, anything a future apply-path implementer (6.4–6.7) needs to know.)*
+Shipped as specified — schema shape, writer shape, and test plan match the binding shape in this story. Implementation choices worth noting for Epic 6b apply-path implementers:
+
+- **`skill-supersede.replacement` shape.** Kept as `z.object(SkillCreateBody).strict()` (no inner `type` discriminator). The outer `type: "skill-supersede"` is the only discriminator on the record; the nested `replacement` is just the field-set of a skill-create payload. Apply tools (6.5/6.7) read `proposal.replacement.proposed_path / .frontmatter_description / .body` directly — no `proposal.replacement.type` field exists.
+- **`PathInsideRepoSchema` is shared.** `proposed_path`, `target_skill_path`, `superseded_skill_path`, and `replacement.proposed_path` all run through the same refine: rejects leading `/` (absolute) and any `..` segment (traversal). When Epic 6b's apply tools form an absolute path, they MUST still re-resolve and re-validate the join is inside `targetRepoRoot` — defense in depth.
+- **`last_invoked_at: null` vs absent.** Schema is `z.nullable()` not `z.optional()`. Apply tools comparing two skill-retire proposals can rely on the field always being present (null or an ISO timestamp).
+- **ULID regex on `id` and `target_rule_id`.** Crockford base32 minus I L O U; 26 chars. Identical to the regex used by the `ulid` package.
+- **`RETRO_PROPOSAL_TYPES` tuple exported.** Apply-tool handlers can `switch(proposal.type)` with an exhaustiveness check against this tuple — adding an eighth variant will be a TS error at every switch-site.
+- **File-level wrapper round-trips.** `parseRetroProposalFile(yaml.parse(<frontmatter>))` is the canonical apply-time re-read. The writer renders frontmatter with `lineWidth: 0` for byte-stable output (idempotency test included).
+- **Renderer body shape.** The body is operator-readable scaffolding only — apply tools MUST read the frontmatter (the structured source of truth), never the body. Long fields (`skill-create.body`, `skill-revise.revised_body`, `skill-supersede.replacement.body`) are summarised as a line-count in the body to keep operator reading tractable; the full text remains in the frontmatter.

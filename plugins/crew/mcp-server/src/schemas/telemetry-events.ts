@@ -145,6 +145,40 @@ export const YieldHandoffEventSchema = TelemetryEventBase.extend({
     .strict(),
 }).strict();
 
+/**
+ * `retro.proposal.applied` — emitted by the `/accept-proposal` gate
+ * (`acceptProposal`) on a successful confirmed apply (Story 6.4 AC5). Exactly
+ * one event per apply; NONE on preview, on a declined apply, on an idempotent
+ * no-op, or on a fail-closed unregistered kind.
+ *
+ * - `id`              — the proposal's ULID.
+ * - `proposal_type`   — the proposal's kind (one of the seven retro-proposal
+ *                       discriminator literals).
+ * - `applied_sha`     — the commit sha from the git wrapper.
+ * - `idempotency_key` — the proposal's stable id (mirrors the `applied` block).
+ *
+ * No body/diff/contents strings (NFR14) — only surfacing fields.
+ */
+export const RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
+  type: z.literal("retro.proposal.applied"),
+  data: z
+    .object({
+      id: z.string().min(1),
+      proposal_type: z.enum([
+        "rule",
+        "rule-retirement",
+        "skill-create",
+        "skill-revise",
+        "skill-supersede",
+        "skill-retire",
+        "team-change",
+      ]),
+      applied_sha: z.string().min(1),
+      idempotency_key: z.string().min(1),
+    })
+    .strict(),
+}).strict();
+
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
@@ -152,10 +186,9 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
   ReviewerVerdictMergeActionEventSchema,
   DevBudgetExceededEventSchema,
   YieldHandoffEventSchema,
+  RetroProposalAppliedEventSchema,
 ]);
 
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
 export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;
 export type ReviewerVerdictMergeActionEvent = z.infer<typeof ReviewerVerdictMergeActionEventSchema>;
-export type DevBudgetExceededEvent = z.infer<typeof DevBudgetExceededEventSchema>;
-export type YieldHandoffEvent = z.infer<typeof YieldHandoffEventSchema>;

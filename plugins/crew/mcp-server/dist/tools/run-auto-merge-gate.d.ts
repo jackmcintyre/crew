@@ -28,7 +28,9 @@
 import { z } from "zod";
 import { execa as defaultExeca } from "execa";
 import type { AgreementMetricResult, ComputeAgreementOptions } from "./compute-agreement.js";
+import type { ReviewerResultFileShape } from "../lib/read-reviewer-result-file.js";
 import type { ExecutionManifest } from "../schemas/execution-manifest.js";
+import type { RolePermissions } from "../schemas/role-permissions.js";
 import type { PluginSettings } from "../schemas/workspace-config.js";
 import type { AutoMergeGateReason } from "../lib/auto-merge-gate.js";
 /**
@@ -45,9 +47,11 @@ export declare const AutoMergeGateResultSchema: z.ZodObject<{
         "pause-needs-human": "pause-needs-human";
     }>;
     reason: z.ZodEnum<{
+        "ci-not-green": "ci-not-green";
         "high-risk": "high-risk";
         "low-risk-insufficient-data": "low-risk-insufficient-data";
         "low-risk-met-threshold": "low-risk-met-threshold";
+        "low-risk-provisional-trust": "low-risk-provisional-trust";
         "low-risk-sub-threshold": "low-risk-sub-threshold";
         "medium-risk": "medium-risk";
         "no-tier-no-signal": "no-tier-no-signal";
@@ -105,6 +109,24 @@ export interface RunAutoMergeGateOptions {
     readManifestImpl?: (absPath: string) => Promise<ExecutionManifest>;
     /** Test seam: inject a custom workspace-config loader. */
     loadWorkspaceConfigImpl?: (targetRepoRoot: string) => Promise<PluginSettings>;
+    /**
+     * Test seam: bypass the workspace-config read for the provisional-trust flag
+     * (Stage-2). Production callers pass `undefined` (resolved from config).
+     */
+    provisionalTrustOverride?: boolean;
+    /** Test seam: inject a custom reviewer-result reader (Stage-2 tier fallback). */
+    readReviewerResultImpl?: (targetRepoRoot: string, sessionUlid: string, ref: string) => Promise<ReviewerResultFileShape | null>;
+    /**
+     * Test seam: bypass the real CI poll (Stage-2 CI-gating). Production callers
+     * omit this; the gate polls GitHub checks. Tests inject the desired outcome.
+     */
+    ciGateImpl?: (opts: {
+        prNumber: number;
+        role: string;
+        permissions: RolePermissions;
+        execaImpl: typeof defaultExeca;
+        pluginRoot: string;
+    }) => Promise<CiGateState>;
     /** Plugin root override — test seam for loadRolePermissions and gh-error-map. */
     pluginRootOverride?: string;
     /** Role name for gh permission lookup (default: "generalist-dev"). */
@@ -118,6 +140,28 @@ export interface RunAutoMergeGateOptions {
  * @internal — exposed via `loadWorkspaceConfigImpl` test seam.
  */
 export declare function loadWorkspaceConfig(targetRepoRoot: string): Promise<PluginSettings>;
+/** Outcome of the CI gate poll. */
+export type CiGateState = "green" | "failed" | "pending-timeout";
+/**
+ * Classify a `gh pr view --json statusCheckRollup` array into a coarse state,
+ * as an ALLOWLIST — "green" requires every item to be *explicitly passing*.
+ * Handles CheckRun items (`status`/`conclusion`) and StatusContext items
+ * (`state`).
+ *
+ * Per item: an explicit failure ⇒ the whole rollup is "failed". A COMPLETED
+ * CheckRun with a pass conclusion, or a StatusContext `state: SUCCESS`, is a
+ * pass. ANYTHING ELSE — not-yet-complete, a completed check with an
+ * unrecognized/absent conclusion, or a sparse/unknown-shape item — is treated
+ * as NOT-yet-passing (pending), never silently green. Aggregation: any failure
+ * ⇒ "failed"; else all items pass (and ≥1) ⇒ "green"; else ⇒ "pending". An
+ * empty rollup is "pending" (checks not registered yet).
+ *
+ * Conservative by construction: a green verdict cannot arise from an item the
+ * classifier does not positively recognize as passing.
+ *
+ * @internal — exported for unit tests.
+ */
+export declare function classifyCiRollup(rollup: Array<Record<string, unknown>>): "green" | "failed" | "pending";
 /**
  * Run the auto-merge gate for a PR that has reached `done-ready-for-merge`.
  *

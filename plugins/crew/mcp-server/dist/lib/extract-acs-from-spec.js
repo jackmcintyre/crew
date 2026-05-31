@@ -11,8 +11,8 @@ import { promises as fs } from "node:fs";
  * the pattern `**AC<N>...:` (where `N` is one or more digits), and return
  * an array of `{ index, firstLine }` objects in numeric order.
  *
- * The regex matches:
- *   `**AC1:**`, `**AC2 (user-surface):**`, `**AC3 (integration):**`
+ * The regex matches (byte-identical to the BMad adapter, Story 8.2):
+ *   `**AC1:**`, `**AC2 (user-surface):**`, `**AC3 — descriptive title:**`
  *
  * The `firstLine` is the first non-blank line of the AC's body (the text
  * that follows the `**ACN...**` heading line), truncated to 120 characters.
@@ -23,9 +23,12 @@ import { promises as fs } from "node:fs";
 export async function extractAcsFromSpec(specPath) {
     const raw = await fs.readFile(specPath, "utf8");
     const lines = raw.split("\n");
-    // Regex to identify an AC heading line.
-    // Matches: **AC1:** or **AC2 (user-surface):** or **AC3 (integration):**
-    const AC_HEADING_RE = /^\*\*AC(\d+)(\s*\([^)]+\))?\s*:\*\*/;
+    // Regex to identify an AC heading line. Kept BYTE-IDENTICAL to the BMad
+    // adapter's heading regex (`parse-bmad-story.ts`) so the reviewer extracts
+    // the SAME ACs the scanner parsed — closing the "reviewer verifies zero ACs
+    // on em-dash headings" divergence (Story 8.2). Matches:
+    //   **AC1:**  **AC2 (user-surface):**  **AC3 — descriptive title:**  **AC4 — title (integration):**
+    const AC_HEADING_RE = /^\*\*AC(\d+)(?:\s+—\s+[^()]*?)?(?:\s*\(([^)]+)\))?:\*\*\s*$/;
     const results = [];
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -34,9 +37,9 @@ export async function extractAcsFromSpec(specPath) {
             continue;
         const index = parseInt(headingMatch[1], 10);
         // Extract the parenthetical tag from the AC heading (Story 4.6 Task 1.2).
-        // headingMatch[2] is e.g. " (user-surface)" — strip parens + trim.
-        const rawTag = headingMatch[2];
-        const tag = rawTag ? rawTag.replace(/^\s*\(/, "").replace(/\)\s*$/, "").trim() : null;
+        // headingMatch[2] is the tag content WITHOUT parens (e.g. "user-surface"),
+        // captured by `\(([^)]+)\)` — matching the BMad parser's group (Story 8.2).
+        const tag = headingMatch[2] ? headingMatch[2].trim() : null;
         // Collect all body lines after the heading (Story 4.6 Task 1.3).
         // Body runs until the next AC heading, the next level-2 section heading
         // (## ), or end of file. Stopping at ## prevents prose under sections like

@@ -238,12 +238,15 @@ describe("Story 5.28 — AC1: zero-new-deps static check", () => {
    * The pre-story `dependencies` and `devDependencies` blocks (from origin/dev
    * before the first 5.28 commit) are inlined here as the canonical reference.
    * If anyone adds a dep this assertion catches the drift immediately.
+   *
+   * De-cruft 2026-05-30: `pino` removed — it was declared speculatively for a
+   * future SonicBoom logger swap that never landed (the logger uses
+   * `fs.appendFile`). Reference updated to match.
    */
   const PRE_STORY_DEPENDENCIES: Record<string, string> = {
     "@modelcontextprotocol/sdk": "1.29.0",
     "execa": "^9.6.1",
     "picomatch": "^4.0.4",
-    "pino": "^10.3.1",
     "ulid": "3.0.2",
     "yaml": "^2.9.0",
     "zod": "^4.4.3",

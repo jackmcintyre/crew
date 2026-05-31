@@ -48,6 +48,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { atomicWriteFile } from "../../lib/managed-fs.js";
+import { reviewerResultFilePath } from "../../lib/read-reviewer-result-file.js";
+import { writeInProgressSnapshot } from "../../state/manifest-state-machine.js";
 import { parseExecutionManifest } from "../../schemas/execution-manifest.js";
 import { processDevTranscript } from "../process-dev-transcript.js";
 import { processReviewerTranscript } from "../process-reviewer-transcript.js";
@@ -180,6 +182,9 @@ let tmpRoot;
 let manifestPath;
 async function seedManifest(manifest) {
     await atomicWriteFile(manifestPath, yamlStringify(manifest, { lineWidth: 0 }));
+    // Story 5.29: seed the claim-time sidecar so completeStory's hand-edit guard
+    // has a baseline to compare against.
+    await writeInProgressSnapshot({ targetRepoRoot: tmpRoot, ref: manifest.ref, manifest });
 }
 beforeEach(async () => {
     tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "crew-inner-cycle-integration-"));
@@ -243,9 +248,9 @@ function makeReviewerOpts() {
  * Mirrors what `runReviewerSession` writes before returning.
  */
 async function seedReviewerResultFile(targetRepoRoot, sessionUlid, ref, recommendedVerdict) {
-    const sessionDir = path.join(targetRepoRoot, ".crew", "state", "sessions", sessionUlid);
-    await fs.mkdir(sessionDir, { recursive: true });
-    const filePath = path.join(sessionDir, "reviewer-result.json");
+    // Story 8.15: seed at the per-ref namespaced path the reader now derives.
+    const filePath = reviewerResultFilePath(targetRepoRoot, sessionUlid, ref);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
     const content = {
         sessionUlid,
         ref,
@@ -476,7 +481,15 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("postReviewerComments");
             expect(toolNames).not.toContain("runDevSession");
             expect(toolNames).toContain("applyReviewerLabels");
-            expect(toolNames.length).toBe(36); // Story 4.12 added recordAgentInvoke (26), recordPrCloseAction (27); Story 4.11 added processReviewerYield (28); Story 4.9b added classifyRiskTier (29); Story 4.10 added computeAgreement (30); Story 4.10b added runAutoMergeGate (31); Story 1.13 added createSmokeScratchRepo (32); Story 5.11 added scanOrphanedInProgress (33), reattachOrphan (34), blockOrphanNoTranscript (35); Story 6.1 added recordStoryRetro (36)
+            // De-cruft 2026-05-30: recordAgentInvoke + recordPrCloseAction were
+            // removed (unwired dead code — registered but never called on any runtime
+            // path; the Story 4.12/5.3 wiring that would have called them was mooted
+            // by the stateless-workflow pivot). 38 → 36.
+            expect(toolNames).not.toContain("recordAgentInvoke");
+            expect(toolNames).not.toContain("recordPrCloseAction");
+            // Story 6.4 added acceptProposal (the /accept-proposal gate). 36 → 37.
+            expect(toolNames).toContain("acceptProposal");
+            expect(toolNames.length).toBe(37);
         }
         finally {
             await client.close();

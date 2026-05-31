@@ -45,4 +45,12 @@ export declare function gh(opts: {
     pluginRootOverride?: string;
     /** Optional stdin body piped to the subprocess. Supported by execa natively. */
     input?: string;
+    /**
+     * Optional working directory for the spawned `gh` process. `gh` resolves the
+     * target GitHub repo from its cwd; when the dev operates in an isolated
+     * worktree (Story 8.16) the caller passes the worktree path so `gh pr create`
+     * targets the intended repo rather than the orchestrating checkout. Omitted →
+     * `gh` inherits the parent process cwd (the prior behaviour).
+     */
+    cwd?: string;
 }): Promise<GhCallResult>;

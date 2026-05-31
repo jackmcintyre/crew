@@ -49,8 +49,8 @@ export async function applyReviewerLabels(opts) {
     const role = opts.role ?? "generalist-reviewer";
     const pluginRoot = opts.pluginRootOverride ?? getPluginRoot();
     const execaImpl = opts.execaImpl ?? defaultExeca;
-    // Step 1: Read the persisted reviewer-result.json file.
-    const resultFile = await readReviewerResultFile(opts.targetRepoRoot, opts.sessionUlid);
+    // Step 1: Read the persisted reviewer-result.json file (Story 8.15: per-ref path).
+    const resultFile = await readReviewerResultFile(opts.targetRepoRoot, opts.sessionUlid, opts.ref);
     if (resultFile === null) {
         // File absent — skip silently. processReviewerTranscript surfaces the loud blocker.
         return { next: "skipped-no-session-result" };
