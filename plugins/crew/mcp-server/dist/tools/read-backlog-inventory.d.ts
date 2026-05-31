@@ -30,6 +30,22 @@ export interface BacklogInventoryEntry {
     title: string;
     state: InventoryState;
     withdrawn: boolean;
+    /**
+     * Operator readiness flag (Story 9.1), projected verbatim from the parsed
+     * manifest. Additive: `native-source-only` entries (no manifest yet) read as
+     * `false`, matching the schema default for an unblessed item. The dashboard
+     * (Story 9.5) surfaces this so the operator sees what is blessed at a glance.
+     */
+    ready: boolean;
+    /**
+     * True iff every `depends_on` ref is present in `<root>/.crew/state/done/`
+     * (Story 9.5). Computed by the same stat-based check `listClaimableTodos`
+     * uses. An item with no dependencies is trivially deps-ready. Carried so a
+     * reader can distinguish a blessed-but-blocked item (ready, deps NOT ready)
+     * from a claimable one. `native-source-only` entries read as deps-ready
+     * (they carry no `depends_on` until scanned).
+     */
+    depsReady: boolean;
 }
 /** Output shape returned by `readBacklogInventory`. */
 export interface ReadBacklogInventoryOutput {

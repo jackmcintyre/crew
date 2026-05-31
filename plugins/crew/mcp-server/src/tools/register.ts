@@ -11,6 +11,10 @@ import { acceptProposal } from "./accept-proposal.js";
 import { gatherRetroInputs } from "./gather-retro-inputs.js";
 import { listClaimableTodos } from "./list-claimable-todos.js";
 import { mintSessionUlid } from "./mint-session-ulid.js";
+import {
+  getBacklogDashboard,
+  renderBacklogDashboard,
+} from "./render-backlog-dashboard.js";
 import { getStatus, renderStatus } from "./get-status.js";
 import { getTeamSnapshot, renderTeamSnapshot } from "./get-team-snapshot.js";
 import { instantiatePersona } from "./instantiate-persona.js";
@@ -492,6 +496,49 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         const result = await readBacklogInventory(args);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 9.5 — getBacklogDashboard: the cockpit read surface. Reads the live
+  // backlog inventory once (the only IO) and renders a grouped-by-epic view
+  // with each item's state, readiness (Story 9.1 flag), and claimability
+  // (deps-ready AND ready, un-withdrawn to-do). Read-only — mutates nothing;
+  // mirrors the getStatus getter/renderStatus pure-render split. The dashboard
+  // is generated output, never a hand-maintained list.
+  // MalformedExecutionManifestError surfaces verbatim (not caught here).
+  server.registerTool({
+    name: "getBacklogDashboard",
+    description:
+      "Render the outstanding backlog as grouped-by-epic tables generated from live state (Story 9.5). " +
+      "Read-only — reads the backlog inventory and returns text grouping each item by epic with its " +
+      "state, readiness (the Story 9.1 ready flag), and claimability (dependency-satisfied AND ready, " +
+      "an un-withdrawn to-do item). Never mutates state and never writes a file. " +
+      "MalformedExecutionManifestError surfaces verbatim. Used by the /crew:board skill.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+      },
+      required: ["targetRepoRoot"],
+    },
+    handler: async (args) => {
+      const root = z.string().min(1).parse(args.targetRepoRoot);
+      try {
+        const snapshot = await getBacklogDashboard({ targetRepoRoot: root });
+        return {
+          content: [
+            { type: "text" as const, text: renderBacklogDashboard(snapshot) },
+          ],
         };
       } catch (err) {
         if (err instanceof DomainError) {

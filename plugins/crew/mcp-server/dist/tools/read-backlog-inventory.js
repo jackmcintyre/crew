@@ -58,6 +58,7 @@ export async function readBacklogInventory(rawInput) {
     const workspace = await resolveWorkspace({ targetRepoRoot });
     const isNative = workspace.activeAdapterName === "native";
     const stateRoot = path.join(targetRepoRoot, ".crew", "state");
+    const doneDir = path.join(stateRoot, "done");
     const inventory = [];
     const seenRefs = new Set();
     // Scan each state directory.
@@ -81,11 +82,24 @@ export async function readBacklogInventory(rawInput) {
             // schema failure. Per the skill's `MalformedExecutionManifestError` failure
             // mode, the tool surfaces the error verbatim (not caught here).
             const manifest = parseExecutionManifest(parsed, { absPath });
+            // depsReady mirrors listClaimableTodos: every dep present in done/.
+            let depsReady = true;
+            for (const dep of manifest.depends_on) {
+                try {
+                    await fs.stat(path.join(doneDir, `${dep}.yaml`));
+                }
+                catch {
+                    depsReady = false;
+                    break;
+                }
+            }
             inventory.push({
                 ref: manifest.ref,
                 title: manifest.title,
                 state: stateName,
                 withdrawn: manifest.withdrawn,
+                ready: manifest.ready,
+                depsReady,
             });
             seenRefs.add(manifest.ref);
         }
@@ -117,6 +131,8 @@ export async function readBacklogInventory(rawInput) {
                 title,
                 state: "native-source-only",
                 withdrawn: false,
+                ready: false,
+                depsReady: true,
             });
         }
     }

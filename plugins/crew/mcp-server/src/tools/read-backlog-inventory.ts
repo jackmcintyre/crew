@@ -39,6 +39,22 @@ export interface BacklogInventoryEntry {
   title: string;
   state: InventoryState;
   withdrawn: boolean;
+  /**
+   * Operator readiness flag (Story 9.1), projected verbatim from the parsed
+   * manifest. Additive: `native-source-only` entries (no manifest yet) read as
+   * `false`, matching the schema default for an unblessed item. The dashboard
+   * (Story 9.5) surfaces this so the operator sees what is blessed at a glance.
+   */
+  ready: boolean;
+  /**
+   * True iff every `depends_on` ref is present in `<root>/.crew/state/done/`
+   * (Story 9.5). Computed by the same stat-based check `listClaimableTodos`
+   * uses. An item with no dependencies is trivially deps-ready. Carried so a
+   * reader can distinguish a blessed-but-blocked item (ready, deps NOT ready)
+   * from a claimable one. `native-source-only` entries read as deps-ready
+   * (they carry no `depends_on` until scanned).
+   */
+  depsReady: boolean;
 }
 
 /** Output shape returned by `readBacklogInventory`. */
@@ -85,6 +101,7 @@ export async function readBacklogInventory(
   const isNative = workspace.activeAdapterName === "native";
 
   const stateRoot = path.join(targetRepoRoot, ".crew", "state");
+  const doneDir = path.join(stateRoot, "done");
   const inventory: BacklogInventoryEntry[] = [];
   const seenRefs = new Set<string>();
 
@@ -112,11 +129,24 @@ export async function readBacklogInventory(
       // mode, the tool surfaces the error verbatim (not caught here).
       const manifest = parseExecutionManifest(parsed, { absPath });
 
+      // depsReady mirrors listClaimableTodos: every dep present in done/.
+      let depsReady = true;
+      for (const dep of manifest.depends_on) {
+        try {
+          await fs.stat(path.join(doneDir, `${dep}.yaml`));
+        } catch {
+          depsReady = false;
+          break;
+        }
+      }
+
       inventory.push({
         ref: manifest.ref,
         title: manifest.title,
         state: stateName,
         withdrawn: manifest.withdrawn,
+        ready: manifest.ready,
+        depsReady,
       });
       seenRefs.add(manifest.ref);
     }
@@ -149,6 +179,8 @@ export async function readBacklogInventory(
         title,
         state: "native-source-only",
         withdrawn: false,
+        ready: false,
+        depsReady: true,
       });
     }
   }
