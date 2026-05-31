@@ -125,6 +125,28 @@ export declare class StandardsDocMalformedError extends DomainError {
     });
 }
 /**
+ * `docs/discipline-rules.yaml` was found but failed the parser: either YAML
+ * syntax is invalid, a required rule field is missing or wrongly typed, or an
+ * unknown key was present (the schema is `.strict()`). The `zodMessage` field
+ * carries the offending Zod message (or the YAML parse error); `yamlPath`
+ * names the offending rule path so the operator can find it.
+ *
+ * Mirrors `StandardsDocMalformedError`'s constructor shape. Distinct from an
+ * absent registry — absence is NOT an error (it parses to an empty registry).
+ *
+ * (Story 6.5 — FR62)
+ */
+export declare class RuleRegistryMalformedError extends DomainError {
+    readonly sourcePath: string;
+    readonly yamlPath: string;
+    readonly zodMessage: string;
+    constructor(opts: {
+        sourcePath: string;
+        yamlPath: string;
+        zodMessage: string;
+    });
+}
+/**
  * An agent operating under a known role attempted to invoke an MCP tool
  * whose name is not in the role's tools_allow. Caught at the
  * CallToolRequestSchema handler before the tool's handler runs.
@@ -1290,6 +1312,21 @@ export declare class MalformedSkillInvokeInputError extends DomainError {
     });
 }
 /**
+ * A `skill-create` (or `skill-supersede` replacement) apply handler refused
+ * because a file already exists at the proposed skill path. Skill creation
+ * never overwrites — a collision means the operator is trying to create a
+ * skill that already lives at that path; they should revise or supersede it
+ * instead. Thrown BEFORE any write so the working tree is left untouched.
+ *
+ * Story 6.7 — skill proposal application.
+ */
+export declare class SkillAlreadyExistsError extends DomainError {
+    readonly skillPath: string;
+    constructor(opts: {
+        skillPath: string;
+    });
+}
+/**
  * `computeSkillEffectiveness` was called with a `window` value that is not a
  * positive integer (`0`, negative, non-integer, `NaN`, or non-finite). The
  * window bounds which most-recent `skill.invoke` events are considered; a
@@ -1303,5 +1340,20 @@ export declare class SkillEffectivenessWindowInvalidError extends DomainError {
     constructor(opts: {
         window: number;
         reason: string;
+    });
+}
+/**
+ * A `skill-revise`, `skill-retire`, or `skill-supersede` apply handler refused
+ * because the targeted skill file does not exist at the live path. You cannot
+ * revise, retire, or supersede a skill that was never created (or has already
+ * been archived). Thrown BEFORE any write so the working tree is left
+ * untouched.
+ *
+ * Story 6.7 — skill proposal application.
+ */
+export declare class SkillNotFoundError extends DomainError {
+    readonly skillPath: string;
+    constructor(opts: {
+        skillPath: string;
     });
 }

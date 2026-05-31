@@ -49,6 +49,7 @@ import * as path from "node:path";
 import { parse as yamlParse } from "yaml";
 import { parseExecutionManifest, } from "../schemas/execution-manifest.js";
 import { TelemetryEventSchema } from "../schemas/telemetry-events.js";
+import { parseRuleRegistry } from "../schemas/discipline-rules.js";
 /** Month-bucket filename pattern matching the Story 1.5 logger contract. */
 const TELEMETRY_FILE_REGEX = /\.jsonl$/;
 /**
@@ -191,9 +192,16 @@ async function gatherPriorProposals(targetRepoRoot) {
 // rule registry
 // ---------------------------------------------------------------------------
 /**
- * Read `<targetRepoRoot>/docs/discipline-rules.yaml` via the
- * comment-preserving `yaml` package, or return `null` when absent.
- * Absence is NOT an error (the registry lands in Story 6.5).
+ * Read `<targetRepoRoot>/docs/discipline-rules.yaml` through the validated,
+ * comment-preserving parser (`parseRuleRegistry`, Story 6.5), or return `null`
+ * when absent. Absence is NOT an error — null-tolerance matches the analyst's
+ * `ruleRegistry: null` contract. A present-but-malformed registry now raises a
+ * typed `RuleRegistryMalformedError` (a corrupt registry is a hard stop, like a
+ * corrupt done/ manifest — not a silently-swallowed line).
+ *
+ * Returns the schema-validated `{ rules }` view (not the comment-carrying
+ * Document) — the analyst reasons over the rules, the apply handler is the only
+ * caller that needs the comment-preserving Document.
  */
 async function gatherRuleRegistry(targetRepoRoot) {
     const registryPath = path.join(targetRepoRoot, "docs", "discipline-rules.yaml");
@@ -207,7 +215,8 @@ async function gatherRuleRegistry(targetRepoRoot) {
         }
         throw err;
     }
-    return yamlParse(raw);
+    // Validated parse — raises RuleRegistryMalformedError on a bad registry.
+    return parseRuleRegistry(raw, "docs/discipline-rules.yaml").data;
 }
 // ---------------------------------------------------------------------------
 // helpers

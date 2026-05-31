@@ -9,14 +9,14 @@
  * stamp, and records telemetry. All kind-specific behaviour lives behind this
  * handler interface.
  *
- * **This story ships ONLY the gate machinery.** The production registry is
- * deliberately EMPTY — every kind fails closed via
- * `ProposalKindNotApplicableYetError` (AC6). The real handlers are registered
- * by later stories:
+ * **Story 6.4 shipped the gate machinery with an EMPTY production registry.**
+ * Each kind's real handler is registered by its story; an unregistered kind
+ * still fails closed via `ProposalKindNotApplicableYetError` (AC6). Status:
  *
- *   - `rule` / `rule-retirement`                      → Story 6.5
+ *   - `rule`                                          → Story 6.5 (REGISTERED)
+ *   - `rule-retirement`                               → Story 6.6
  *   - `skill-create` / `skill-revise` /
- *     `skill-supersede` / `skill-retire`              → Story 6.7
+ *     `skill-supersede` / `skill-retire`              → Story 6.7 (REGISTERED)
  *   - `team-change`                                   → Story 6.10
  *   - persona-append (when 6.9 routes through here)   → Story 6.9
  *
@@ -29,6 +29,8 @@
  */
 
 import type { RetroProposal } from "../schemas/retro-proposal.js";
+import { makeRuleApplyHandler } from "./apply-rule-proposal.js";
+import { createSkillProposalHandlers } from "./apply-skill-proposal.js";
 
 /**
  * Context threaded into a handler's `previewDiff`/`apply` calls. The gate owns
@@ -87,15 +89,38 @@ export type ProposalApplyRegistry = Map<
 >;
 
 /**
- * The PRODUCTION registry — empty in Story 6.4 by design (AC6). Later stories
- * register their handlers into this map. The gate defaults to this registry
- * when no `handlers` injection is provided.
+ * The PRODUCTION registry. Story 6.4 shipped it EMPTY; Story 6.5 registers the
+ * `rule` handler and Story 6.7 the `skill-*` handlers. Every OTHER kind still
+ * fails closed via `ProposalKindNotApplicableYetError` until its handler lands
+ * (see `KIND_TO_STORY`). The gate defaults to this registry when no `handlers`
+ * injection is provided.
  *
- * It is intentionally a fresh empty map (not a shared mutable singleton) per
- * import so a test that mutates a registry never leaks into production.
+ * Registered handlers:
+ *   - `rule`                                          → Story 6.5
+ *   - `skill-create` / `skill-revise` /
+ *     `skill-supersede` / `skill-retire`              → Story 6.7
+ *
+ * Still fail closed (no handler) until their story registers them:
+ *   - `rule-retirement`                               → Story 6.6
+ *   - `team-change`                                   → Story 6.10
+ *   - persona-append (when 6.9 routes through here)   → Story 6.9
+ *
+ * It is intentionally a fresh map (not a shared mutable singleton) per import so
+ * a test that mutates a registry never leaks into production; the `rule` handler
+ * is constructed fresh per call, and the `skill-*` handlers use the default
+ * `Date` clock (tests that need a deterministic `introduced_at` / `retired_at`
+ * build their own registry from `createSkillProposalHandlers({ now })` and
+ * inject it).
  */
 export function createProductionRegistry(): ProposalApplyRegistry {
-  return new Map();
+  const registry: ProposalApplyRegistry = new Map();
+  // Story 6.5 — the first real handler.
+  registry.set("rule", makeRuleApplyHandler());
+  // Story 6.7 — the skill-* handlers.
+  for (const handler of createSkillProposalHandlers()) {
+    registry.set(handler.type, handler);
+  }
+  return registry;
 }
 
 /**
@@ -106,7 +131,10 @@ export function createProductionRegistry(): ProposalApplyRegistry {
  */
 export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
   rule: "Story 6.5",
-  "rule-retirement": "Story 6.5",
+  // Repointed from 6.5 → 6.6: the rule-retirement apply path lands in Story 6.6
+  // (this story ships only the `rule` handler). Until 6.6 lands its handler,
+  // accepting a `rule-retirement` proposal fails closed with this story pointer.
+  "rule-retirement": "Story 6.6",
   "skill-create": "Story 6.7",
   "skill-revise": "Story 6.7",
   "skill-supersede": "Story 6.7",

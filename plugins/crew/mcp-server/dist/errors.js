@@ -160,6 +160,30 @@ export class StandardsDocMalformedError extends DomainError {
     }
 }
 /**
+ * `docs/discipline-rules.yaml` was found but failed the parser: either YAML
+ * syntax is invalid, a required rule field is missing or wrongly typed, or an
+ * unknown key was present (the schema is `.strict()`). The `zodMessage` field
+ * carries the offending Zod message (or the YAML parse error); `yamlPath`
+ * names the offending rule path so the operator can find it.
+ *
+ * Mirrors `StandardsDocMalformedError`'s constructor shape. Distinct from an
+ * absent registry — absence is NOT an error (it parses to an empty registry).
+ *
+ * (Story 6.5 — FR62)
+ */
+export class RuleRegistryMalformedError extends DomainError {
+    sourcePath;
+    yamlPath;
+    zodMessage;
+    constructor(opts) {
+        super(`docs/discipline-rules.yaml at ${opts.sourcePath} is malformed at '${opts.yamlPath}': ${opts.zodMessage}. ` +
+            `See the schema in mcp-server/src/schemas/discipline-rules.ts. (FR62)`);
+        this.sourcePath = opts.sourcePath;
+        this.yamlPath = opts.yamlPath;
+        this.zodMessage = opts.zodMessage;
+    }
+}
+/**
  * An agent operating under a known role attempted to invoke an MCP tool
  * whose name is not in the role's tools_allow. Caught at the
  * CallToolRequestSchema handler before the tool's handler runs.
@@ -1530,6 +1554,24 @@ export class MalformedSkillInvokeInputError extends DomainError {
     }
 }
 /**
+ * A `skill-create` (or `skill-supersede` replacement) apply handler refused
+ * because a file already exists at the proposed skill path. Skill creation
+ * never overwrites — a collision means the operator is trying to create a
+ * skill that already lives at that path; they should revise or supersede it
+ * instead. Thrown BEFORE any write so the working tree is left untouched.
+ *
+ * Story 6.7 — skill proposal application.
+ */
+export class SkillAlreadyExistsError extends DomainError {
+    skillPath;
+    constructor(opts) {
+        super(`Cannot create a skill at '${opts.skillPath}' — a file already exists there. ` +
+            `Skill creation never overwrites; revise or supersede the existing skill ` +
+            `instead. No file was written. (Story 6.7)`);
+        this.skillPath = opts.skillPath;
+    }
+}
+/**
  * `computeSkillEffectiveness` was called with a `window` value that is not a
  * positive integer (`0`, negative, non-integer, `NaN`, or non-finite). The
  * window bounds which most-recent `skill.invoke` events are considered; a
@@ -1545,5 +1587,23 @@ export class SkillEffectivenessWindowInvalidError extends DomainError {
             `(Story 6.8)`);
         this.window = opts.window;
         this.reason = opts.reason;
+    }
+}
+/**
+ * A `skill-revise`, `skill-retire`, or `skill-supersede` apply handler refused
+ * because the targeted skill file does not exist at the live path. You cannot
+ * revise, retire, or supersede a skill that was never created (or has already
+ * been archived). Thrown BEFORE any write so the working tree is left
+ * untouched.
+ *
+ * Story 6.7 — skill proposal application.
+ */
+export class SkillNotFoundError extends DomainError {
+    skillPath;
+    constructor(opts) {
+        super(`Cannot apply a skill change targeting '${opts.skillPath}' — no skill file ` +
+            `exists at that path. It may never have been created or may already be ` +
+            `archived. No file was written. (Story 6.7)`);
+        this.skillPath = opts.skillPath;
     }
 }
