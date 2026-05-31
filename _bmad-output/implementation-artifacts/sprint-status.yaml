@@ -158,7 +158,7 @@ development_status:
   epic-9-retrospective: optional
   epic-10: in-progress
   10-1-enrich-native-ac-verification-block: ready-for-dev
-  10-2-native-tasks-ac-refs-cited-sources-and-narrative: backlog
+  10-2-native-tasks-ac-refs-cited-sources-and-narrative: ready-for-dev
   10-3-complete-tier-0-discipline-validator: backlog
   10-4-plumb-risk-tier-into-native-draft: backlog
   10-5-bmad-to-native-ingest-seam: backlog
