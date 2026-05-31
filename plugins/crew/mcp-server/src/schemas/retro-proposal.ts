@@ -93,14 +93,46 @@ const PathInsideRepoSchema = z
 // ---------------------------------------------------------------------------
 
 /**
- * Shared base shared across every variant — `id`, `created_at`, `rationale`.
+ * The `applied` block stamped onto an individual proposal by the
+ * `/accept-proposal` gate after a successful confirmed apply (Story 6.4 AC3).
+ *
+ * - `applied_at`      — ISO-8601 UTC timestamp of the apply.
+ * - `applied_sha`     — the commit sha from the git wrapper (single commit
+ *                       carrying the handler's changed paths + the proposal
+ *                       file stamp).
+ * - `idempotency_key` — the proposal's stable `id` (a ULID). Re-runs match
+ *                       on this persisted block; the gate returns
+ *                       `already-applied` without re-applying (AC4).
+ *
+ * `.strict()` — no silent acceptance of unknown keys, consistent with every
+ * other variant. The block is OPTIONAL on the base: existing proposal files
+ * written before Story 6.4 (no `applied` key) still parse cleanly.
+ */
+export const AppliedBlockSchema = z
+  .object({
+    applied_at: IsoTimestampSchema,
+    applied_sha: z.string().min(1),
+    idempotency_key: UlidSchema,
+  })
+  .strict();
+
+export type AppliedBlock = z.infer<typeof AppliedBlockSchema>;
+
+/**
+ * Shared base shared across every variant — `id`, `created_at`, `rationale`,
+ * plus the optional `applied` stamp (Story 6.4).
  * `z.object` (no `.strict()` here) so the per-variant `.extend(...).strict()`
  * applies on the final shape (zod merges + strict on extend correctly).
+ *
+ * `applied` is additive and optional: a proposal authored by `writeRetroProposal`
+ * carries no `applied` key, and `parseRetroProposalFile` round-trips it cleanly
+ * either way. The `/accept-proposal` gate is the only writer of this block.
  */
 const ProposalBase = z.object({
   id: UlidSchema,
   created_at: IsoTimestampSchema,
   rationale: z.string().min(1),
+  applied: AppliedBlockSchema.optional(),
 });
 
 /**

@@ -7,6 +7,7 @@ import { claimStory } from "./claim-story.js";
 import { completeStory } from "./complete-story.js";
 import { recordStoryRetro } from "./record-story-retro.js";
 import { writeRetroProposal } from "./write-retro-proposal.js";
+import { acceptProposal } from "./accept-proposal.js";
 import { gatherRetroInputs } from "./gather-retro-inputs.js";
 import { listClaimableTodos } from "./list-claimable-todos.js";
 import { mintSessionUlid } from "./mint-session-ulid.js";
@@ -648,6 +649,71 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
           })
           .parse(args);
         const result = await writeRetroProposal(parsed);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        if (err instanceof DomainError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ error: err.name, message: err.message }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    },
+  });
+
+  // Story 6.4 — acceptProposal: the /accept-proposal <id> diff-then-confirm gate
+  // (FR61, NFR10). Two-phase, deterministic seam: a preview call (confirm absent)
+  // returns the handler's diff with NO mutation; a confirm call (confirm: true)
+  // runs the registered handler, commits the handler's changed paths + the
+  // proposal-file `applied` stamp in a single git-wrapper commit, emits one
+  // retro.proposal.applied telemetry event, and returns the sha. Re-running an
+  // already-applied id is an idempotent no-op (already-applied). In Story 6.4
+  // the production handler registry is EMPTY — every kind fails closed with
+  // ProposalKindNotApplicableYetError (the first real handler ships in Story 6.5).
+  server.registerTool({
+    name: "acceptProposal",
+    description:
+      "The /accept-proposal <id> diff-then-confirm gate (Story 6.4, FR61, NFR10). " +
+      "Two-phase, deterministic: called without confirm it returns { status: 'preview', diff } " +
+      "with NO file write, commit, or telemetry; called with confirm:true it runs the registered " +
+      "per-kind apply handler, commits the handler's changed paths + the proposal-file `applied` " +
+      "stamp in a SINGLE git-wrapper commit, emits one retro.proposal.applied telemetry event, " +
+      "and returns { status: 'applied', appliedSha, idempotencyKey }. Re-running an already-applied " +
+      "id (even with confirm:true) is an idempotent no-op returning { status: 'already-applied', " +
+      "appliedSha, appliedAt } — no handler call, no write, no commit, no telemetry. " +
+      "Throws ProposalNotFoundError (id matched no proposal across all files), " +
+      "AmbiguousProposalIdError (id matched in two files — a bug, ids are unique), and " +
+      "ProposalKindNotApplicableYetError (no registered handler for the kind — fail-closed; in " +
+      "Story 6.4 the production registry is empty so every kind fails closed). Story 6.4.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetRepoRoot: { type: "string" },
+        proposalId: { type: "string" },
+        confirm: { type: "boolean" },
+        role: { type: "string" },
+      },
+      required: ["targetRepoRoot", "proposalId"],
+    },
+    handler: async (args) => {
+      const parsed = z
+        .object({
+          targetRepoRoot: z.string().min(1),
+          proposalId: z.string().min(1),
+          confirm: z.boolean().optional(),
+          role: z.string().optional(),
+        })
+        .parse(args);
+      try {
+        const result = await acceptProposal(parsed);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

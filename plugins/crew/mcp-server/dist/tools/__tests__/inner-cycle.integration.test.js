@@ -487,7 +487,9 @@ describe("AC4(g): tool count and required tools present", () => {
             // by the stateless-workflow pivot). 38 → 36.
             expect(toolNames).not.toContain("recordAgentInvoke");
             expect(toolNames).not.toContain("recordPrCloseAction");
-            expect(toolNames.length).toBe(36);
+            // Story 6.4 added acceptProposal (the /accept-proposal gate). 36 → 37.
+            expect(toolNames).toContain("acceptProposal");
+            expect(toolNames.length).toBe(37);
         }
         finally {
             await client.close();

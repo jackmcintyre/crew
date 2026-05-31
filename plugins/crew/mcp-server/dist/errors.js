@@ -1256,6 +1256,69 @@ export class MalformedRetroProposalError extends DomainError {
     }
 }
 /**
+ * `acceptProposal`'s id locator scanned every `.crew/retro-proposals/*.md`
+ * file and found no proposal whose `id` matches the requested id. Names
+ * the id and how many files were scanned so the operator can tell an
+ * empty/absent proposals dir apart from a genuine miss.
+ *
+ * (Story 6.4 AC1)
+ */
+export class ProposalNotFoundError extends DomainError {
+    proposalId;
+    filesScanned;
+    constructor(opts) {
+        super(`No retro proposal with id '${opts.proposalId}' found ` +
+            `(scanned ${opts.filesScanned} proposal file${opts.filesScanned === 1 ? "" : "s"} ` +
+            `under .crew/retro-proposals/). Check the id against the proposal markdown file, ` +
+            `or run /crew:retro to produce proposals first. (Story 6.4 AC1)`);
+        this.proposalId = opts.proposalId;
+        this.filesScanned = opts.filesScanned;
+    }
+}
+/**
+ * `acceptProposal`'s id locator found the same proposal id in two distinct
+ * proposal files. Proposal ids are minted unique (ULIDs), so a collision is
+ * a bug — never a silent pick-first. Names both files so the operator can
+ * remove or fix the duplicate.
+ *
+ * (Story 6.4 AC1)
+ */
+export class AmbiguousProposalIdError extends DomainError {
+    proposalId;
+    matchingFiles;
+    constructor(opts) {
+        super(`Proposal id '${opts.proposalId}' matched in multiple proposal files: ` +
+            `[${opts.matchingFiles.join(", ")}]. Proposal ids are minted unique — ` +
+            `a collision is a bug, not a legitimate pick-first. Remove or fix the ` +
+            `duplicate. (Story 6.4 AC1)`);
+        this.proposalId = opts.proposalId;
+        this.matchingFiles = [...opts.matchingFiles];
+    }
+}
+/**
+ * `acceptProposal` dispatched a located proposal to the handler registry but
+ * found no registered handler for the proposal's kind. Each kind maps to the
+ * story that will ship its apply path so the message is actionable. Raised
+ * BEFORE any preview is rendered or any state is touched — the gate fails
+ * closed rather than half-applying an un-handled kind.
+ *
+ * In this story (6.4) the production registry is empty by design — every
+ * kind fails closed here. The first real handler arrives in Story 6.5.
+ *
+ * (Story 6.4 AC6)
+ */
+export class ProposalKindNotApplicableYetError extends DomainError {
+    kind;
+    story;
+    constructor(opts) {
+        super(`Accepting a proposal of kind '${opts.kind}' is not supported yet — ` +
+            `its apply path ships in ${opts.story}. No file was written, no commit ` +
+            `was made, and the proposal was not stamped. (Story 6.4 AC6)`);
+        this.kind = opts.kind;
+        this.story = opts.story;
+    }
+}
+/**
  * `writeRetroProposal` refused to overwrite an existing proposal file —
  * proposals are immutable artifacts keyed by their ISO-8601 timestamp.
  * A collision means the caller (the retro-analyst subagent) re-used a

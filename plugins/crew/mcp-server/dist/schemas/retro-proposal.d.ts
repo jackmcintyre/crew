@@ -40,6 +40,28 @@
  */
 import { z } from "zod";
 /**
+ * The `applied` block stamped onto an individual proposal by the
+ * `/accept-proposal` gate after a successful confirmed apply (Story 6.4 AC3).
+ *
+ * - `applied_at`      — ISO-8601 UTC timestamp of the apply.
+ * - `applied_sha`     — the commit sha from the git wrapper (single commit
+ *                       carrying the handler's changed paths + the proposal
+ *                       file stamp).
+ * - `idempotency_key` — the proposal's stable `id` (a ULID). Re-runs match
+ *                       on this persisted block; the gate returns
+ *                       `already-applied` without re-applying (AC4).
+ *
+ * `.strict()` — no silent acceptance of unknown keys, consistent with every
+ * other variant. The block is OPTIONAL on the base: existing proposal files
+ * written before Story 6.4 (no `applied` key) still parse cleanly.
+ */
+export declare const AppliedBlockSchema: z.ZodObject<{
+    applied_at: z.ZodString;
+    applied_sha: z.ZodString;
+    idempotency_key: z.ZodString;
+}, z.core.$strict>;
+export type AppliedBlock = z.infer<typeof AppliedBlockSchema>;
+/**
  * `rule` — propose a new operator-readable rule.
  * (Story 6.3 AC3 / FR59)
  */
@@ -47,6 +69,11 @@ export declare const RuleProposalSchema: z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"rule">;
     text: z.ZodString;
     target_failure_class: z.ZodString;
@@ -64,6 +91,11 @@ export declare const RuleRetirementProposalSchema: z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"rule-retirement">;
     target_rule_id: z.ZodString;
     fire_count_over_window: z.ZodNumber;
@@ -80,6 +112,11 @@ export declare const SkillCreateProposalSchema: z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     proposed_path: z.ZodString;
     frontmatter_description: z.ZodString;
     body: z.ZodString;
@@ -93,6 +130,11 @@ export declare const SkillReviseProposalSchema: z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"skill-revise">;
     target_skill_path: z.ZodString;
     revised_body: z.ZodString;
@@ -120,6 +162,11 @@ export declare const SkillSupersedeProposalSchema: z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"skill-supersede">;
     superseded_skill_path: z.ZodString;
     replacement: z.ZodObject<{
@@ -143,6 +190,11 @@ export declare const SkillRetireProposalSchema: z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"skill-retire">;
     target_skill_path: z.ZodString;
     last_invoked_at: z.ZodNullable<z.ZodString>;
@@ -158,6 +210,11 @@ export declare const TeamChangeProposalSchema: z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"team-change">;
     action: z.ZodEnum<{
         hire: "hire";
@@ -184,6 +241,11 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"rule">;
     text: z.ZodString;
     target_failure_class: z.ZodString;
@@ -196,6 +258,11 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"rule-retirement">;
     target_rule_id: z.ZodString;
     fire_count_over_window: z.ZodNumber;
@@ -207,6 +274,11 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     proposed_path: z.ZodString;
     frontmatter_description: z.ZodString;
     body: z.ZodString;
@@ -215,6 +287,11 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"skill-revise">;
     target_skill_path: z.ZodString;
     revised_body: z.ZodString;
@@ -226,6 +303,11 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"skill-supersede">;
     superseded_skill_path: z.ZodString;
     replacement: z.ZodObject<{
@@ -237,6 +319,11 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"skill-retire">;
     target_skill_path: z.ZodString;
     last_invoked_at: z.ZodNullable<z.ZodString>;
@@ -244,6 +331,11 @@ export declare const RetroProposalSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     created_at: z.ZodString;
     rationale: z.ZodString;
+    applied: z.ZodOptional<z.ZodObject<{
+        applied_at: z.ZodString;
+        applied_sha: z.ZodString;
+        idempotency_key: z.ZodString;
+    }, z.core.$strict>>;
     type: z.ZodLiteral<"team-change">;
     action: z.ZodEnum<{
         hire: "hire";
@@ -280,6 +372,11 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         id: z.ZodString;
         created_at: z.ZodString;
         rationale: z.ZodString;
+        applied: z.ZodOptional<z.ZodObject<{
+            applied_at: z.ZodString;
+            applied_sha: z.ZodString;
+            idempotency_key: z.ZodString;
+        }, z.core.$strict>>;
         type: z.ZodLiteral<"rule">;
         text: z.ZodString;
         target_failure_class: z.ZodString;
@@ -292,6 +389,11 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         id: z.ZodString;
         created_at: z.ZodString;
         rationale: z.ZodString;
+        applied: z.ZodOptional<z.ZodObject<{
+            applied_at: z.ZodString;
+            applied_sha: z.ZodString;
+            idempotency_key: z.ZodString;
+        }, z.core.$strict>>;
         type: z.ZodLiteral<"rule-retirement">;
         target_rule_id: z.ZodString;
         fire_count_over_window: z.ZodNumber;
@@ -303,6 +405,11 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         id: z.ZodString;
         created_at: z.ZodString;
         rationale: z.ZodString;
+        applied: z.ZodOptional<z.ZodObject<{
+            applied_at: z.ZodString;
+            applied_sha: z.ZodString;
+            idempotency_key: z.ZodString;
+        }, z.core.$strict>>;
         proposed_path: z.ZodString;
         frontmatter_description: z.ZodString;
         body: z.ZodString;
@@ -311,6 +418,11 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         id: z.ZodString;
         created_at: z.ZodString;
         rationale: z.ZodString;
+        applied: z.ZodOptional<z.ZodObject<{
+            applied_at: z.ZodString;
+            applied_sha: z.ZodString;
+            idempotency_key: z.ZodString;
+        }, z.core.$strict>>;
         type: z.ZodLiteral<"skill-revise">;
         target_skill_path: z.ZodString;
         revised_body: z.ZodString;
@@ -322,6 +434,11 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         id: z.ZodString;
         created_at: z.ZodString;
         rationale: z.ZodString;
+        applied: z.ZodOptional<z.ZodObject<{
+            applied_at: z.ZodString;
+            applied_sha: z.ZodString;
+            idempotency_key: z.ZodString;
+        }, z.core.$strict>>;
         type: z.ZodLiteral<"skill-supersede">;
         superseded_skill_path: z.ZodString;
         replacement: z.ZodObject<{
@@ -333,6 +450,11 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         id: z.ZodString;
         created_at: z.ZodString;
         rationale: z.ZodString;
+        applied: z.ZodOptional<z.ZodObject<{
+            applied_at: z.ZodString;
+            applied_sha: z.ZodString;
+            idempotency_key: z.ZodString;
+        }, z.core.$strict>>;
         type: z.ZodLiteral<"skill-retire">;
         target_skill_path: z.ZodString;
         last_invoked_at: z.ZodNullable<z.ZodString>;
@@ -340,6 +462,11 @@ export declare const RetroProposalFileSchema: z.ZodObject<{
         id: z.ZodString;
         created_at: z.ZodString;
         rationale: z.ZodString;
+        applied: z.ZodOptional<z.ZodObject<{
+            applied_at: z.ZodString;
+            applied_sha: z.ZodString;
+            idempotency_key: z.ZodString;
+        }, z.core.$strict>>;
         type: z.ZodLiteral<"team-change">;
         action: z.ZodEnum<{
             hire: "hire";

@@ -72,6 +72,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // to tmpdir via raw fs.writeFile/mkdir. Test file only; gatherRetroInputs is
   // a read-only consumer with no production writes.
   path.join(SRC_DIR, "tools", "__tests__", "retro-skill.test.ts"),
+  // Story 6.4: accept-proposal tests inject a FAKE apply handler whose `apply`
+  // writes one known file to tmpdir via raw fs.writeFile (simulating what a real
+  // per-kind handler does in a later story). Test file only; the production gate
+  // routes the proposal-file stamp through writeManagedFile and the commit
+  // through the git wrapper — it performs no raw fs writes itself.
+  path.join(SRC_DIR, "tools", "__tests__", "accept-proposal.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [
