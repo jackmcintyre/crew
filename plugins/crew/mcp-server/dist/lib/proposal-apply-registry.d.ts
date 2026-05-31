@@ -9,15 +9,14 @@
  * stamp, and records telemetry. All kind-specific behaviour lives behind this
  * handler interface.
  *
- * Story 6.4 shipped ONLY the gate machinery with an EMPTY production registry.
- * Story 6.5 registers the FIRST real handler — `rule`. Every other kind still
- * fails closed via `ProposalKindNotApplicableYetError` (AC6) until its handler
- * lands:
+ * **Story 6.4 shipped the gate machinery with an EMPTY production registry.**
+ * Each kind's real handler is registered by its story; an unregistered kind
+ * still fails closed via `ProposalKindNotApplicableYetError` (AC6). Status:
  *
- *   - `rule`                                          → Story 6.5 (DONE)
+ *   - `rule`                                          → Story 6.5 (REGISTERED)
  *   - `rule-retirement`                               → Story 6.6
  *   - `skill-create` / `skill-revise` /
- *     `skill-supersede` / `skill-retire`              → Story 6.7
+ *     `skill-supersede` / `skill-retire`              → Story 6.7 (REGISTERED)
  *   - `team-change`                                   → Story 6.10
  *   - persona-append (when 6.9 routes through here)   → Story 6.9
  *
@@ -77,19 +76,27 @@ export interface ProposalApplyHandler {
 export type ProposalApplyRegistry = Map<RetroProposal["type"], ProposalApplyHandler>;
 /**
  * The PRODUCTION registry. Story 6.4 shipped it EMPTY; Story 6.5 registers the
- * first real handler — `rule` — so accepting a `rule` proposal now actually
- * appends (or edits) a rule in `docs/discipline-rules.yaml`. Every OTHER kind
- * still fails closed via `ProposalKindNotApplicableYetError` until its handler
- * lands (see `KIND_TO_STORY`). The gate defaults to this registry when no
- * `handlers` injection is provided.
+ * `rule` handler and Story 6.7 the `skill-*` handlers. Every OTHER kind still
+ * fails closed via `ProposalKindNotApplicableYetError` until its handler lands
+ * (see `KIND_TO_STORY`). The gate defaults to this registry when no `handlers`
+ * injection is provided.
  *
- * It is intentionally a fresh map (not a shared mutable singleton) per import
- * so a test that mutates a registry never leaks into production; the `rule`
- * handler is likewise constructed fresh per call.
+ * Registered handlers:
+ *   - `rule`                                          → Story 6.5
+ *   - `skill-create` / `skill-revise` /
+ *     `skill-supersede` / `skill-retire`              → Story 6.7
  *
- * Retro-path registrations are grouped here: as later stories land their
- * handlers (`rule-retirement` → 6.6, `skill-*` → 6.7, `team-change` → 6.10)
- * they append a `.set(...)` line below.
+ * Still fail closed (no handler) until their story registers them:
+ *   - `rule-retirement`                               → Story 6.6
+ *   - `team-change`                                   → Story 6.10
+ *   - persona-append (when 6.9 routes through here)   → Story 6.9
+ *
+ * It is intentionally a fresh map (not a shared mutable singleton) per import so
+ * a test that mutates a registry never leaks into production; the `rule` handler
+ * is constructed fresh per call, and the `skill-*` handlers use the default
+ * `Date` clock (tests that need a deterministic `introduced_at` / `retired_at`
+ * build their own registry from `createSkillProposalHandlers({ now })` and
+ * inject it).
  */
 export declare function createProductionRegistry(): ProposalApplyRegistry;
 /**
