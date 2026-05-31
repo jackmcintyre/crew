@@ -47,7 +47,7 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { execa as defaultExeca } from "execa";
 import { DevStoryWorktreeError } from "../errors.js";
-import { GIT_LOCK_CONTENTION, GIT_LOCK_MAX_ATTEMPTS, GIT_LOCK_BACKOFF_MS, defaultGitLockSleep, } from "./git.js";
+import { GIT_LOCK_CONTENTION, GIT_LOCK_MAX_ATTEMPTS, gitLockBackoffMs, defaultGitLockSleep, } from "./git.js";
 // ---------------------------------------------------------------------------
 // Internal: run a git subcommand via execa (mirrors the materialise-pr-branch
 // precedent — git operations bypass the gh allowlist).
@@ -152,7 +152,7 @@ export async function materialiseDevStoryWorktree(opts) {
         GIT_LOCK_CONTENTION.test(add.stderr); attempt++) {
         setupLog.push(`[dev-story-worktree] git worktree add for ${ref} hit lock contention ` +
             `(attempt ${attempt}/${GIT_LOCK_MAX_ATTEMPTS}): ${add.stderr.trim()}. Retrying.`);
-        await sleep(GIT_LOCK_BACKOFF_MS * attempt);
+        await sleep(gitLockBackoffMs(attempt));
         add = await runGit(["-C", targetRepoRoot, "worktree", "add", "--detach", worktreePath, base], targetRepoRoot, execaImpl);
     }
     if (add.exitCode !== 0) {

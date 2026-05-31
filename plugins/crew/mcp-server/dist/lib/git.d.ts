@@ -23,9 +23,24 @@ export declare function assertNoNegativeFlags(args: readonly string[], role: str
 /** stderr substrings that mark a transient git-lock collision worth retrying. */
 export declare const GIT_LOCK_CONTENTION: RegExp;
 /** Total attempts (initial + retries) before surfacing a git-lock failure. */
-export declare const GIT_LOCK_MAX_ATTEMPTS = 5;
-/** Linear backoff between retries: retry 1 → 25ms, 2 → 50ms, … */
-export declare const GIT_LOCK_BACKOFF_MS = 25;
+export declare const GIT_LOCK_MAX_ATTEMPTS = 8;
+/**
+ * Full-jitter exponential backoff for git-lock contention retries (1-based
+ * `attempt`). Returns a delay drawn uniformly from `[0, window)`, where `window`
+ * doubles each attempt up to `GIT_LOCK_BACKOFF_CAP_MS`.
+ *
+ * Why jitter: two concurrent workers that collide on a lock and then back off by
+ * the SAME deterministic delay stay phase-locked and keep colliding — exactly the
+ * lockstep that left the `concurrent-drains-isolation` test red on CI under load
+ * even with a (linear) retry already in place. Randomising each backoff into a
+ * growing window decorrelates the workers so the loser reschedules into a
+ * different slot. This is the standard "full jitter" policy (AWS architecture
+ * blog: "Exponential Backoff And Jitter").
+ *
+ * `random` is injectable so tests can assert the window bounds deterministically;
+ * production uses `Math.random`.
+ */
+export declare function gitLockBackoffMs(attempt: number, random?: () => number): number;
 /** Default backoff sleep (real timer); overridable via a `sleepImpl` test seam. */
 export declare function defaultGitLockSleep(ms: number): Promise<void>;
 /**

@@ -18,7 +18,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { gitCreateBranch, gitCommit, gitPush } from "../git.js";
+import {
+  gitCreateBranch,
+  gitCommit,
+  gitPush,
+  gitLockBackoffMs,
+  GIT_LOCK_MAX_ATTEMPTS,
+} from "../git.js";
 import { GitPushFailedError } from "../../errors.js";
 
 const LOCK = "fatal: could not lock ref 'refs/heads/story/x': Unable to create '.git/refs/heads/story/x.lock': File exists";
@@ -150,6 +156,33 @@ describe("gitPush — lock-contention retry", () => {
     await expect(
       gitPush({ targetRepoRoot: "/repo", branchName: "story/x", role: "generalist-dev", execaImpl, sleepImpl: noopSleep }),
     ).rejects.toBeInstanceOf(GitPushFailedError);
-    expect(pushes).toBe(5);
+    // Caps at the attempt budget — does not retry forever. Tracks the constant
+    // so the assertion follows future tuning of the budget.
+    expect(pushes).toBe(GIT_LOCK_MAX_ATTEMPTS);
+  });
+});
+
+describe("gitLockBackoffMs — full-jitter backoff window", () => {
+  it("draws each backoff from [0, window) so lockstepped workers decorrelate", () => {
+    // With random()=0 the backoff is the window floor (0); with random()→1 it
+    // approaches the window ceiling. The window doubles per 1-based attempt up to
+    // the cap, so two workers on the same attempt land in different slots.
+    const lo = (n: number) => gitLockBackoffMs(n, () => 0);
+    const hi = (n: number) => gitLockBackoffMs(n, () => 0.999999);
+
+    // Floor is always 0 (full jitter); ceiling grows then plateaus at the cap.
+    expect(lo(1)).toBe(0);
+    expect(lo(5)).toBe(0);
+    expect(hi(1)).toBe(24); // window 25  → [0,25)
+    expect(hi(2)).toBe(49); // window 50  → [0,50)
+    expect(hi(3)).toBe(99); // window 100 → [0,100)
+    // Capped at 500ms regardless of how many attempts deep we go.
+    expect(hi(10)).toBe(499);
+    expect(hi(50)).toBe(499);
+  });
+
+  it("never returns a negative delay for the first attempt", () => {
+    expect(gitLockBackoffMs(1, () => 0)).toBeGreaterThanOrEqual(0);
+    expect(gitLockBackoffMs(0, () => 0.5)).toBeGreaterThanOrEqual(0);
   });
 });
