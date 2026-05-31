@@ -78,6 +78,12 @@ const FS_WRITE_WHITELIST = new Set<string>([
   // routes the proposal-file stamp through writeManagedFile and the commit
   // through the git wrapper — it performs no raw fs writes itself.
   path.join(SRC_DIR, "tools", "__tests__", "accept-proposal.test.ts"),
+  // Story 6.5: apply-rule-proposal tests seed a discipline-rules.yaml registry
+  // fixture directly to tmpdir via raw fs.writeFile so the handler can be driven
+  // against a pre-existing registry (and assert comment survival). Test file
+  // only; the real rule apply handler routes its single registry write through
+  // writeManagedFile (with the MCP tool context) and makes no commit of its own.
+  path.join(SRC_DIR, "tools", "__tests__", "apply-rule-proposal.test.ts"),
 ]);
 
 const BANNED_WRITE_BINDINGS = [

@@ -9,12 +9,13 @@
  * stamp, and records telemetry. All kind-specific behaviour lives behind this
  * handler interface.
  *
- * **This story ships ONLY the gate machinery.** The production registry is
- * deliberately EMPTY — every kind fails closed via
- * `ProposalKindNotApplicableYetError` (AC6). The real handlers are registered
- * by later stories:
+ * Story 6.4 shipped ONLY the gate machinery with an EMPTY production registry.
+ * Story 6.5 registers the FIRST real handler — `rule`. Every other kind still
+ * fails closed via `ProposalKindNotApplicableYetError` (AC6) until its handler
+ * lands:
  *
- *   - `rule` / `rule-retirement`                      → Story 6.5
+ *   - `rule`                                          → Story 6.5 (DONE)
+ *   - `rule-retirement`                               → Story 6.6
  *   - `skill-create` / `skill-revise` /
  *     `skill-supersede` / `skill-retire`              → Story 6.7
  *   - `team-change`                                   → Story 6.10
@@ -75,12 +76,20 @@ export interface ProposalApplyHandler {
  */
 export type ProposalApplyRegistry = Map<RetroProposal["type"], ProposalApplyHandler>;
 /**
- * The PRODUCTION registry — empty in Story 6.4 by design (AC6). Later stories
- * register their handlers into this map. The gate defaults to this registry
- * when no `handlers` injection is provided.
+ * The PRODUCTION registry. Story 6.4 shipped it EMPTY; Story 6.5 registers the
+ * first real handler — `rule` — so accepting a `rule` proposal now actually
+ * appends (or edits) a rule in `docs/discipline-rules.yaml`. Every OTHER kind
+ * still fails closed via `ProposalKindNotApplicableYetError` until its handler
+ * lands (see `KIND_TO_STORY`). The gate defaults to this registry when no
+ * `handlers` injection is provided.
  *
- * It is intentionally a fresh empty map (not a shared mutable singleton) per
- * import so a test that mutates a registry never leaks into production.
+ * It is intentionally a fresh map (not a shared mutable singleton) per import
+ * so a test that mutates a registry never leaks into production; the `rule`
+ * handler is likewise constructed fresh per call.
+ *
+ * Retro-path registrations are grouped here: as later stories land their
+ * handlers (`rule-retirement` → 6.6, `skill-*` → 6.7, `team-change` → 6.10)
+ * they append a `.set(...)` line below.
  */
 export declare function createProductionRegistry(): ProposalApplyRegistry;
 /**
