@@ -139,12 +139,12 @@ development_status:
   8-12-unattended-drain-runbook: done
   8-13-risk-tiering-worked-examples: done
   8-14-drain-result-and-exit-reasons: done
-  8-15-per-story-reviewer-result-isolation: ready-for-dev
-  8-16-per-dev-worktree-on-the-drain-path: ready-for-dev
-  8-17-dev-runs-full-build-before-opening-pr: ready-for-dev
-  8-18-drain-progress-heartbeat: ready-for-dev
-  8-19-drain-pause-to-ping-on-genuine-ambiguity: ready-for-dev
-  8-20-true-drain-parallelism-dev-edits-in-own-worktree: ready-for-dev
-  8-21-drain-observability-seams-non-fatal: ready-for-dev
-  8-22-drain-dispatches-concurrent-workers: ready-for-dev
+  8-15-per-story-reviewer-result-isolation: done
+  8-16-per-dev-worktree-on-the-drain-path: done
+  8-17-dev-runs-full-build-before-opening-pr: done
+  8-18-drain-progress-heartbeat: done
+  8-19-drain-pause-to-ping-on-genuine-ambiguity: done
+  8-20-true-drain-parallelism-dev-edits-in-own-worktree: done
+  8-21-drain-observability-seams-non-fatal: done
+  8-22-drain-dispatches-concurrent-workers: done
   epic-8-retrospective: optional
