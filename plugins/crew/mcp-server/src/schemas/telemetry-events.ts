@@ -205,6 +205,32 @@ export const BacklogReadinessChangedEventSchema = TelemetryEventBase.extend({
     .strict(),
 }).strict();
 
+/**
+ * `draft.authored` — emitted by `writeNativeStory` (Story 9.2, Epic 9 author
+ * seam) once a candidate story has PASSED the fail-closed discipline gate and
+ * been written to disk. Exactly ONE event per written draft; NONE on a refused
+ * / discipline-violating candidate (the write throws `DisciplineViolationError`
+ * before the event is reachable) and NONE on the wrong-adapter or
+ * round-trip-parse failure paths (which throw before the write completes).
+ *
+ * - `ref`   — the freshly-minted draft ref (`native:<ULID>`). Also mirrored into
+ *             the envelope `story_id` so consumers reading only the envelope can
+ *             join.
+ * - `title` — the draft's human-readable title.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved
+ * (no body/diff/contents strings — NFR14).
+ */
+export const DraftAuthoredEventSchema = TelemetryEventBase.extend({
+  type: z.literal("draft.authored"),
+  data: z
+    .object({
+      ref: z.string().min(1),
+      title: z.string().min(1),
+    })
+    .strict(),
+}).strict();
+
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
@@ -214,6 +240,7 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
   YieldHandoffEventSchema,
   RetroProposalAppliedEventSchema,
   BacklogReadinessChangedEventSchema,
+  DraftAuthoredEventSchema,
 ]);
 
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;

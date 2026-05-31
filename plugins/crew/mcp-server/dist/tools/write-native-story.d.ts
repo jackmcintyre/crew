@@ -16,6 +16,7 @@ export declare const WriteNativeStoryInputSchema: z.ZodObject<{
     }, z.core.$strip>>;
     implementation_notes: z.ZodOptional<z.ZodString>;
     depends_on: z.ZodArray<z.ZodString>;
+    sessionUlid: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export type WriteNativeStoryInput = z.infer<typeof WriteNativeStoryInputSchema>;
 export interface WriteNativeStoryOutput {

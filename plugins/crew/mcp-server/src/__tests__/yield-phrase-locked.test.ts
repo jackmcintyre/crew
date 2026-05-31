@@ -44,6 +44,7 @@ const ALL_CATALOGUE_ROLES = [
   "test-specialist",
   "docs-specialist",
   "debugger",
+  "author",
 ] as const;
 
 async function readLockedYield(role: string): Promise<string | undefined> {

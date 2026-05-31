@@ -35,6 +35,7 @@ const ALL_CATALOGUE_ROLES = [
     "test-specialist",
     "docs-specialist",
     "debugger",
+    "author",
 ];
 async function readLockedYield(role) {
     const filePath = path.join(CATALOGUE_DIR, `${role}.md`);

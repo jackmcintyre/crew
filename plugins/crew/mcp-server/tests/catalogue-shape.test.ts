@@ -6,7 +6,8 @@
  * `##` sections in canonical order).
  *
  * This test is the contract gate for:
- *  - AC1: the catalogue directory contains exactly the 10 v1 roster files.
+ *  - AC1: the catalogue directory contains exactly the v1 roster files
+ *    (10 original v1 roles + the Epic 9 `author` seam role, Story 9.2).
  *  - AC2: every catalogue file's frontmatter parses against `CatalogueRoleSchema`.
  *  - AC3: every catalogue file's `domain:` string is pairwise distinct (FR98 / FR99).
  *  - AC4(a–e): a single harness that discovers, parses, asserts file-set
@@ -28,9 +29,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CATALOGUE_DIR = path.resolve(HERE, "..", "..", "catalogue");
 
 /**
- * The fixed v1 catalogue roster. Story 2.1 ACs reference this exact
- * set of 10 file basenames. Any addition / removal / rename is a
- * breaking change and must update this list deliberately.
+ * The fixed catalogue roster. Story 2.1 ACs reference the original 10
+ * v1 roles; Story 9.2 (Epic 9 author seam) adds the `author` role. Any
+ * addition / removal / rename is a breaking change and must update this
+ * list deliberately.
  */
 const CATALOGUE_FILES = [
   "hiring-manager.md",
@@ -43,11 +45,13 @@ const CATALOGUE_FILES = [
   "test-specialist.md",
   "docs-specialist.md",
   "debugger.md",
+  // Story 9.2 — Epic 9 author seam: one plain-language feature in, one draft out.
+  "author.md",
 ] as const;
 
 describe("Story 2.1 — catalogue file format and shipped role templates", () => {
   describe("AC1 / AC4(a,c): catalogue directory contains exactly the v1 roster", () => {
-    it("lists exactly the 10 expected files (filtering `.gitkeep` if still present)", async () => {
+    it("lists exactly the expected roster files (filtering `.gitkeep` if still present)", async () => {
       const entries = await fs.readdir(CATALOGUE_DIR);
       const markdown = entries.filter((e) => e.endsWith(".md")).sort();
       const expected = [...CATALOGUE_FILES].sort();
