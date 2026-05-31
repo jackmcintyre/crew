@@ -302,6 +302,44 @@ export const QualityAdjudicatedEventSchema = TelemetryEventBase.extend({
     .strict(),
 }).strict();
 
+/**
+ * `skill.invoke` — per-skill-invocation telemetry (Story 6.8, FR-skill-calibration).
+ * Emitted by `recordSkillInvoke` (the single write-path) when a crew skill fires.
+ * The architecture pins the shape (architecture/skill-calibration-loop.md): it
+ * carries the skill identity + version + scope + invocation source so
+ * `computeSkillEffectiveness` can attribute a downstream `reviewer.verdict` of
+ * `READY FOR MERGE` to the specific skill body that fired.
+ *
+ * - `skill_name`        — `<plugin>:<command>` (e.g. `crew:plan`).
+ * - `skill_path`        — absolute path to the skill file that fired.
+ * - `skill_version`     — semver-ish version from the skill frontmatter
+ *                         (Story 6.7); a plugin-scope skill that predates
+ *                         versioning defaults to its shipped plugin version.
+ * - `skill_scope`       — closed enum (`project | persona | plugin`). No
+ *                         silent fallback variant — an unknown scope is a bug.
+ * - `invocation_source` — closed enum (`user-slash-command | agent-call`).
+ *
+ * Both `skill_scope` and `invocation_source` are CLOSED enums: an unknown
+ * value fails validation rather than falling through (the "no silent
+ * fallback" discipline). `story_id` (envelope) is present only when the skill
+ * fired inside a story flow; a user-slash-command outside a story has none.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved
+ * (no body/diff/contents strings — NFR14).
+ */
+export const SkillInvokeEventSchema = TelemetryEventBase.extend({
+  type: z.literal("skill.invoke"),
+  data: z
+    .object({
+      skill_name: z.string().min(1),
+      skill_path: z.string().min(1),
+      skill_version: z.string().min(1),
+      skill_scope: z.enum(["project", "persona", "plugin"]),
+      invocation_source: z.enum(["user-slash-command", "agent-call"]),
+    })
+    .strict(),
+}).strict();
+
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
@@ -314,8 +352,10 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
   DraftAuthoredEventSchema,
   PanelGradedEventSchema,
   QualityAdjudicatedEventSchema,
+  SkillInvokeEventSchema,
 ]);
 
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
 export type ReviewerVerdictEvent = z.infer<typeof ReviewerVerdictEventSchema>;
 export type ReviewerVerdictMergeActionEvent = z.infer<typeof ReviewerVerdictMergeActionEventSchema>;
+export type SkillInvokeEvent = z.infer<typeof SkillInvokeEventSchema>;
