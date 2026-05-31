@@ -47,6 +47,8 @@ const CATALOGUE_FILES = [
   "debugger.md",
   // Story 9.2 — Epic 9 author seam: one plain-language feature in, one draft out.
   "author.md",
+  // Story 9.4 — Epic 9 Quality Lead: adjudicates the panel verdict (ready / rework / escalate).
+  "quality-lead.md",
 ] as const;
 
 describe("Story 2.1 — catalogue file format and shipped role templates", () => {

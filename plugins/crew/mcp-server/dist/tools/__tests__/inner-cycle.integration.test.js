@@ -496,7 +496,9 @@ describe("AC4(g): tool count and required tools present", () => {
             // Story 9.3 added writeLensVerdict + aggregateJudgePanel (judge panel). 38 → 40.
             expect(toolNames).toContain("writeLensVerdict");
             expect(toolNames).toContain("aggregateJudgePanel");
-            expect(toolNames.length).toBe(40);
+            // Story 9.4 added adjudicateQualityLead (Quality Lead). 40 → 41.
+            expect(toolNames).toContain("adjudicateQualityLead");
+            expect(toolNames.length).toBe(41);
         }
         finally {
             await client.close();

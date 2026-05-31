@@ -40,7 +40,8 @@ import { scanOrphanedInProgress } from "./scan-orphaned-in-progress.js";
 import { reattachOrphan } from "./reattach-orphan.js";
 import { blockOrphanNoTranscript } from "./block-orphan-no-transcript.js";
 import { writeLensVerdict, aggregateJudgePanel, DEFAULT_LENS_ROLES } from "./judge-panel.js";
-import { LENS_NAMES } from "../schemas/lens-verdict.js";
+import { LENS_NAMES, PanelVerdictSchema } from "../schemas/lens-verdict.js";
+import { adjudicateQualityLead, DEFAULT_ADJUDICATION_K } from "./quality-lead-adjudicate.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -1783,6 +1784,93 @@ export function registerAllTools(server) {
                     draft: parsed.draft,
                     lensRoles: { ...DEFAULT_LENS_ROLES, ...(parsed.lensRoles ?? {}) },
                     ...(parsed.tier0 !== undefined ? { tier0: parsed.tier0 } : {}),
+                });
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: JSON.stringify({ error: err.name, message: err.message }) }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 9.4 — adjudicateQualityLead: the adjudication half of gate 1 (the
+    // Quality Lead). Synthesises the Story 9.3 PanelVerdict via the rubric §5 rule:
+    // all five lenses pass → `ready` (blesses the draft through Story 9.1's
+    // markStoryReady brake — never a direct manifest write); any lens fails →
+    // `rework` (returns the failed `missed` strings, draft stays not-ready); a split
+    // that persists after K rounds (default 2) → `escalate` (to the operator with an
+    // escalation_reason, draft stays not-ready — never auto-pass a close call).
+    // Persists the AdjudicationVerdict alongside the panel's per-lens files and emits
+    // one quality.adjudicated telemetry event (even on `ready` — the judge-the-judge
+    // input for the calibration loop).
+    server.registerTool({
+        name: "adjudicateQualityLead",
+        description: "Synthesise a Story 9.3 PanelVerdict into a Quality-Lead decision (Story 9.4, gate 1 adjudication). " +
+            "Applies the rubric §5 rule: all five lenses pass → `ready` (blesses via the Story 9.1 markStoryReady " +
+            "brake — never a direct manifest write); any lens fails → `rework` (returns the failed `missed` strings, " +
+            "draft stays not-ready); a split that persists after K rounds (default 2) → `escalate` (to the operator " +
+            "with a populated escalation_reason, draft stays not-ready — never auto-pass a close call). Persists the " +
+            "AdjudicationVerdict { ref, decision, rationale, escalation_reason?, round } (validated against " +
+            "AdjudicationVerdictSchema) to <targetRepoRoot>/.crew/state/sessions/<sessionUlid>/<ref>/adjudication-verdict.json " +
+            "— the canonical record the dashboard (9.5) and the calibration loop (judge-the-judge) read. Emits one " +
+            "quality.adjudicated telemetry event on every decision. Returns { verdict, verdictFilePath, blessed? }.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+                ref: { type: "string" },
+                panel: {
+                    type: "object",
+                    properties: {
+                        tier0: { type: "string", enum: ["pass", "fail"] },
+                        lenses: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    lens: { type: "string", enum: [...LENS_NAMES] },
+                                    role: { type: "string" },
+                                    pass: { type: "boolean" },
+                                    missed: { type: "string" },
+                                },
+                                required: ["lens", "role", "pass", "missed"],
+                            },
+                        },
+                    },
+                    required: ["tier0", "lenses"],
+                },
+                round: { type: "number" },
+                k: { type: "number" },
+            },
+            required: ["targetRepoRoot", "sessionUlid", "ref", "panel"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                sessionUlid: z.string().min(1),
+                ref: z.string().min(1),
+                panel: PanelVerdictSchema,
+                round: z.number().int().positive().optional(),
+                k: z.number().int().positive().optional(),
+            })
+                .parse(args);
+            try {
+                const result = await adjudicateQualityLead({
+                    targetRepoRoot: parsed.targetRepoRoot,
+                    sessionUlid: parsed.sessionUlid,
+                    ref: parsed.ref,
+                    panel: parsed.panel,
+                    round: parsed.round ?? 1,
+                    k: parsed.k ?? DEFAULT_ADJUDICATION_K,
                 });
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],

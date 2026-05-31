@@ -1,0 +1,13 @@
+role: quality-lead
+# Bounded to exactly what adjudication needs (AC6): read the panel verdict (Read),
+# adjudicate + persist the AdjudicationVerdict (adjudicateQualityLead), and bless via
+# the Story 9.1 brake (markStoryReady). Deliberately WITHHELD — the Quality Lead
+# cannot merge, push, close PRs, or edit code (no Bash, no Edit/Write, no gh).
+# Mirrors the generalist-reviewer's negative-capability posture: the role that holds
+# the quality bar gets only the capabilities the bar needs.
+tools_allow:
+  - Read
+  - adjudicateQualityLead
+  - markStoryReady
+gh_allow: []
+gh_allow_args: {}

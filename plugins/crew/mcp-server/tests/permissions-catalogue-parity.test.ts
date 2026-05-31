@@ -42,6 +42,11 @@ const CATALOGUE_ROLES = [
   "test-specialist",
   "docs-specialist",
   "debugger",
+  // Story 9.4 — Epic 9 Quality Lead: a real instantiable role with bounded
+  // permissions (catalogue + permission YAML both ship), so it joins the parity
+  // roster. (The Story 9.2 `author` role is catalogue-only — a planner sub-mode
+  // with no permission YAML — so it is intentionally absent here.)
+  "quality-lead",
 ] as const;
 
 const PERMISSION_FILES = [
@@ -55,6 +60,8 @@ const PERMISSION_FILES = [
   "test-specialist.yaml",
   "docs-specialist.yaml",
   "debugger.yaml",
+  // Story 9.4 — Epic 9 Quality Lead bounded permission spec.
+  "quality-lead.yaml",
   "gh-error-map.yaml",
 ] as const;
 

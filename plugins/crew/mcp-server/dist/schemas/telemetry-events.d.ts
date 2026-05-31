@@ -279,6 +279,46 @@ export declare const PanelGradedEventSchema: z.ZodObject<{
         failed_lenses: z.ZodNumber;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/**
+ * `quality.adjudicated` — emitted by `adjudicateQualityLead` (Story 9.4, Epic 9
+ * gate 1 adjudication) once the Quality Lead has synthesised a panel verdict into
+ * a decision. Exactly ONE event per adjudication, on EVERY decision (including
+ * `ready`) — the calibration loop's judge-the-judge input correlates `ready`
+ * verdicts with downstream merge outcomes, so a `ready` adjudication must be
+ * recorded too. NONE on a malformed-panel hard failure (which throws before this
+ * line).
+ *
+ * - `ref`       — the draft's reference (`<adapter>:<source-id>`). Also mirrored
+ *                 into the envelope `story_id` so consumers reading only the
+ *                 envelope can join.
+ * - `decision`  — the synthesised decision (`ready` | `escalate` | `rework`).
+ * - `round`     — the adjudication round that produced the decision (1-based).
+ * - `escalated` — `true` iff `decision === "escalate"` (a convenience flag for the
+ *                 dashboard / loop; derivable from `decision`).
+ *
+ * The verdict's `rationale` / `escalation_reason` strings are NOT in the event
+ * (NFR14 — no free-text payloads in telemetry); the canonical record carrying them
+ * is the `adjudication-verdict.json` file the tool persists in the session dir.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved.
+ */
+export declare const QualityAdjudicatedEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"quality.adjudicated">;
+    data: z.ZodObject<{
+        ref: z.ZodString;
+        decision: z.ZodEnum<{
+            escalate: "escalate";
+            ready: "ready";
+            rework: "rework";
+        }>;
+        round: z.ZodNumber;
+        escalated: z.ZodBoolean;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     ts: z.ZodString;
     session_id: z.ZodString;
@@ -415,6 +455,22 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
         }>;
         passed_lenses: z.ZodNumber;
         failed_lenses: z.ZodNumber;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"quality.adjudicated">;
+    data: z.ZodObject<{
+        ref: z.ZodString;
+        decision: z.ZodEnum<{
+            escalate: "escalate";
+            ready: "ready";
+            rework: "rework";
+        }>;
+        round: z.ZodNumber;
+        escalated: z.ZodBoolean;
     }, z.core.$strict>;
 }, z.core.$strict>], "type">;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;

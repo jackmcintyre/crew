@@ -267,6 +267,41 @@ export const PanelGradedEventSchema = TelemetryEventBase.extend({
     .strict(),
 }).strict();
 
+/**
+ * `quality.adjudicated` — emitted by `adjudicateQualityLead` (Story 9.4, Epic 9
+ * gate 1 adjudication) once the Quality Lead has synthesised a panel verdict into
+ * a decision. Exactly ONE event per adjudication, on EVERY decision (including
+ * `ready`) — the calibration loop's judge-the-judge input correlates `ready`
+ * verdicts with downstream merge outcomes, so a `ready` adjudication must be
+ * recorded too. NONE on a malformed-panel hard failure (which throws before this
+ * line).
+ *
+ * - `ref`       — the draft's reference (`<adapter>:<source-id>`). Also mirrored
+ *                 into the envelope `story_id` so consumers reading only the
+ *                 envelope can join.
+ * - `decision`  — the synthesised decision (`ready` | `escalate` | `rework`).
+ * - `round`     — the adjudication round that produced the decision (1-based).
+ * - `escalated` — `true` iff `decision === "escalate"` (a convenience flag for the
+ *                 dashboard / loop; derivable from `decision`).
+ *
+ * The verdict's `rationale` / `escalation_reason` strings are NOT in the event
+ * (NFR14 — no free-text payloads in telemetry); the canonical record carrying them
+ * is the `adjudication-verdict.json` file the tool persists in the session dir.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved.
+ */
+export const QualityAdjudicatedEventSchema = TelemetryEventBase.extend({
+  type: z.literal("quality.adjudicated"),
+  data: z
+    .object({
+      ref: z.string().min(1),
+      decision: z.enum(["ready", "escalate", "rework"]),
+      round: z.number().int().positive(),
+      escalated: z.boolean(),
+    })
+    .strict(),
+}).strict();
+
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
@@ -278,6 +313,7 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
   BacklogReadinessChangedEventSchema,
   DraftAuthoredEventSchema,
   PanelGradedEventSchema,
+  QualityAdjudicatedEventSchema,
 ]);
 
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
