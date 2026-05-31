@@ -120,6 +120,30 @@ export const ExecutionManifestSchema = z
     withdrawn: z.boolean().default(false),
 
     /**
+     * Operator readiness brake (Story 9.1 — Epic 9 intake cockpit).
+     *
+     * Orthogonal to BOTH `status` and `withdrawn`: it is NOT a status value and
+     * triggers NO state-directory move. `status` is the vertical axis
+     * (`to-do → in-progress → done`); `withdrawn` and `ready` are horizontal
+     * operator overrides on a `to-do/` manifest.
+     *
+     * Polarity is the mirror image of `withdrawn`:
+     *   - `withdrawn: true`  removes an item from the claim candidate set.
+     *   - `ready: true`      is REQUIRED to admit an item into the candidate set.
+     *
+     * Default `false` so the brake fails closed: a freshly-scanned backlog item
+     * is in `to-do/` but is NOT claimable by the dev loop until the operator
+     * blesses it via the `markStoryReady` tool (the `/crew:ready` skill). The
+     * two flags are independent — a withdrawn item is never claimable regardless
+     * of `ready`, and a not-ready item is never claimable regardless of deps.
+     *
+     * Set by the `markStoryReady` tool; honoured by the `claimNextStory`
+     * eligibility filter. Additive and strict-compatible: a manifest authored
+     * before this field existed parses cleanly and reads as not-ready (`false`).
+     */
+    ready: z.boolean().default(false),
+
+    /**
      * When set, names the reason the manifest was placed in `blocked/`
      * instead of `to-do/`. Only populated for blocked manifests.
      *

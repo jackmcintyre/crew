@@ -181,6 +181,33 @@ export declare const RetroProposalAppliedEventSchema: z.ZodObject<{
         idempotency_key: z.ZodString;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/**
+ * `backlog.readiness_changed` — emitted by `markStoryReady` (Story 9.1, Epic 9
+ * intake cockpit) on a real readiness toggle of a backlog item. Exactly ONE
+ * event per real toggle; NONE on an idempotent no-op (the flag already holds
+ * the requested value) or on the typed-error path (the ref is not an
+ * un-claimed backlog item).
+ *
+ * - `ref`   — the backlog item's reference (`<adapter>:<source-id>`). Also
+ *             mirrored into the envelope `story_id` so consumers reading only
+ *             the envelope can join.
+ * - `ready` — the NEW flag value after the toggle (`true` = blessed for the
+ *             claim path; `false` = parked back behind the brake).
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved
+ * (no body/diff/contents strings — NFR14).
+ */
+export declare const BacklogReadinessChangedEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"backlog.readiness_changed">;
+    data: z.ZodObject<{
+        ref: z.ZodString;
+        ready: z.ZodBoolean;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     ts: z.ZodString;
     session_id: z.ZodString;
@@ -277,6 +304,16 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
         }>;
         applied_sha: z.ZodString;
         idempotency_key: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"backlog.readiness_changed">;
+    data: z.ZodObject<{
+        ref: z.ZodString;
+        ready: z.ZodBoolean;
     }, z.core.$strict>;
 }, z.core.$strict>], "type">;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;

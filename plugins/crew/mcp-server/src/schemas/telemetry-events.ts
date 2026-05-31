@@ -179,6 +179,32 @@ export const RetroProposalAppliedEventSchema = TelemetryEventBase.extend({
     .strict(),
 }).strict();
 
+/**
+ * `backlog.readiness_changed` — emitted by `markStoryReady` (Story 9.1, Epic 9
+ * intake cockpit) on a real readiness toggle of a backlog item. Exactly ONE
+ * event per real toggle; NONE on an idempotent no-op (the flag already holds
+ * the requested value) or on the typed-error path (the ref is not an
+ * un-claimed backlog item).
+ *
+ * - `ref`   — the backlog item's reference (`<adapter>:<source-id>`). Also
+ *             mirrored into the envelope `story_id` so consumers reading only
+ *             the envelope can join.
+ * - `ready` — the NEW flag value after the toggle (`true` = blessed for the
+ *             claim path; `false` = parked back behind the brake).
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved
+ * (no body/diff/contents strings — NFR14).
+ */
+export const BacklogReadinessChangedEventSchema = TelemetryEventBase.extend({
+  type: z.literal("backlog.readiness_changed"),
+  data: z
+    .object({
+      ref: z.string().min(1),
+      ready: z.boolean(),
+    })
+    .strict(),
+}).strict();
+
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
   AgentInvokeEventSchema,
   TelemetryInvalidEventSchema,
@@ -187,6 +213,7 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
   DevBudgetExceededEventSchema,
   YieldHandoffEventSchema,
   RetroProposalAppliedEventSchema,
+  BacklogReadinessChangedEventSchema,
 ]);
 
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;

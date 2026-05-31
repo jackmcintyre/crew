@@ -53,6 +53,7 @@ export declare const ExecutionManifestSchema: z.ZodObject<{
     narrative: z.ZodString;
     implementation_notes: z.ZodOptional<z.ZodString>;
     withdrawn: z.ZodDefault<z.ZodBoolean>;
+    ready: z.ZodDefault<z.ZodBoolean>;
     blocked_by: z.ZodOptional<z.ZodEnum<{
         "deps-drift": "deps-drift";
         "gh-defer": "gh-defer";

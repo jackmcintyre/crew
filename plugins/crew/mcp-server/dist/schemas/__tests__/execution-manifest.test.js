@@ -140,3 +140,47 @@ describe("retro fields (Story 6.1)", () => {
         expect(() => parseExecutionManifest({ ...BASE_MANIFEST, duration_seconds: 1.5 }, { absPath: "/fake/path.yaml" })).toThrow(MalformedExecutionManifestError);
     });
 });
+// ---------------------------------------------------------------------------
+// ready field (Story 9.1 — AC2: orthogonal operator readiness brake)
+// ---------------------------------------------------------------------------
+describe("ready field (Story 9.1)", () => {
+    // A to-do/ manifest is the realistic carrier of `ready`. Build a base that
+    // predates the field (no `ready` key, no `claimed_by`) to prove backward-compat.
+    const TODO_MANIFEST_WITHOUT_READY = {
+        ref: "native:01HZABC0000000000000000002",
+        status: "to-do",
+        adapter: "native",
+        source_path: ".crew/native-stories/01HZABC0000000000000000002.md",
+        source_hash: "b".repeat(64),
+        depends_on: [],
+        acceptance_criteria: [{ text: "Given x, when y, then z.", kind: "integration" }],
+        title: "Readiness Test Story",
+        narrative: "As a dev, I want to test the readiness brake.",
+        withdrawn: false,
+    };
+    it("parses a manifest authored before the field existed and reads ready as false (default-closed)", () => {
+        const manifest = parseExecutionManifest(TODO_MANIFEST_WITHOUT_READY, {
+            absPath: "/fake/path.yaml",
+        });
+        expect(manifest.ready).toBe(false);
+    });
+    it("parses a manifest carrying ready: true and reads it as true", () => {
+        const manifest = parseExecutionManifest({ ...TODO_MANIFEST_WITHOUT_READY, ready: true }, { absPath: "/fake/path.yaml" });
+        expect(manifest.ready).toBe(true);
+    });
+    it("parses a manifest carrying ready: false and reads it as false", () => {
+        const manifest = parseExecutionManifest({ ...TODO_MANIFEST_WITHOUT_READY, ready: false }, { absPath: "/fake/path.yaml" });
+        expect(manifest.ready).toBe(false);
+    });
+    it("ready is orthogonal to withdrawn — both can be true on the same manifest", () => {
+        const manifest = parseExecutionManifest({ ...TODO_MANIFEST_WITHOUT_READY, ready: true, withdrawn: true }, { absPath: "/fake/path.yaml" });
+        expect(manifest.ready).toBe(true);
+        expect(manifest.withdrawn).toBe(true);
+    });
+    it("preserves the strict posture — an unknown key is still rejected (Story 9.1 must not weaken the schema)", () => {
+        expect(() => parseExecutionManifest({ ...TODO_MANIFEST_WITHOUT_READY, ready: true, not_a_real_field: 1 }, { absPath: "/fake/path.yaml" })).toThrow(MalformedExecutionManifestError);
+    });
+    it("throws MalformedExecutionManifestError when ready is a non-boolean", () => {
+        expect(() => parseExecutionManifest({ ...TODO_MANIFEST_WITHOUT_READY, ready: "yes" }, { absPath: "/fake/path.yaml" })).toThrow(MalformedExecutionManifestError);
+    });
+});

@@ -91,6 +91,7 @@ export async function listClaimableTodos(opts) {
             title: manifest.title,
             depends_on: manifest.depends_on,
             depsReady,
+            ready: manifest.ready,
         });
     }
     // Count in-progress manifests.

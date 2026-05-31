@@ -57,6 +57,7 @@ import { processReviewerTranscript } from "../process-reviewer-transcript.js";
 import { ReviewerFirstCallSkippedError } from "../../errors.js";
 import { claimNextStory } from "../claim-next-story.js";
 import { scanSources } from "../scan-sources.js";
+import { markStoryReady } from "../mark-story-ready.js";
 import { registerAllTools } from "../register.js";
 import { createServer } from "../../server.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -113,6 +114,7 @@ function makeBaseManifest(ref: string): ExecutionManifest {
     title: "Integration Test Story",
     narrative: "As a dev, I want to integrate test.",
     withdrawn: false,
+    ready: true,
     claimed_by: SESSION_ULID,
   };
 }
@@ -596,7 +598,9 @@ describe("AC4(g): tool count and required tools present", () => {
       expect(toolNames).not.toContain("recordPrCloseAction");
       // Story 6.4 added acceptProposal (the /accept-proposal gate). 36 → 37.
       expect(toolNames).toContain("acceptProposal");
-      expect(toolNames.length).toBe(37);
+      // Story 9.1 added markStoryReady (the readiness brake). 37 → 38.
+      expect(toolNames).toContain("markStoryReady");
+      expect(toolNames.length).toBe(38);
     } finally {
       await client.close();
       await server.close();
@@ -682,6 +686,11 @@ async function buildTwoStoryWorkspace(scratch: string): Promise<{
 
   // Scan sources to populate to-do/
   await scanSources({ targetRepoRoot: root });
+
+  // Story 9.1: freshly-scanned items default to not-ready (fail-closed brake).
+  // Bless both so the claim path will admit them, as these tests assert.
+  await markStoryReady({ targetRepoRoot: root, ref: refA, ready: true });
+  await markStoryReady({ targetRepoRoot: root, ref: refB, ready: true });
 
   return { root, refA, refB };
 }
