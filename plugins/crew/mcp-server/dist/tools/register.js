@@ -39,6 +39,8 @@ import { createSmokeScratchRepo } from "./create-smoke-scratch-repo.js";
 import { scanOrphanedInProgress } from "./scan-orphaned-in-progress.js";
 import { reattachOrphan } from "./reattach-orphan.js";
 import { blockOrphanNoTranscript } from "./block-orphan-no-transcript.js";
+import { writeLensVerdict, aggregateJudgePanel, DEFAULT_LENS_ROLES } from "./judge-panel.js";
+import { LENS_NAMES } from "../schemas/lens-verdict.js";
 /**
  * Tool-registration seam. Every future story that ships an MCP tool
  * appends a `server.registerTool({...})` call here, keeping `server.ts`
@@ -1643,6 +1645,145 @@ export function registerAllTools(server) {
                 .parse(args);
             try {
                 const result = await blockOrphanNoTranscript(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: JSON.stringify({ error: err.name, message: err.message }) }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 9.3 — writeLensVerdict: each judge subagent's deterministic verdict
+    // write seam (gate 1, Tier 1). Validates a {lens, role, pass, missed} verdict
+    // (the empty-`missed` guard fails AT WRITE TIME) and atomically writes it to
+    // the per-lens result file the panel reads. The judge's reasoning is free;
+    // only this projection is load-bearing — exactly the reviewer's posture.
+    server.registerTool({
+        name: "writeLensVerdict",
+        description: "Write a single judge's per-lens verdict to its deterministic result file (Story 9.3, gate 1 Tier 1). " +
+            "Validates { lens, role, pass, missed } against LensVerdictSchema — a fail with an empty `missed` is " +
+            "rejected at write time (a malformed verdict never reaches disk). Writes atomically to " +
+            "<targetRepoRoot>/.crew/state/sessions/<sessionUlid>/<ref>/judge-<lens>.json. " +
+            "Returns { resultFilePath }. Each lens judge calls this once; the panel reads the file back " +
+            "(deterministic-seam discipline — the panel consumes files, never transcripts).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+                ref: { type: "string" },
+                lens: { type: "string", enum: [...LENS_NAMES] },
+                role: { type: "string" },
+                pass: { type: "boolean" },
+                missed: { type: "string" },
+            },
+            required: ["targetRepoRoot", "sessionUlid", "ref", "lens", "role", "pass", "missed"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                sessionUlid: z.string().min(1),
+                ref: z.string().min(1),
+                lens: z.enum(LENS_NAMES),
+                role: z.string().min(1),
+                pass: z.boolean(),
+                missed: z.string().min(1),
+            })
+                .parse(args);
+            try {
+                const result = await writeLensVerdict(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: JSON.stringify({ error: err.name, message: err.message }) }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 9.3 — aggregateJudgePanel: the panel-aggregation half of gate 1 Tier 1.
+    // Called by the /crew:judge skill AFTER it has spawned one judge per lens (each
+    // from a distinct role) and each judge has written its verdict via writeLensVerdict.
+    // Classifies the draft's risk tier (selects the Considered bar), reads the five
+    // per-lens files (never transcripts), assembles + validates the PanelVerdict, and
+    // emits one panel.graded telemetry event. Writes NO readiness flag / manifest —
+    // adjudication is Story 9.4's call. Fails loudly (LensJudgeUnavailableError /
+    // DuplicateLensJudgeError / LensVerdictFileMalformedError) rather than reporting a
+    // clean sweep when a lens is missing, a role is shared, or a verdict file is bad.
+    server.registerTool({
+        name: "aggregateJudgePanel",
+        description: "Aggregate the five per-lens judge verdict files into a single PanelVerdict (Story 9.3, gate 1 Tier 1). " +
+            "Validates the lens→role binding (one DISTINCT role per lens — lens diversity is structural), classifies " +
+            "the draft's risk tier via classifyRiskTier to select the Considered-lens bar, reads the five " +
+            "judge-<lens>.json files written by writeLensVerdict (deterministic-seam: files, never transcripts), and " +
+            "assembles { tier0, lenses } validated against PanelVerdictSchema (exactly five entries, one per lens). " +
+            "Emits one panel.graded telemetry event. Returns { riskTier, verdict }. Writes NOTHING to the readiness " +
+            "flag or any manifest — that decision is Story 9.4's. Throws LensJudgeUnavailableError (a lens has no " +
+            "role), DuplicateLensJudgeError (a role is shared across lenses), and LensVerdictFileMalformedError (a " +
+            "verdict file is absent / unparseable / fails schema / disagrees on lens|role).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+                draft: {
+                    type: "object",
+                    properties: {
+                        ref: { type: "string" },
+                        title: { type: "string" },
+                        specText: { type: "string" },
+                        changedPaths: { type: "array", items: { type: "string" } },
+                        commitMessages: { type: "array", items: { type: "string" } },
+                        diffSize: { type: "number" },
+                    },
+                    required: ["ref", "title", "specText"],
+                },
+                lensRoles: { type: "object" },
+                tier0: { type: "string", enum: ["pass", "fail"] },
+            },
+            required: ["targetRepoRoot", "sessionUlid", "draft"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                sessionUlid: z.string().min(1),
+                draft: z
+                    .object({
+                    ref: z.string().min(1),
+                    title: z.string().min(1),
+                    specText: z.string(),
+                    changedPaths: z.array(z.string()).optional(),
+                    commitMessages: z.array(z.string()).optional(),
+                    diffSize: z.number().int().nonnegative().optional(),
+                })
+                    .strict(),
+                lensRoles: z.record(z.string(), z.string()).optional(),
+                tier0: z.enum(["pass", "fail"]).optional(),
+            })
+                .parse(args);
+            try {
+                const result = await aggregateJudgePanel({
+                    targetRepoRoot: parsed.targetRepoRoot,
+                    sessionUlid: parsed.sessionUlid,
+                    draft: parsed.draft,
+                    lensRoles: { ...DEFAULT_LENS_ROLES, ...(parsed.lensRoles ?? {}) },
+                    ...(parsed.tier0 !== undefined ? { tier0: parsed.tier0 } : {}),
+                });
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };

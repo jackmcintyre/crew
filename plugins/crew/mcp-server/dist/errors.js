@@ -1434,3 +1434,75 @@ export class DisciplineViolationError extends DomainError {
         this.violations = opts.violations;
     }
 }
+/**
+ * The judge panel (Story 9.3) could not grade a Tier-1 lens because no role was
+ * supplied to judge it.
+ *
+ * This is the rubber-stamp failure in disguise: a missing lens must FAIL LOUDLY,
+ * never be silently dropped while the panel reports a clean sweep. Lens diversity
+ * is non-negotiable (rubric §3) — every one of the five Tier-1 lenses must be
+ * graded by a distinct judge role.
+ *
+ * Thrown before any verdict file is read or any panel verdict is assembled.
+ *
+ * Story 9.3 — judge panel.
+ */
+export class LensJudgeUnavailableError extends DomainError {
+    lens;
+    constructor(opts) {
+        super(`Judge panel cannot grade the '${opts.lens}' lens: no judging role was ` +
+            `supplied for it. A missing lens is the rubber-stamp failure in disguise — ` +
+            `every Tier-1 lens (structure, verifiability, discipline, domain, considered) ` +
+            `must be graded by a distinct role. Hire / supply a role for '${opts.lens}' ` +
+            `and re-run the panel. (Story 9.3)`);
+        this.lens = opts.lens;
+    }
+}
+/**
+ * Two or more Tier-1 lenses were bound to the SAME judging role.
+ *
+ * Lens diversity is structural, not advisory (rubric §3): a panel that shares a
+ * judge across lenses re-opens the rubber-stamp risk. The panel refuses to run
+ * rather than grade with a degenerate roster.
+ *
+ * Story 9.3 — judge panel.
+ */
+export class DuplicateLensJudgeError extends DomainError {
+    role;
+    lenses;
+    constructor(opts) {
+        super(`Judge panel refuses to run: role '${opts.role}' is bound to more than one ` +
+            `lens [${opts.lenses.join(", ")}]. Lens diversity is non-negotiable — no two ` +
+            `lenses may share a judge, or the panel rubber-stamps the author's blind spots. ` +
+            `Bind a distinct role to each lens. (Story 9.3)`);
+        this.role = opts.role;
+        this.lenses = opts.lenses;
+    }
+}
+/**
+ * A lens judge's per-lens verdict file is absent, unparseable, fails
+ * `LensVerdictSchema`, or disagrees with the lens / role the panel asked it to
+ * grade (e.g. a fail with an empty `missed`, the wrong `lens`, or the wrong
+ * `role`).
+ *
+ * The panel consumes FILES, never transcripts (deterministic-seam discipline).
+ * A judge that did not write a well-formed verdict file is treated as a hard
+ * failure, not a silent pass — a malformed verdict would otherwise let a thin
+ * draft slip through the gate.
+ *
+ * Story 9.3 — judge panel.
+ */
+export class LensVerdictFileMalformedError extends DomainError {
+    lens;
+    path;
+    reason;
+    constructor(opts) {
+        super(`Lens-verdict file for the '${opts.lens}' lens at ${opts.path} is missing or ` +
+            `malformed: ${opts.reason}. The panel reads files, not transcripts — a judge ` +
+            `that did not write a well-formed {lens, role, pass, missed} verdict (e.g. a ` +
+            `fail with an empty 'missed') is a hard failure, never a silent pass. (Story 9.3)`);
+        this.lens = opts.lens;
+        this.path = opts.path;
+        this.reason = opts.reason;
+    }
+}

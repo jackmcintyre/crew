@@ -1212,3 +1212,62 @@ export declare class DisciplineViolationError extends DomainError {
         }>;
     });
 }
+/**
+ * The judge panel (Story 9.3) could not grade a Tier-1 lens because no role was
+ * supplied to judge it.
+ *
+ * This is the rubber-stamp failure in disguise: a missing lens must FAIL LOUDLY,
+ * never be silently dropped while the panel reports a clean sweep. Lens diversity
+ * is non-negotiable (rubric §3) — every one of the five Tier-1 lenses must be
+ * graded by a distinct judge role.
+ *
+ * Thrown before any verdict file is read or any panel verdict is assembled.
+ *
+ * Story 9.3 — judge panel.
+ */
+export declare class LensJudgeUnavailableError extends DomainError {
+    readonly lens: string;
+    constructor(opts: {
+        lens: string;
+    });
+}
+/**
+ * Two or more Tier-1 lenses were bound to the SAME judging role.
+ *
+ * Lens diversity is structural, not advisory (rubric §3): a panel that shares a
+ * judge across lenses re-opens the rubber-stamp risk. The panel refuses to run
+ * rather than grade with a degenerate roster.
+ *
+ * Story 9.3 — judge panel.
+ */
+export declare class DuplicateLensJudgeError extends DomainError {
+    readonly role: string;
+    readonly lenses: string[];
+    constructor(opts: {
+        role: string;
+        lenses: string[];
+    });
+}
+/**
+ * A lens judge's per-lens verdict file is absent, unparseable, fails
+ * `LensVerdictSchema`, or disagrees with the lens / role the panel asked it to
+ * grade (e.g. a fail with an empty `missed`, the wrong `lens`, or the wrong
+ * `role`).
+ *
+ * The panel consumes FILES, never transcripts (deterministic-seam discipline).
+ * A judge that did not write a well-formed verdict file is treated as a hard
+ * failure, not a silent pass — a malformed verdict would otherwise let a thin
+ * draft slip through the gate.
+ *
+ * Story 9.3 — judge panel.
+ */
+export declare class LensVerdictFileMalformedError extends DomainError {
+    readonly lens: string;
+    readonly path: string;
+    readonly reason: string;
+    constructor(opts: {
+        lens: string;
+        path: string;
+        reason: string;
+    });
+}
