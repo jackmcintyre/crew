@@ -150,9 +150,9 @@ development_status:
   8-22-drain-dispatches-concurrent-workers: done
   epic-8-retrospective: optional
   epic-9: in-progress
-  9-1-readiness-brake-and-minimal-intake-cockpit: ready-for-dev
-  9-2-author-seam-feature-to-drafted-story: ready-for-dev
-  9-3-judge-panel-rubric-grading: ready-for-dev
-  9-4-quality-lead-adjudication-and-escalation: ready-for-dev
-  9-5-generated-backlog-dashboard: ready-for-dev
+  9-1-readiness-brake-and-minimal-intake-cockpit: done
+  9-2-author-seam-feature-to-drafted-story: done
+  9-3-judge-panel-rubric-grading: done
+  9-4-quality-lead-adjudication-and-escalation: done
+  9-5-generated-backlog-dashboard: done
   epic-9-retrospective: optional
