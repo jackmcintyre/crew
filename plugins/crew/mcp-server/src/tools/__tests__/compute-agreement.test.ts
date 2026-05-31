@@ -605,7 +605,8 @@ describe("AC4o — MCP tool registration smoke", () => {
     // De-cruft 2026-05-30: removed recordAgentInvoke + recordPrCloseAction (unwired dead code). 38 → 36.
     // Story 6.4 added acceptProposal. 36 → 37.
     // Story 9.1 added markStoryReady. 37 → 38.
-    expect(registeredTools.length).toBe(38);
+    // Story 9.3 added writeLensVerdict + aggregateJudgePanel (judge panel). 38 → 40.
+    expect(registeredTools.length).toBe(40);
   });
 });
 

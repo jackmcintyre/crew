@@ -235,6 +235,50 @@ export declare const DraftAuthoredEventSchema: z.ZodObject<{
         title: z.ZodString;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/**
+ * `panel.graded` — emitted by `runJudgePanel` (Story 9.3, Epic 9 gate 1 Tier 1)
+ * once the judge panel has assembled a complete `PanelVerdict` for a draft.
+ * Exactly ONE event per completed panel run; NONE on a panel that fails loudly
+ * (a missing lens, a duplicate judge role, or a malformed lens-verdict file all
+ * throw before this line).
+ *
+ * - `ref`           — the draft's reference (`<adapter>:<source-id>`). Also
+ *                     mirrored into the envelope `story_id` so consumers reading
+ *                     only the envelope can join.
+ * - `tier0`         — the Tier-0 status carried on the panel verdict.
+ * - `risk_tier`     — the draft's classified risk tier (low|medium|high), which
+ *                     selected the Considered-lens bar.
+ * - `passed_lenses` — count of lenses that PASSED (0–5).
+ * - `failed_lenses` — count of lenses that FAILED (0–5). `passed + failed` is
+ *                     always 5 (the five Tier-1 lenses).
+ *
+ * The panel writes NO readiness flag — that decision is Story 9.4's. This event
+ * records that grading happened, not that the draft was blessed.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved
+ * (no body/diff/contents strings — NFR14, no per-lens `missed` strings leaked).
+ */
+export declare const PanelGradedEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"panel.graded">;
+    data: z.ZodObject<{
+        ref: z.ZodString;
+        tier0: z.ZodEnum<{
+            fail: "fail";
+            pass: "pass";
+        }>;
+        risk_tier: z.ZodEnum<{
+            high: "high";
+            low: "low";
+            medium: "medium";
+        }>;
+        passed_lenses: z.ZodNumber;
+        failed_lenses: z.ZodNumber;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     ts: z.ZodString;
     session_id: z.ZodString;
@@ -351,6 +395,26 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
     data: z.ZodObject<{
         ref: z.ZodString;
         title: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"panel.graded">;
+    data: z.ZodObject<{
+        ref: z.ZodString;
+        tier0: z.ZodEnum<{
+            fail: "fail";
+            pass: "pass";
+        }>;
+        risk_tier: z.ZodEnum<{
+            high: "high";
+            low: "low";
+            medium: "medium";
+        }>;
+        passed_lenses: z.ZodNumber;
+        failed_lenses: z.ZodNumber;
     }, z.core.$strict>;
 }, z.core.$strict>], "type">;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;

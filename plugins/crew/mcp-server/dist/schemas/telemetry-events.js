@@ -219,6 +219,41 @@ export const DraftAuthoredEventSchema = TelemetryEventBase.extend({
     })
         .strict(),
 }).strict();
+/**
+ * `panel.graded` — emitted by `runJudgePanel` (Story 9.3, Epic 9 gate 1 Tier 1)
+ * once the judge panel has assembled a complete `PanelVerdict` for a draft.
+ * Exactly ONE event per completed panel run; NONE on a panel that fails loudly
+ * (a missing lens, a duplicate judge role, or a malformed lens-verdict file all
+ * throw before this line).
+ *
+ * - `ref`           — the draft's reference (`<adapter>:<source-id>`). Also
+ *                     mirrored into the envelope `story_id` so consumers reading
+ *                     only the envelope can join.
+ * - `tier0`         — the Tier-0 status carried on the panel verdict.
+ * - `risk_tier`     — the draft's classified risk tier (low|medium|high), which
+ *                     selected the Considered-lens bar.
+ * - `passed_lenses` — count of lenses that PASSED (0–5).
+ * - `failed_lenses` — count of lenses that FAILED (0–5). `passed + failed` is
+ *                     always 5 (the five Tier-1 lenses).
+ *
+ * The panel writes NO readiness flag — that decision is Story 9.4's. This event
+ * records that grading happened, not that the draft was blessed.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved
+ * (no body/diff/contents strings — NFR14, no per-lens `missed` strings leaked).
+ */
+export const PanelGradedEventSchema = TelemetryEventBase.extend({
+    type: z.literal("panel.graded"),
+    data: z
+        .object({
+        ref: z.string().min(1),
+        tier0: z.enum(["pass", "fail"]),
+        risk_tier: z.enum(["low", "medium", "high"]),
+        passed_lenses: z.number().int().nonnegative(),
+        failed_lenses: z.number().int().nonnegative(),
+    })
+        .strict(),
+}).strict();
 export const TelemetryEventSchema = z.discriminatedUnion("type", [
     AgentInvokeEventSchema,
     TelemetryInvalidEventSchema,
@@ -229,4 +264,5 @@ export const TelemetryEventSchema = z.discriminatedUnion("type", [
     RetroProposalAppliedEventSchema,
     BacklogReadinessChangedEventSchema,
     DraftAuthoredEventSchema,
+    PanelGradedEventSchema,
 ]);
