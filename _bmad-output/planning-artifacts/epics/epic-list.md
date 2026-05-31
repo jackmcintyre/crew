@@ -96,7 +96,19 @@ Lands: an operator-controlled `ready` state + a drain claim-path that selects on
 
 ---
 
+## Epic 10: Native Re-foundation — Promote the Native Format to Primary
+
+**Goal:** Make the native story format the primary substrate and close the gap that the schema is thinner than the rubric grades — four of six Tier-0 checks can't be machine-enforced because the data isn't structured. Enrich the native schema so every rubric-graded property is a structured field (per-AC `verification`, `tasks[]→ac_refs`, `cited_sources[]`, `risk_tier`, structured `narrative`), finish Tier-0 in code (fail-closed at write + scan), build a one-off BMad→native ingest, cut over to native-primary (BMad ingest-only), and prove the pipeline end-to-end on a real feature. The keystone: the strict schema *is* the grading sheet — "a string appears in a file" passing as verification becomes structurally unrepresentable. Not a rewrite — the native format, parser/writer, and the two-gate cockpit already run on the native adapter (Epic 9); this promotes it and closes the specific gaps.
+
+**Source of truth:** `_bmad-output/planning-artifacts/native-refoundation-plan-2026-05-31.md` (code-grounded gap analysis + re-foundation plan). Extends the Epic 9 design note and `rubric-story-quality-2026-05-31.md`. Reuses E2 (team/personas), E3 (adapters/manifests/scan), E6 (standards/rubric).
+
+Lands: a per-AC structured `verification` block — the spine (10.1); `tasks[]→ac_refs`, `cited_sources[]`, and a structured `narrative` (10.2); the four missing Tier-0 checks in the discipline validator, fail-closed at write + scan (10.3); `risk_tier` plumbed into the draft so the Considered lens grades at author time (10.4); a one-off, one-way BMad→native ingest seam (10.5); cutover to native-primary / BMad ingest-only (10.6); an end-to-end proof on a real feature (10.7).
+
+**Status (2026-05-31):** active scaffold — all 5 §8 design decisions ratified by Jack 2026-05-31. Stories are thin stubs; `bmad-create-story` authors each full spec. Build-order: 10.3 shares the discipline-validator surface with the live Epic 6 calibration drain (6.5–6.8) — author now, build after that drain lands. Sequencing: 10.1 → 10.2 → 10.3 → 10.4 → 10.5 → 10.6 → 10.7.
+
+---
+
 **Dependency flow:**
-E1 (foundation) → E2 (hire) ↔ E3 (backlog) → E4 (dev loop) → E5 (orchestration) ↔ E6 (calibration) → E7 (canary). **E8 (stateless substrate + Stage-1 dogfood)** supersedes the E5 daemon/`/watch` line and is the active proof-point workstream; it reuses the E2–E6 tool layer. **E9 (intake & judging — the planning cockpit)** is the new front half: gate 1 that feeds the E8 drain (gate 2), reusing the E2/E3/E6 tool layer and superseding E3's one-shot `/plan` as the ongoing planning surface.
+E1 (foundation) → E2 (hire) ↔ E3 (backlog) → E4 (dev loop) → E5 (orchestration) ↔ E6 (calibration) → E7 (canary). **E8 (stateless substrate + Stage-1 dogfood)** supersedes the E5 daemon/`/watch` line and is the active proof-point workstream; it reuses the E2–E6 tool layer. **E9 (intake & judging — the planning cockpit)** is the new front half: gate 1 that feeds the E8 drain (gate 2), reusing the E2/E3/E6 tool layer and superseding E3's one-shot `/plan` as the ongoing planning surface. **E10 (native re-foundation)** promotes the E9-built native adapter to primary — enriching the native schema to carry everything the rubric grades, finishing Tier-0 in code, ingesting the BMad backlog one-way, and cutting over to native-primary (BMad ingest-only).
 
 E2 and E3 are independent of each other (you can hire without a backlog; you can scan a backlog without hiring) but both are prerequisites for E4. E5 and E6 are independent of each other but both consume manifests + telemetry produced by E4.
