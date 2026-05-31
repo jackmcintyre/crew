@@ -20,6 +20,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execa as realExeca } from "execa";
 import { materialiseDevStoryWorktree } from "../dev-story-worktree.js";
+import { GIT_LOCK_MAX_ATTEMPTS } from "../git.js";
 import { DevStoryWorktreeError } from "../../errors.js";
 
 const SESSION_ULID = "01HZSESSION00000000009999";
@@ -122,7 +123,7 @@ describe("materialiseDevStoryWorktree — concurrent worktree-add lock retry", (
       sleepImpl: noopSleep,
     });
 
-    // 4 failures + 1 success = 5 attempts (the budget), worktree created.
+    // 4 failures + 1 success = 5 attempts (well within the budget), worktree created.
     expect(flaky.attempts()).toBe(5);
     await expect(fs.access(result.worktreePath)).resolves.toBeUndefined();
   });
@@ -160,7 +161,8 @@ describe("materialiseDevStoryWorktree — concurrent worktree-add lock retry", (
       }),
     ).rejects.toBeInstanceOf(DevStoryWorktreeError);
 
-    // Capped at the max-attempts budget — does not retry forever.
-    expect(flaky.attempts()).toBe(5);
+    // Capped at the max-attempts budget — does not retry forever. Tracks the
+    // constant so the assertion follows future tuning of the budget.
+    expect(flaky.attempts()).toBe(GIT_LOCK_MAX_ATTEMPTS);
   });
 });

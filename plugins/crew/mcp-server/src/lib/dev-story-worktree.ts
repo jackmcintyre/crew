@@ -51,7 +51,7 @@ import { DevStoryWorktreeError } from "../errors.js";
 import {
   GIT_LOCK_CONTENTION,
   GIT_LOCK_MAX_ATTEMPTS,
-  GIT_LOCK_BACKOFF_MS,
+  gitLockBackoffMs,
   defaultGitLockSleep,
 } from "./git.js";
 
@@ -248,7 +248,7 @@ export async function materialiseDevStoryWorktree(
       `[dev-story-worktree] git worktree add for ${ref} hit lock contention ` +
         `(attempt ${attempt}/${GIT_LOCK_MAX_ATTEMPTS}): ${add.stderr.trim()}. Retrying.`,
     );
-    await sleep(GIT_LOCK_BACKOFF_MS * attempt);
+    await sleep(gitLockBackoffMs(attempt));
     add = await runGit(
       ["-C", targetRepoRoot, "worktree", "add", "--detach", worktreePath, base],
       targetRepoRoot,
