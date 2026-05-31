@@ -160,7 +160,7 @@ development_status:
   10-1-enrich-native-ac-verification-block: ready-for-dev
   10-2-native-tasks-ac-refs-cited-sources-and-narrative: ready-for-dev
   10-3-complete-tier-0-discipline-validator: ready-for-dev
-  10-4-plumb-risk-tier-into-native-draft: backlog
+  10-4-plumb-risk-tier-into-native-draft: ready-for-dev
   10-5-bmad-to-native-ingest-seam: backlog
   10-6-cutover-native-primary-bmad-ingest-only: backlog
   10-7-prove-pipeline-end-to-end: backlog
