@@ -6,7 +6,9 @@
 >
 > **These story blocks are intentionally thin stubs** (title + one-line scope only). Per the never-hand-write rule, `bmad-create-story` authors each full spec (user-story + acceptance criteria) into the implementation-artifact. Do **not** hand-author ACs here.
 >
-> **Sequencing:** 9.1 first (the spine — readiness brake; needs no rubric). Then 9.2 (author seam). **Extend the rubric before 9.3.** Then 9.3 (judge panel) → 9.4 (Quality Lead) → 9.5 (dashboard). Drain in small serial batches. State lives in the existing sprint-status ledger + manifests — one source of truth, no parallel store.
+> **Sequencing:** 9.1 first (the spine — readiness brake; needs no rubric). Then 9.2 (author seam). Then 9.3 (judge panel) → 9.4 (Quality Lead) → 9.5 (dashboard). Drain in small serial batches. State lives in the existing sprint-status ledger + manifests — one source of truth, no parallel store.
+>
+> **The rubric these stories grade against:** `_bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md` — the canonical, evolvable grading artifact (Tier 0 deterministic veto + Tier 1 panel lenses, with worked pass/fail examples). 9.2 drafts *to pass* it; 9.3 *scores* against it; 9.4 *owns* it. When 9.2/9.3 are authored via `bmad-create-story`, that file path belongs in each spec's References section so the author/judge loads it by name rather than reinventing a rubric.
 
 ---
 
@@ -16,11 +18,11 @@ Scope: introduce an explicit operator-controlled `ready` state distinct from "ex
 
 ## Story 9.2: Author seam — feature to drafted story
 
-Scope: turn a plain-language feature description into a drafted story spec shaped for the current (BMad) substrate, via an author agent (reuse the Epic 3 planner / `bmad-create-story` path). The operator describes a feature; a draft spec appears for review. *Observable spine: given a feature description, a spec file appears that passes the Tier-0 deterministic checks (required sections, well-formed ACs with verification markers, explicit deps, cited sources).* (Slice 2.)
+Scope: turn a plain-language feature description into a drafted story spec shaped for the current (BMad) substrate, via an author agent (reuse the Epic 3 planner / `bmad-create-story` path). The operator describes a feature; a draft spec appears for review. The author drafts **to pass the rubric** (`_bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md`) — the rubric is the author's target, so the Tier-0 checks below are exactly its Tier 0. *Observable spine: given a feature description, a spec file appears that passes the Tier-0 deterministic checks (required sections, well-formed ACs with verification markers, explicit deps, cited sources).* (Slice 2.)
 
 ## Story 9.3: Judge panel — rubric grading
 
-Scope: a generate-and-judge step that grades a drafted story against the rubric using diverse-lens judges drawn from the hired team (verifiability, structure, discipline, domain), emitting a **machine-checkable per-criterion verdict** (pass/fail + what each lens missed) — not prose. Reuses the Epic 6 standards/rubric surface. *Observable spine: a deliberately thin draft (e.g. an AC that only asserts a string appears in a file) is failed on the verifiability lens, not passed.* **Depends on the extended rubric.** (Slice 3.)
+Scope: a generate-and-judge step that grades a drafted story against the rubric (`_bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md`) using diverse-lens judges drawn from the hired team (verifiability, structure, discipline, domain, considered), emitting a **machine-checkable per-criterion verdict** (pass/fail + what each lens missed) — not prose. The judging tool loads that rubric file into each judge's prompt (read by construction, not by reminder) and forces the per-lens structured verdict. Reuses the Epic 6 standards/rubric surface. *Observable spine: a deliberately thin draft (e.g. an AC that only asserts a string appears in a file) is failed on the verifiability lens, not passed.* **Depends on the extended rubric (the file above).** (Slice 3.)
 
 ## Story 9.4: Quality Lead — adjudication + escalation
 
