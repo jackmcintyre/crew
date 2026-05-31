@@ -156,8 +156,8 @@ development_status:
   9-4-quality-lead-adjudication-and-escalation: done
   9-5-generated-backlog-dashboard: done
   epic-9-retrospective: optional
-  epic-10: backlog
-  10-1-enrich-native-ac-verification-block: backlog
+  epic-10: in-progress
+  10-1-enrich-native-ac-verification-block: ready-for-dev
   10-2-native-tasks-ac-refs-cited-sources-and-narrative: backlog
   10-3-complete-tier-0-discipline-validator: backlog
   10-4-plumb-risk-tier-into-native-draft: backlog
