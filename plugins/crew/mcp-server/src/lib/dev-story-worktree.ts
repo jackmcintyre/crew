@@ -48,6 +48,12 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { execa as defaultExeca } from "execa";
 import { DevStoryWorktreeError } from "../errors.js";
+import {
+  GIT_LOCK_CONTENTION,
+  GIT_LOCK_MAX_ATTEMPTS,
+  GIT_LOCK_BACKOFF_MS,
+  defaultGitLockSleep,
+} from "./git.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,6 +84,12 @@ export interface DevStoryWorktreeOpts {
   base: string;
   /** Test seam — production callers do not pass this. */
   execaImpl?: typeof defaultExeca;
+  /**
+   * Test seam for the `git worktree add` retry backoff — production callers do
+   * not pass this (the default awaits a real timer). Injecting a no-op keeps the
+   * unit test that drives the lock-contention retry path instant.
+   */
+  sleepImpl?: (ms: number) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +109,13 @@ async function runGit(
     exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
   };
 }
+
+// Concurrent `git worktree add` against a shared `.git` can lose a lock race
+// (two dev workers, Story 8.22) exactly as the mutating ops in `git.ts` can —
+// so the retry policy (regex / attempt budget / backoff / sleep) is shared from
+// there rather than duplicated here. The prior code comment claiming git
+// "serialises" concurrent worktree adds was wrong; it surfaced as the flaky
+// `concurrent-drains-isolation` test that reds CI under load.
 
 /**
  * Sanitise a story ref into a filesystem-safe worktree directory segment.
@@ -152,6 +171,7 @@ export async function materialiseDevStoryWorktree(
 ): Promise<DevStoryWorktreeResult> {
   const { targetRepoRoot, sessionUlid, ref, base } = opts;
   const execaImpl = opts.execaImpl ?? defaultExeca;
+  const sleep = opts.sleepImpl ?? defaultGitLockSleep;
   const setupLog: string[] = [];
 
   // -------------------------------------------------------------------------
@@ -203,14 +223,38 @@ export async function materialiseDevStoryWorktree(
   // Step 2: git worktree add --detach <path> <base> — a clean checkout cut from
   // `base`, the dev's editing + build surface. `--detach` keeps `base` usable in
   // the orchestrating checkout and composes with concurrency (each story cuts a
-  // distinct path off the same base; git serialises the `.git` index update).
-  // runDevTerminalAction creates the story branch inside the worktree next.
+  // distinct path off the same base).
+  //
+  // Concurrency caveat: git does NOT fully serialise concurrent `git worktree
+  // add` against a shared `.git` — two workers can collide on the config/index/
+  // ref locks and the loser exits non-zero with a transient lock error. Retry
+  // those with a short backoff; a non-lock failure (e.g. a bad base ref) still
+  // fails fast on the first attempt. runDevTerminalAction creates the story
+  // branch inside the worktree next.
   // -------------------------------------------------------------------------
-  const add = await runGit(
+  let add = await runGit(
     ["-C", targetRepoRoot, "worktree", "add", "--detach", worktreePath, base],
     targetRepoRoot,
     execaImpl,
   );
+  for (
+    let attempt = 1;
+    add.exitCode !== 0 &&
+    attempt < GIT_LOCK_MAX_ATTEMPTS &&
+    GIT_LOCK_CONTENTION.test(add.stderr);
+    attempt++
+  ) {
+    setupLog.push(
+      `[dev-story-worktree] git worktree add for ${ref} hit lock contention ` +
+        `(attempt ${attempt}/${GIT_LOCK_MAX_ATTEMPTS}): ${add.stderr.trim()}. Retrying.`,
+    );
+    await sleep(GIT_LOCK_BACKOFF_MS * attempt);
+    add = await runGit(
+      ["-C", targetRepoRoot, "worktree", "add", "--detach", worktreePath, base],
+      targetRepoRoot,
+      execaImpl,
+    );
+  }
   if (add.exitCode !== 0) {
     throw new DevStoryWorktreeError({
       ref,

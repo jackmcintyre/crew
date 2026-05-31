@@ -110,6 +110,71 @@ export function assertNoNegativeFlags(
 }
 
 // ---------------------------------------------------------------------------
+// Concurrent git-lock contention retry (concurrent drains — Story 8.20/8.22).
+//
+// Concurrent dev workers run mutating git ops (checkout -b, commit, push)
+// against the SAME shared `.git`: drain worktrees share the common dir, and they
+// push to one origin. Git does NOT fully serialise these — two workers can
+// collide on the config/index/ref/packed-refs locks and the loser exits non-zero
+// with a transient lock error. (Surfaced as a flaky `concurrent-drains-isolation`
+// test that reds CI under load.) These helpers retry the transient lock failures
+// with a short backoff; a non-lock failure (bad ref, malformed message, remote
+// rejection, …) is re-thrown UNCHANGED on the first attempt, so every existing
+// failure mode is preserved exactly. The same pattern guards `git worktree add`
+// in dev-story-worktree.ts, which imports the constants below.
+// ---------------------------------------------------------------------------
+
+/** stderr substrings that mark a transient git-lock collision worth retrying. */
+export const GIT_LOCK_CONTENTION =
+  /could not lock|cannot lock|\.lock\b|update_ref failed|another git process/i;
+
+/** Total attempts (initial + retries) before surfacing a git-lock failure. */
+export const GIT_LOCK_MAX_ATTEMPTS = 5;
+
+/** Linear backoff between retries: retry 1 → 25ms, 2 → 50ms, … */
+export const GIT_LOCK_BACKOFF_MS = 25;
+
+/** Default backoff sleep (real timer); overridable via a `sleepImpl` test seam. */
+export function defaultGitLockSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** True if `value` (an Error, an execa result, or a string) carries a transient git-lock signature. */
+function isGitLockContention(value: unknown): boolean {
+  const stderr =
+    typeof value === "string"
+      ? value
+      : String(
+          (value as { stderr?: unknown })?.stderr ??
+            (value as { message?: unknown })?.message ??
+            "",
+        );
+  return GIT_LOCK_CONTENTION.test(stderr);
+}
+
+/**
+ * Invoke a git-spawning thunk, retrying transient lock-contention failures with a
+ * short backoff. The thunk MUST throw on failure (execa's default reject, or the
+ * helper's own typed error) and MUST be idempotent on a lock-failed attempt — a
+ * lock collision means the op did not mutate. On a non-lock error, or once the
+ * attempt budget is exhausted, the ORIGINAL error is re-thrown UNCHANGED, so the
+ * caller sees exactly the failure it did before this retry existed.
+ */
+async function retryGitOnLockContention<T>(
+  thunk: () => Promise<T>,
+  sleepImpl: (ms: number) => Promise<void>,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await thunk();
+    } catch (err) {
+      if (attempt >= GIT_LOCK_MAX_ATTEMPTS || !isGitLockContention(err)) throw err;
+      await sleepImpl(GIT_LOCK_BACKOFF_MS * attempt);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // gitCommit (Story 1.5 AC4, extended by Story 4.4 Task 2.3)
 // ---------------------------------------------------------------------------
 
@@ -150,10 +215,13 @@ export async function gitCommit(opts: {
   messageShape?: "plugin-internal" | "conventional";
   body?: string;
   execaImpl?: typeof defaultExeca;
+  /** Test seam for the lock-contention retry backoff (production omits this). */
+  sleepImpl?: (ms: number) => Promise<void>;
 }): Promise<GitCommitResult> {
   const { targetRepoRoot, paths, message } = opts;
   const messageShape = opts.messageShape ?? "plugin-internal";
   const execaImpl = opts.execaImpl ?? defaultExeca;
+  const sleep = opts.sleepImpl ?? defaultGitLockSleep;
 
   if (paths.length === 0) {
     throw new GitCommitMessageMalformedError({
@@ -191,7 +259,12 @@ export async function gitCommit(opts: {
     commitArgs.push("-m", opts.body);
   }
 
-  const commitResult = await execaImpl("git", commitArgs);
+  // The commit updates the branch ref in the shared `.git`; under concurrent
+  // drains that ref update can lose a lock race. Retry on transient contention.
+  const commitResult = await retryGitOnLockContention(
+    () => execaImpl("git", commitArgs),
+    sleep,
+  );
 
   const revResult = await execaImpl("git", [
     "-C",
@@ -226,15 +299,23 @@ export async function gitCreateBranch(opts: {
   targetRepoRoot: string;
   branchName: string;
   execaImpl?: typeof defaultExeca;
+  /** Test seam for the lock-contention retry backoff (production omits this). */
+  sleepImpl?: (ms: number) => Promise<void>;
 }): Promise<void> {
   const { targetRepoRoot, branchName } = opts;
   const execaImpl = opts.execaImpl ?? defaultExeca;
+  const sleep = opts.sleepImpl ?? defaultGitLockSleep;
 
   if (!STORY_BRANCH_REGEX.test(branchName)) {
     throw new GitBranchNameMalformedError({ branchName });
   }
 
-  await execaImpl("git", ["-C", targetRepoRoot, "checkout", "-b", branchName]);
+  // `checkout -b` creates a ref in the shared `.git`; under concurrent drains
+  // that ref creation can lose a lock race. Retry on transient contention.
+  await retryGitOnLockContention(
+    () => execaImpl("git", ["-C", targetRepoRoot, "checkout", "-b", branchName]),
+    sleep,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -257,22 +338,30 @@ export async function gitPush(opts: {
   branchName: string;
   role: string;
   execaImpl?: typeof defaultExeca;
+  /** Test seam for the lock-contention retry backoff (production omits this). */
+  sleepImpl?: (ms: number) => Promise<void>;
 }): Promise<void> {
   const { targetRepoRoot, branchName } = opts;
   const execaImpl = opts.execaImpl ?? defaultExeca;
+  const sleep = opts.sleepImpl ?? defaultGitLockSleep;
 
-  const result = await execaImpl(
-    "git",
-    ["-C", targetRepoRoot, "push", "-u", "origin", branchName],
-    { reject: false },
-  );
-
-  if ((result.exitCode ?? 0) !== 0) {
-    throw new GitPushFailedError({
-      branchName,
-      stderr: (result as unknown as { stderr?: string }).stderr ?? "",
-    });
-  }
+  // Concurrent drains push different branches to ONE origin; the origin's ref
+  // transaction can lose a lock race. The thunk throws GitPushFailedError on any
+  // non-zero exit; the retry wrapper retries it only when the stderr signals
+  // lock contention, and re-throws the same GitPushFailedError otherwise.
+  await retryGitOnLockContention(async () => {
+    const result = await execaImpl(
+      "git",
+      ["-C", targetRepoRoot, "push", "-u", "origin", branchName],
+      { reject: false },
+    );
+    if ((result.exitCode ?? 0) !== 0) {
+      throw new GitPushFailedError({
+        branchName,
+        stderr: (result as unknown as { stderr?: string }).stderr ?? "",
+      });
+    }
+  }, sleep);
 }
 
 // ---------------------------------------------------------------------------
