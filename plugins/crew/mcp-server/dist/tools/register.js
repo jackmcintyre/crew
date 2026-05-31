@@ -35,6 +35,8 @@ import { applyReviewerLabels } from "./apply-reviewer-labels.js";
 import { processReviewerYield } from "./process-reviewer-yield.js";
 import { classifyRiskTier } from "./classify-risk-tier.js";
 import { computeAgreement, AgreementMetricResultSchema } from "./compute-agreement.js";
+import { recordSkillInvoke } from "./record-skill-invoke.js";
+import { computeSkillEffectiveness, SkillEffectivenessResultSchema, } from "./compute-skill-effectiveness.js";
 import { runAutoMergeGate, AutoMergeGateResultSchema } from "./run-auto-merge-gate.js";
 import { createSmokeScratchRepo } from "./create-smoke-scratch-repo.js";
 import { scanOrphanedInProgress } from "./scan-orphaned-in-progress.js";
@@ -1483,6 +1485,145 @@ export function registerAllTools(server) {
                 if (err instanceof DomainError) {
                     return {
                         content: [{ type: "text", text: JSON.stringify({ error: err.name, message: err.message }) }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 6.8 — recordSkillInvoke: the SINGLE write-path for the skill.invoke
+    // telemetry event. Validates the data payload (closed enums on skill_scope /
+    // invocation_source — an unknown value is rejected, never coerced) and emits
+    // exactly one skill.invoke event via logTelemetryEvent. Called by the skill
+    // capture seam (an instrumented crew SKILL.md first-step on the fallback path).
+    // Grouped with the telemetry/retro-path tools (computeAgreement). (Story 6.8)
+    server.registerTool({
+        name: "recordSkillInvoke",
+        description: "Single write-path for the skill.invoke telemetry event (Story 6.8). " +
+            "Validates { skill_name, skill_path, skill_version, skill_scope, invocation_source } — " +
+            "skill_scope (project|persona|plugin) and invocation_source (user-slash-command|agent-call) " +
+            "are CLOSED enums; an unknown value raises MalformedSkillInvokeInputError and writes nothing. " +
+            "Emits exactly one skill.invoke event via the telemetry logger (which stamps ts). " +
+            "Returns { recorded: true } on success. Touches no .crew/state manifest.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                sessionUlid: { type: "string" },
+                agent: { type: "string" },
+                storyId: { type: "string" },
+                data: {
+                    type: "object",
+                    properties: {
+                        skill_name: { type: "string" },
+                        skill_path: { type: "string" },
+                        skill_version: { type: "string" },
+                        skill_scope: { type: "string", enum: ["project", "persona", "plugin"] },
+                        invocation_source: {
+                            type: "string",
+                            enum: ["user-slash-command", "agent-call"],
+                        },
+                    },
+                    required: [
+                        "skill_name",
+                        "skill_path",
+                        "skill_version",
+                        "skill_scope",
+                        "invocation_source",
+                    ],
+                },
+            },
+            required: ["targetRepoRoot", "sessionUlid", "agent", "data"],
+        },
+        handler: async (args) => {
+            const parsed = z
+                .object({
+                targetRepoRoot: z.string().min(1),
+                sessionUlid: z.string().min(1),
+                agent: z.string().min(1),
+                storyId: z.string().min(1).optional(),
+                data: z.unknown(),
+            })
+                .parse(args);
+            try {
+                const result = await recordSkillInvoke({
+                    targetRepoRoot: parsed.targetRepoRoot,
+                    sessionUlid: parsed.sessionUlid,
+                    agent: parsed.agent,
+                    storyId: parsed.storyId,
+                    data: parsed.data,
+                });
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({ error: err.name, message: err.message }),
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 6.8 — computeSkillEffectiveness: pure, deterministic, no-LLM helper
+    // (the skill-side analogue of computeAgreement). Reads skill.invoke events
+    // under <targetRepoRoot>/.crew/telemetry/, joins each to a later READY FOR
+    // MERGE reviewer.verdict in the same story flow, and reports per-skill
+    // invoke_count, useful_fire_count, and effectiveness_ratio. Always returns a
+    // result shape (empty per_skill map on no data — never null, never throws on
+    // empty/malformed input); throws only SkillEffectivenessWindowInvalidError on
+    // an invalid window. Consumed by the retro analyst's retirement criterion.
+    // Grouped with the telemetry/retro-path tools. (Story 6.8)
+    server.registerTool({
+        name: "computeSkillEffectiveness",
+        description: "Compute per-skill effectiveness from skill.invoke events joined to downstream " +
+            "READY FOR MERGE reviewer verdicts (Story 6.8). Reads every *.jsonl under " +
+            "<targetRepoRoot>/.crew/telemetry/, sorts skill.invoke events newest-first, takes " +
+            "the first `window` (default 50), and for each skill reports invoke_count, " +
+            "useful_fire_count (invocations followed by a same-session/same-story READY FOR MERGE), " +
+            "and effectiveness_ratio (useful/invoke, 0 not NaN). Returns " +
+            "{ per_skill, window_size, sample_size, malformed_lines } — an empty per_skill map on " +
+            "no data (never null, never an error on empty/malformed input). Malformed JSONL lines " +
+            "are skipped and counted. Throws SkillEffectivenessWindowInvalidError on an invalid window.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                window: { type: "number" },
+            },
+            required: ["targetRepoRoot"],
+        },
+        handler: async (args) => {
+            const parsed = {
+                targetRepoRoot: args.targetRepoRoot,
+                window: args.window,
+            };
+            try {
+                const result = await computeSkillEffectiveness(parsed);
+                // Validate return shape before surfacing (round-trip guard).
+                SkillEffectivenessResultSchema.parse(result);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({ error: err.name, message: err.message }),
+                            },
+                        ],
                         isError: true,
                     };
                 }

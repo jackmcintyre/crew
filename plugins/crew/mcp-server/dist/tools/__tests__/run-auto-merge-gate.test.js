@@ -745,7 +745,8 @@ describe("AC5(j) — MCP tool registration smoke", () => {
         // Story 9.3 added writeLensVerdict + aggregateJudgePanel (judge panel). 38 → 40.
         // Story 9.4 added adjudicateQualityLead (Quality Lead). 40 → 41.
         // Story 9.5 added getBacklogDashboard (backlog dashboard). 41 → 42.
-        expect(registeredTools.length).toBe(42);
+        // Story 6.8 added recordSkillInvoke + computeSkillEffectiveness (skill telemetry). 42 → 44.
+        expect(registeredTools.length).toBe(44);
     });
 });
 // ---------------------------------------------------------------------------

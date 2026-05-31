@@ -500,7 +500,10 @@ describe("AC4(g): tool count and required tools present", () => {
             expect(toolNames).toContain("adjudicateQualityLead");
             // Story 9.5 added getBacklogDashboard (backlog dashboard). 41 → 42.
             expect(toolNames).toContain("getBacklogDashboard");
-            expect(toolNames.length).toBe(42);
+            // Story 6.8 added recordSkillInvoke + computeSkillEffectiveness (skill telemetry). 42 → 44.
+            expect(toolNames).toContain("recordSkillInvoke");
+            expect(toolNames).toContain("computeSkillEffectiveness");
+            expect(toolNames.length).toBe(44);
         }
         finally {
             await client.close();

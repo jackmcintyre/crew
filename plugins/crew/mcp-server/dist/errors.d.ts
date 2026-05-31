@@ -1294,6 +1294,24 @@ export declare class LensVerdictFileMalformedError extends DomainError {
     });
 }
 /**
+ * `recordSkillInvoke` was called with an input payload that failed schema
+ * validation — a missing/empty `data` field, or a closed-enum violation on
+ * `skill_scope` / `invocation_source`. The closed enums are intentional: an
+ * unknown scope or source is a bug, not something to fall through (the "no
+ * silent fallback" discipline). No `skill.invoke` event is written when this
+ * throws (the bad event never reaches the logger).
+ *
+ * Story 6.8.
+ */
+export declare class MalformedSkillInvokeInputError extends DomainError {
+    readonly zodPath: string;
+    readonly zodMessage: string;
+    constructor(opts: {
+        zodPath: string;
+        zodMessage: string;
+    });
+}
+/**
  * A `skill-create` (or `skill-supersede` replacement) apply handler refused
  * because a file already exists at the proposed skill path. Skill creation
  * never overwrites — a collision means the operator is trying to create a
@@ -1306,6 +1324,22 @@ export declare class SkillAlreadyExistsError extends DomainError {
     readonly skillPath: string;
     constructor(opts: {
         skillPath: string;
+    });
+}
+/**
+ * `computeSkillEffectiveness` was called with a `window` value that is not a
+ * positive integer (`0`, negative, non-integer, `NaN`, or non-finite). The
+ * window bounds which most-recent `skill.invoke` events are considered; a
+ * mis-typed value should never silently widen or empty the sample.
+ *
+ * Story 6.8 (mirrors `AgreementWindowInvalidError`).
+ */
+export declare class SkillEffectivenessWindowInvalidError extends DomainError {
+    readonly window: number;
+    readonly reason: string;
+    constructor(opts: {
+        window: number;
+        reason: string;
     });
 }
 /**
