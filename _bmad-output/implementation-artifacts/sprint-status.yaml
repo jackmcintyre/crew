@@ -81,7 +81,7 @@ development_status:
   5-15-fix-gh-pr-view-base-repository-non-field: done
   5-16-scan-sources-drift-on-refresh: done
   5-17-bmad-parser-ac-heading-regex-widening: done
-  5-18-structural-story-parser: backlog
+  5-18-structural-story-parser: cancelled  # native re-foundation §10: strict generated format leaves nothing sloppy to parse; charter absorbed by Epic 10 (10.3 Tier-0). See sprint-change-proposal-2026-05-31-native-refoundation-correct-course.md
   5-19-scan-sources-readfile-resilience: done
   5-20-orphan-recovery-reviewer-only-respawn: done
   5-21-reviewer-first-call-deterministic-seam: done
@@ -108,20 +108,20 @@ development_status:
   6-6-promotion-threshold-and-rule-retirement: ready-for-dev
   6-7-skill-proposal-application-create-revise-supersede-retire: done
   6-8-skill-invoke-telemetry-and-skill-effectiveness-helper: done
-  6-14-hand-editable-persona-files-defaults-template-minimal-valid: backlog  # tracked 2026-05-31 (operator decision); usability prereq for 6.9 — author + slot before 6.9
-  6-9-persona-knowledge-append-via-proposed-md-and-accept-proposal: backlog
-  6-10-team-change-proposals-and-apply-team-change: backlog
-  6-11-outcome-stats-and-constructive-to-defensive-ratio: backlog
-  6-12-archive-cycle-and-cycle-boundaries: backlog
-  6-13-persona-files-version-controlled-and-bad-append-recovery: backlog
+  6-14-hand-editable-persona-files-defaults-template-minimal-valid: backlog  # tracked 2026-05-31 (operator decision); usability prereq for 6.9 — author + slot before 6.9; sequence: persona/team cluster waits behind native cutover (Epic 10/10.6), decision #5 HARMONIZE. See SCP 2026-05-31 native-refoundation.
+  6-9-persona-knowledge-append-via-proposed-md-and-accept-proposal: backlog  # sequence: persona/team cluster waits behind native cutover (Epic 10/10.6); QL/reviewer HARMONIZE (decision #5) shares one standards registry. See SCP 2026-05-31 native-refoundation.
+  6-10-team-change-proposals-and-apply-team-change: backlog  # sequence: behind native cutover (10.6), decision #5 HARMONIZE. See SCP 2026-05-31 native-refoundation.
+  6-11-outcome-stats-and-constructive-to-defensive-ratio: backlog  # sequence: behind native cutover (10.6). See SCP 2026-05-31 native-refoundation.
+  6-12-archive-cycle-and-cycle-boundaries: backlog  # sequence: behind native cutover (10.6). See SCP 2026-05-31 native-refoundation.
+  6-13-persona-files-version-controlled-and-bad-append-recovery: backlog  # sequence: behind native cutover (10.6). See SCP 2026-05-31 native-refoundation.
   epic-6-retrospective: optional
   epic-7: backlog
-  7-1-bundled-bmad-shaped-example-target-repo: backlog
-  7-2-readme-install-path-with-verifiable-checkpoints: backlog
-  7-3-e2e-canary-vitest-drive-of-the-canonical-scenario: backlog
+  7-1-bundled-bmad-shaped-example-target-repo: backlog  # rescope: native-shaped example (BMad -> ingest-only); re-author post-cutover. See sprint-change-proposal-2026-05-31-native-refoundation-correct-course.md
+  7-2-readme-install-path-with-verifiable-checkpoints: backlog  # rescope: /start+/watch retired -> drain + intake cockpit. See SCP 2026-05-31 native-refoundation.
+  7-3-e2e-canary-vitest-drive-of-the-canonical-scenario: backlog  # rescope: drive the drain (author->judge->QL->ready->drain->merge). See SCP 2026-05-31 native-refoundation.
   7-4-first-run-polish-and-plain-language-pass: backlog
-  7-4b-plain-language-pass-over-orchestration-surfaces: backlog
-  7-5-authoritative-troubleshooting-guide: backlog
+  7-4b-plain-language-pass-over-orchestration-surfaces: backlog  # rescope: Story 5.5 surfaces cancelled -> re-anchor to drain/result-bucket surfaces. See SCP 2026-05-31 native-refoundation.
+  7-5-authoritative-troubleshooting-guide: backlog  # rescope: 5.4/5.5/5.8 failure paths cancelled -> re-anchor to drain exit-reason taxonomy. See SCP 2026-05-31 native-refoundation.
   7-6-telemetry-summary-doc-generator: backlog
   7-7-maya-archetype-validation-paper-test: backlog
   epic-7-retrospective: optional
