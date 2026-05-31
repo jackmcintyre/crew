@@ -63,16 +63,16 @@ development_status:
   4-12-per-invocation-telemetry-and-runtime-soft-hard-limits: done
   epic-4-retrospective: done
   epic-5: backlog
-  5-1-block-story-mcp-tool-and-blocked-by-taxonomy: backlog
-  5-2-heartbeat-based-session-liveness: backlog
-  5-3-watch-skill-and-orchestration-polling-loop: backlog
-  5-4-stuck-story-and-stale-claim-detection: backlog
-  5-4b-paused-for-human-surface: backlog
-  5-5-one-line-terminal-surface-and-user-resolved-blocker-move-back: backlog
+  5-1-block-story-mcp-tool-and-blocked-by-taxonomy: cancelled  # /crew:start retired (#210); blocked_by enum shipped in 5.13
+  5-2-heartbeat-based-session-liveness: cancelled  # drain is one workflow, not polled long-lived sessions
+  5-3-watch-skill-and-orchestration-polling-loop: cancelled  # the drain IS the orchestration; nothing to poll
+  5-4-stuck-story-and-stale-claim-detection: cancelled  # crash-recovery + orphan-reattach shipped (#209)
+  5-4b-paused-for-human-surface: cancelled  # pausedForHuman bucket + 8.19 pause-to-ping cover this
+  5-5-one-line-terminal-surface-and-user-resolved-blocker-move-back: cancelled  # assumed the retired watch loop
   5-6-fault-injection-vitest-harness-and-session-death-recovery: backlog
   5-7-back-to-back-idempotency-integration-test: backlog
-  5-8-no-silent-failures-ci-pairing-assertion: backlog
-  5-9-telemetry-as-files-and-session-death-recovery-guide: backlog
+  5-8-no-silent-failures-ci-pairing-assertion: cancelled  # drain result-bucket guarantee (exactly-one-bucket + reason) covers this
+  5-9-telemetry-as-files-and-session-death-recovery-guide: cancelled  # superseded by 8.12 runbook + 8.14 exit-reasons docs
   5-10-persist-dev-transcript-to-disk-before-any-mcp-call: done
   5-11-orphan-recovery-branch-in-crew-start: done
   5-12-mcp-child-resilient-to-parent-stdin-close: done
