@@ -63,6 +63,7 @@ function makeManifest(
     narrative: sourceFields.narrative,
     implementation_notes: sourceFields.implementation_notes,
     withdrawn: sourceFields.withdrawn,
+    ready: false,
   };
 }
 

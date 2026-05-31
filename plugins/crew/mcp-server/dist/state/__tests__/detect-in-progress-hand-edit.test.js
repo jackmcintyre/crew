@@ -50,6 +50,7 @@ function makeManifest(sourceHash, sourceFields) {
         narrative: sourceFields.narrative,
         implementation_notes: sourceFields.implementation_notes,
         withdrawn: sourceFields.withdrawn,
+        ready: false,
     };
 }
 const CANONICAL_SOURCE_HASH = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";

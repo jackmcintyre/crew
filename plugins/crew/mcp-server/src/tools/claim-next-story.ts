@@ -68,8 +68,12 @@ export async function claimNextStory(
 
   const { todos, inProgressCount } = await listClaimableTodos({ targetRepoRoot });
 
-  // Filter to candidates that are deps-ready.
-  const eligible = todos.filter((c) => c.depsReady);
+  // Filter to candidates that are BOTH deps-ready AND operator-blessed (Story 9.1).
+  // The readiness brake is fail-closed: an item whose dependencies are all
+  // satisfied is still NOT claimed until the operator marks it `ready: true`
+  // via the markStoryReady tool (the /crew:ready skill). This is the single
+  // chokepoint the drain hits, so the gate lives here in the claim entry point.
+  const eligible = todos.filter((c) => c.depsReady && c.ready);
 
   // Queue-drained check: no eligible candidates AND no in-progress.
   if (eligible.length === 0 && inProgressCount === 0) {

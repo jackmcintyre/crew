@@ -45,6 +45,7 @@ function makeBaseManifest(ref) {
         title: "Test Story",
         narrative: "As a dev, I want to test.",
         withdrawn: false,
+        ready: true,
         claimed_by: SESSION_ULID,
     };
 }

@@ -37,6 +37,14 @@ export interface ClaimableCandidate {
    * `depsReady: true` on a given pass.
    */
   depsReady: boolean;
+  /**
+   * Operator readiness flag carried through verbatim from the parsed manifest
+   * (Story 9.1). The claim entry point (`claimNextStory`) requires BOTH
+   * `depsReady` AND `ready` before a candidate is eligible — a candidate that
+   * is deps-ready but not operator-blessed is listed here (so the intake
+   * cockpit can show it) but is never claimed.
+   */
+  ready: boolean;
 }
 
 export interface ListClaimableTodosResult {
@@ -124,6 +132,7 @@ export async function listClaimableTodos(
       title: manifest.title,
       depends_on: manifest.depends_on,
       depsReady,
+      ready: manifest.ready,
     });
   }
 

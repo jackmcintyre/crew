@@ -27,6 +27,7 @@ import {
   QUEUE_DRAINED_LINE,
   WAITING_ON_IN_PROGRESS_LINE,
 } from "../claim-next-story.js";
+import { markStoryReady } from "../mark-story-ready.js";
 import type { ExecutionManifest } from "../../schemas/execution-manifest.js";
 
 // ---------------------------------------------------------------------------
@@ -42,7 +43,10 @@ const SESSION_ULID = "01HZSESSION00000000000099";
 // Fixture helpers
 // ---------------------------------------------------------------------------
 
-function makeTodoManifest(ref: string, opts: { depends_on?: string[] } = {}): ExecutionManifest {
+function makeTodoManifest(
+  ref: string,
+  opts: { depends_on?: string[]; ready?: boolean } = {},
+): ExecutionManifest {
   return {
     ref,
     status: "to-do",
@@ -54,6 +58,10 @@ function makeTodoManifest(ref: string, opts: { depends_on?: string[] } = {}): Ex
     title: `Test story ${ref}`,
     narrative: "As a dev, I want to test.",
     withdrawn: false,
+    // Story 9.1: the claim path requires `ready: true`. Default the helper to
+    // ready so the pre-existing claim/branch tests still exercise their paths;
+    // the readiness-brake tests below set `ready: false` explicitly.
+    ready: opts.ready ?? true,
   };
 }
 
@@ -69,6 +77,7 @@ function makeInProgressManifest(ref: string): ExecutionManifest {
     title: `In-progress story ${ref}`,
     narrative: "As a dev, I want to test.",
     withdrawn: false,
+    ready: true,
     claimed_by: SESSION_ULID,
   };
 }
@@ -108,6 +117,7 @@ async function seedDoneStory(ref: string): Promise<void> {
     title: `Done story ${ref}`,
     narrative: "As a dev, I want to test.",
     withdrawn: false,
+    ready: true,
   };
   await atomicWriteFile(
     path.join(doneDir, `${ref}.yaml`),
@@ -270,5 +280,55 @@ describe("regression: no spawn", () => {
     // no Task-spawn seam is provided. The mere fact it compiles and runs cleanly is the assertion.
     const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
     expect(result.next).toBe("spawn-dev");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story 9.1 — readiness brake (AC1): the claim entry point requires BOTH
+// dependency-readiness AND the operator `ready` flag.
+// ---------------------------------------------------------------------------
+
+describe("Story 9.1 — readiness brake gates the claim entry point", () => {
+  it("never returns a not-ready item; returns the ready one even when both are deps-satisfied", async () => {
+    // Two deps-satisfied (no deps) backlog items: A is NOT ready, B is ready.
+    await seedTodoStory(makeTodoManifest(STORY_REF_A, { ready: false }));
+    await seedTodoStory(makeTodoManifest(STORY_REF_B, { ready: true }));
+
+    // STORY_REF_A sorts before STORY_REF_B, so without the brake the claim path
+    // would pick A. The brake must skip A (not-ready) and select B (ready).
+    const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
+    expect(result.next).toBe("spawn-dev");
+    if (result.next !== "spawn-dev") return;
+    expect(result.ref).toBe(STORY_REF_B);
+  });
+
+  it("queue-drains when the only deps-satisfied item is not ready (fail-closed)", async () => {
+    // A single deps-satisfied but not-ready item, and nothing in-progress.
+    await seedTodoStory(makeTodoManifest(STORY_REF_A, { ready: false }));
+
+    const result = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
+    // No eligible candidate (not ready) and no in-progress → queue-drained.
+    expect(result.next).toBe("queue-drained");
+    expect(result.chatLog).toContain(QUEUE_DRAINED_LINE);
+  });
+
+  it("once the not-ready item is marked ready, the claim entry point selects it", async () => {
+    // Only the not-ready item exists.
+    await seedTodoStory(makeTodoManifest(STORY_REF_A, { ready: false }));
+
+    // Pre-condition: it is never claimed while not ready.
+    const before = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
+    expect(before.next).toBe("queue-drained");
+
+    // Operator blesses it via the real tool.
+    const toggle = await markStoryReady({ targetRepoRoot: tmpRoot, ref: STORY_REF_A, ready: true });
+    expect(toggle.noop).toBe(false);
+    expect(toggle.ready).toBe(true);
+
+    // Now the claim entry point selects it.
+    const after = await claimNextStory({ targetRepoRoot: tmpRoot, sessionUlid: SESSION_ULID });
+    expect(after.next).toBe("spawn-dev");
+    if (after.next !== "spawn-dev") return;
+    expect(after.ref).toBe(STORY_REF_A);
   });
 });

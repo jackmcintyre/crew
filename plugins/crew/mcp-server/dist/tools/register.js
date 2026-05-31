@@ -15,6 +15,7 @@ import { getTeamSnapshot, renderTeamSnapshot } from "./get-team-snapshot.js";
 import { instantiatePersona } from "./instantiate-persona.js";
 import { lookupRoleByDomain } from "./lookup-role-by-domain.js";
 import { markWithdrawn } from "./mark-withdrawn.js";
+import { markStoryReady } from "./mark-story-ready.js";
 import { readBacklogInventory } from "./read-backlog-inventory.js";
 import { readCatalogue } from "./read-catalogue.js";
 import { readCustomRole } from "./read-custom-role.js";
@@ -380,6 +381,46 @@ export function registerAllTools(server) {
         handler: async (args) => {
             try {
                 const result = await markWithdrawn(args);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result) }],
+                };
+            }
+            catch (err) {
+                if (err instanceof DomainError) {
+                    return {
+                        content: [{ type: "text", text: err.message }],
+                        isError: true,
+                    };
+                }
+                throw err;
+            }
+        },
+    });
+    // Story 9.1 — markStoryReady: the operator readiness brake (Epic 9 intake
+    // cockpit). Flips the `ready` flag on an un-claimed backlog manifest; the
+    // claim path admits an item only when it is BOTH deps-ready AND `ready`.
+    // No-op when the flag already holds the value; NotAnEligibleBacklogItemError
+    // when the ref is not an un-claimed backlog item.
+    server.registerTool({
+        name: "markStoryReady",
+        description: "Set the operator `ready` flag on an un-claimed backlog item (Story 9.1). " +
+            "The drain claims an item only once it is dependency-ready AND marked ready. " +
+            "Writes the manifest in-place (no state-directory move); no-op if the flag " +
+            "already holds the requested value; raises NotAnEligibleBacklogItemError for " +
+            "anything that is not an un-claimed to-do/ item.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                targetRepoRoot: { type: "string" },
+                ref: { type: "string" },
+                ready: { type: "boolean" },
+                sessionUlid: { type: "string" },
+            },
+            required: ["targetRepoRoot", "ref", "ready"],
+        },
+        handler: async (args) => {
+            try {
+                const result = await markStoryReady(args);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result) }],
                 };

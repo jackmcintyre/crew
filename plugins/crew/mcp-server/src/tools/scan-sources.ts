@@ -257,6 +257,11 @@ function composeManifest(
     narrative: story.narrative,
     implementation_notes: story.implementation_notes,
     withdrawn: false,
+    // Story 9.1 — the readiness brake. A freshly-scanned item is in to-do/ but
+    // NOT claimable until the operator blesses it (markStoryReady / /crew:ready).
+    // Written explicitly (not left to the schema default) so the on-disk manifest
+    // visibly carries the brake and round-trips stably.
+    ready: false,
   });
   // Defensive parse — throws if the composer produced an invalid shape.
   return ExecutionManifestSchema.parse(raw);

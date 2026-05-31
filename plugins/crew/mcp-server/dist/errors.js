@@ -1361,3 +1361,40 @@ export class DevStoryWorktreeError extends DomainError {
         this.underlyingMessage = opts.underlyingMessage;
     }
 }
+/**
+ * `markStoryReady` refused because the named reference is not an un-claimed
+ * backlog item. The readiness brake (Story 9.1) only applies to items that
+ * are still in `to-do/` and not withdrawn — once a story has been claimed
+ * (`in-progress/`), completed (`done/`), blocked, or withdrawn, toggling its
+ * readiness is meaningless and would risk entangling the flag with the
+ * status state-machine.
+ *
+ * Mirrors the not-an-eligible-item guard polarity of the withdraw path: the
+ * operator may only bless or un-bless work that is genuinely waiting at the
+ * intake gate. Thrown BEFORE any write — the manifest is never mutated on
+ * this path, and no telemetry event is emitted.
+ *
+ * `foundState` is the state directory the ref WAS found in (when it exists),
+ * or `null` when the ref does not exist in any state directory at all, so
+ * the operator gets a precise reason.
+ *
+ * Story 9.1 — Epic 9 intake cockpit.
+ */
+export class NotAnEligibleBacklogItemError extends DomainError {
+    ref;
+    foundState;
+    reason;
+    constructor(opts) {
+        const detail = opts.reason === "not-found"
+            ? `no manifest for '${opts.ref}' exists in any state directory`
+            : opts.reason === "withdrawn"
+                ? `'${opts.ref}' has been withdrawn and is not an admissible backlog item`
+                : `'${opts.ref}' is in state '${opts.foundState}', not 'to-do' — readiness ` +
+                    `can only be toggled on an un-claimed backlog item`;
+        super(`markStoryReady refused: ${detail}. The readiness brake only applies to ` +
+            `un-claimed backlog items waiting in to-do/. (Story 9.1)`);
+        this.ref = opts.ref;
+        this.foundState = opts.foundState;
+        this.reason = opts.reason;
+    }
+}
