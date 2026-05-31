@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 import { ulid as generateUlid } from "ulid";
 import { z } from "zod";
-import { WrongAdapterError } from "../errors.js";
+import { DisciplineViolationError, WrongAdapterError } from "../errors.js";
 import { parseNativeStory } from "../adapters/native/parse-native-story.js";
 import { atomicWriteFile } from "../lib/managed-fs.js";
+import { logTelemetryEvent } from "../lib/logger.js";
 import { resolveWorkspace } from "../state/workspace-resolver.js";
+import { validateStoryAgainstDiscipline } from "../validators/planning-discipline.js";
 /**
  * Input schema for `writeNativeStory`. Mirrors the four-section native-story
  * body shape (Story 3.4 Task 4.1).
@@ -21,6 +24,13 @@ export const WriteNativeStoryInputSchema = z.object({
         .min(1),
     implementation_notes: z.string().optional(),
     depends_on: z.array(z.string()),
+    /**
+     * Session id for the `draft.authored` telemetry envelope. Optional — the
+     * author subagent / `/crew:author` skill passes its orchestration session
+     * ULID when available; defaults to a stable operator marker so the event
+     * still validates when authored interactively. (Story 9.2)
+     */
+    sessionUlid: z.string().min(1).optional(),
 });
 /**
  * Render a native-story file body from validated inputs.
@@ -97,6 +107,26 @@ export async function writeNativeStory(rawInput) {
     const storiesDir = path.join(targetRepoRoot, ".crew", "native-stories");
     const absPath = path.join(storiesDir, `${newUlid}.md`);
     const ref = `native:${newUlid}`;
+    // Story 9.2 — fail-closed discipline gate.
+    //
+    // Run the SAME authoring-time discipline validator the planner's pre-write
+    // `validatePlannerBacklog` call uses (Story 3.5), now INSIDE the write tool.
+    // A violating candidate is refused with a typed `DisciplineViolationError`
+    // and NOTHING is written — no native-story file, no telemetry event. The
+    // guarantee does not rest on the author subagent remembering to validate
+    // first; even a direct write of a violating story is refused here.
+    //
+    // The candidate is validated against the freshly-minted `ref` so the
+    // implicit-depends-on check correctly excludes self-references. The
+    // state-mutating heuristic (`isStateMutatingByHeuristic`) is conservative —
+    // false positives are acceptable; false negatives are not.
+    const candidate = inputToSourceStory(input, ref, absPath);
+    const disciplineResult = validateStoryAgainstDiscipline(candidate);
+    if ("kind" in disciplineResult && disciplineResult.kind === "discipline-violation") {
+        throw new DisciplineViolationError({
+            violations: disciplineResult.violations,
+        });
+    }
     // Render the body.
     const body = renderNativeStoryBody(input);
     // Round-trip validation — throws MalformedNativeStoryError if the rendered
@@ -108,5 +138,40 @@ export async function writeNativeStory(rawInput) {
     // filesystem (Task 4.5). The `.crew/native-stories/` path is non-canonical
     // so no mcpToolContext is required.
     await atomicWriteFile(absPath, body);
+    // Story 9.2 — emit exactly one `draft.authored` telemetry event per written
+    // draft. Reached only on the success path (after the discipline gate passed
+    // and the file was written); a refused/violating candidate throws above and
+    // never reaches this line.
+    await logTelemetryEvent({
+        targetRepoRoot,
+        event: {
+            type: "draft.authored",
+            session_id: input.sessionUlid ?? "operator",
+            agent: "author",
+            story_id: ref,
+            data: { ref, title: input.title },
+        },
+    });
     return { ref, path: absPath };
+}
+/**
+ * Build a `SourceStory` from `WriteNativeStoryInput` for the fail-closed
+ * discipline gate. The `source_hash` is computed over the rendered body so it
+ * is stable and non-empty; `raw_frontmatter` carries the ref/title so the
+ * validator's self-reference exclusion works against the real minted ref.
+ *
+ * Story 9.2.
+ */
+function inputToSourceStory(input, ref, absPath) {
+    return {
+        ref,
+        title: input.title,
+        narrative: input.narrative,
+        acceptance_criteria: input.acceptance_criteria,
+        depends_on: input.depends_on,
+        implementation_notes: input.implementation_notes,
+        raw_path: absPath,
+        raw_frontmatter: { title: input.title, ref },
+        source_hash: createHash("sha256").update(renderNativeStoryBody(input)).digest("hex"),
+    };
 }

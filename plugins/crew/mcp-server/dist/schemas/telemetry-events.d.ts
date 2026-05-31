@@ -208,6 +208,33 @@ export declare const BacklogReadinessChangedEventSchema: z.ZodObject<{
         ready: z.ZodBoolean;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/**
+ * `draft.authored` — emitted by `writeNativeStory` (Story 9.2, Epic 9 author
+ * seam) once a candidate story has PASSED the fail-closed discipline gate and
+ * been written to disk. Exactly ONE event per written draft; NONE on a refused
+ * / discipline-violating candidate (the write throws `DisciplineViolationError`
+ * before the event is reachable) and NONE on the wrong-adapter or
+ * round-trip-parse failure paths (which throw before the write completes).
+ *
+ * - `ref`   — the freshly-minted draft ref (`native:<ULID>`). Also mirrored into
+ *             the envelope `story_id` so consumers reading only the envelope can
+ *             join.
+ * - `title` — the draft's human-readable title.
+ *
+ * Added additively to the discriminated union; `.strict()` posture preserved
+ * (no body/diff/contents strings — NFR14).
+ */
+export declare const DraftAuthoredEventSchema: z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"draft.authored">;
+    data: z.ZodObject<{
+        ref: z.ZodString;
+        title: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     ts: z.ZodString;
     session_id: z.ZodString;
@@ -314,6 +341,16 @@ export declare const TelemetryEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
     data: z.ZodObject<{
         ref: z.ZodString;
         ready: z.ZodBoolean;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    ts: z.ZodString;
+    session_id: z.ZodString;
+    agent: z.ZodString;
+    story_id: z.ZodOptional<z.ZodString>;
+    type: z.ZodLiteral<"draft.authored">;
+    data: z.ZodObject<{
+        ref: z.ZodString;
+        title: z.ZodString;
     }, z.core.$strict>;
 }, z.core.$strict>], "type">;
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;

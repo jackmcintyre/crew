@@ -1398,3 +1398,39 @@ export class NotAnEligibleBacklogItemError extends DomainError {
         this.reason = opts.reason;
     }
 }
+/**
+ * `writeNativeStory` refused to write a candidate story because it violated one
+ * or more authoring-time planning-discipline rules (Story 3.5 rules, e.g. a
+ * state-mutating story with no integration AC, or an undeclared cross-story
+ * reference).
+ *
+ * This is the fail-closed write-gate hardening of Story 9.2: the discipline
+ * check moved INTO the write tool, so a violating story can no longer be
+ * written even by a direct caller that skipped the planner's pre-write
+ * `validatePlannerBacklog` step. The guarantee no longer rests on the author
+ * subagent's prose — it lives in the tool layer.
+ *
+ * Thrown BEFORE any filesystem write: no native-story file appears on disk on
+ * this path, and no `draft.authored` telemetry event is emitted. The caller
+ * (the author subagent / the `/crew:author` skill) surfaces `violations` back
+ * to the operator for the refuse-and-revise loop.
+ *
+ * `violations` mirrors the `DisciplineViolationReason[]` shape returned by
+ * `validateStoryAgainstDiscipline`, so callers can read the machine-checkable
+ * `code`/`field`/`detail` of every violation without parsing the message.
+ *
+ * Story 9.2 — author seam (fail-closed discipline gate).
+ */
+export class DisciplineViolationError extends DomainError {
+    violations;
+    constructor(opts) {
+        const codes = opts.violations.map((v) => v.code).join(", ");
+        const details = opts.violations
+            .map((v) => `- [${v.code}] (${v.field}) ${v.detail}`)
+            .join("\n");
+        super(`writeNativeStory refused: candidate story violates planning-discipline ` +
+            `rule(s): [${codes}]. No story file was written. Revise the feature framing ` +
+            `and retry:\n${details} (Story 9.2)`);
+        this.violations = opts.violations;
+    }
+}

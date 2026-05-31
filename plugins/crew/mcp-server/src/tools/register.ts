@@ -274,7 +274,11 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
     description:
       "Write a new native-adapter story file under <targetRepoRoot>/.crew/native-stories/<ULID>.md. " +
       "Refuses with WrongAdapterError if the active adapter is not 'native'. " +
-      "Used by the planner subagent spawned by /crew:plan (Story 3.4).",
+      "Fail-closed discipline gate (Story 9.2): refuses with DisciplineViolationError and writes " +
+      "nothing if the candidate violates an authoring-time planning-discipline rule (e.g. a " +
+      "state-mutating story with no integration AC). On a successful write, emits exactly one " +
+      "draft.authored telemetry event. Used by the planner subagent (/crew:plan) and the author " +
+      "subagent (/crew:author) (Story 3.4 / 9.2).",
     inputSchema: {
       type: "object",
       properties: {
@@ -294,6 +298,7 @@ export function registerAllTools(server: AiEngineeringTeamServer): void {
         },
         implementation_notes: { type: "string" },
         depends_on: { type: "array", items: { type: "string" } },
+        sessionUlid: { type: "string" },
       },
       required: ["targetRepoRoot", "title", "narrative", "acceptance_criteria", "depends_on"],
     },
