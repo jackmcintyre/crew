@@ -38,9 +38,9 @@ Folders:
 
 ## Current posture (post 2026-05-25 rollback)
 
-- **`dev` is the working trunk.** All `/ship-story` PRs target `dev`. `main` is a known-good snapshot; promote `dev → main` in batches when a coherent set of substrate fixes is ready. Never commit directly to `main`.
+- **`main` is the trunk** (trunk-based development since 2026-05-31). All PRs target `main`; it is protected (PR + required CI), so never push directly. The old `dev` integration branch is retired — `main` is always-releasable, with no separate promote-to-main step. Tag releases/snapshots rather than maintaining a second branch.
 - **Dogfooding (`/crew:start`) is paused** until the three L1 tool defects from `_bmad-output/postmortems/2026-05-25-dogfood-rollback.md` are fixed: (a) dev transcript persistence, (b) orphan-recovery branch in `/crew:start`, (c) MCP idle-reap resilience.
-- **Use `/ship-story` for substrate work** in the interim. Manual per-story shipping, one PR at a time, on `dev`.
+- **Use `/ship-story` for substrate work** in the interim. Manual per-story shipping, one PR at a time, onto `main`.
 - **Stop, don't fix forward.** When a tool I'm orchestrating fails unexpectedly, halt the outer loop, summarise state, and ask. Auto-mode does not authorise continuing a multi-step loop that has already failed once. Read the postmortem before any retry of dogfood.
 
 ## Process notes

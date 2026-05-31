@@ -73,12 +73,12 @@ const ROLE = "generalist-dev";
  * @param opts.summary         Free-form PR summary (appended after machine block).
  * @param opts.manifestPath    Absolute path to the in-progress manifest YAML.
  * @param opts.sessionUlid     ULID of the calling session (for context).
- * @param opts.base            PR base branch. Defaults to `dev` — crew's working
- *                             trunk — so autonomous PRs target the trunk rather
- *                             than the GitHub default branch (`main`). Callers
- *                             targeting a repo whose trunk is not `dev` must pass
- *                             this explicitly (a productization follow-up will
- *                             source it from adapter config).
+ * @param opts.base            PR base branch. Defaults to `main` — the repo's
+ *                             default branch and crew's trunk (post 2026-05-31
+ *                             move to trunk-based development on `main`). Callers
+ *                             whose trunk is a differently-named default branch
+ *                             must pass this explicitly (a follow-up will derive
+ *                             it from the repo's default branch / adapter config).
  * @param opts.worktree        Worktree-aware staging (Story 8.16 / 8.20).
  *                             Defaults to ON: `targetRepoRoot` is treated as the
  *                             dev's own worktree (the runtime rooted the dev
@@ -93,7 +93,7 @@ const ROLE = "generalist-dev";
  */
 export async function runDevTerminalAction(opts) {
     const { targetRepoRoot, ref, title, type, body, summary, manifestPath, sessionUlid, } = opts;
-    const base = opts.base ?? "dev";
+    const base = opts.base ?? "main";
     const useWorktree = opts.worktree !== false;
     const execaImpl = opts.execaImpl;
     // (i) Validate conventional-commits type BEFORE any subprocess spawn.

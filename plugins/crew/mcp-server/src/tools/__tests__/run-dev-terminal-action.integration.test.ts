@@ -338,7 +338,7 @@ describe("runDevTerminalAction — PR base branch", () => {
     return baseIdx === -1 ? undefined : ghArgs[baseIdx + 1];
   }
 
-  it("defaults the PR base to `dev` when no base is supplied", async () => {
+  it("defaults the PR base to `main` when no base is supplied", async () => {
     const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
 
     await runDevTerminalAction({
@@ -354,7 +354,7 @@ describe("runDevTerminalAction — PR base branch", () => {
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
-    expect(baseArgFromSpy(spy)).toBe("dev");
+    expect(baseArgFromSpy(spy)).toBe("main");
   });
 
   it("honours an explicit base branch override", async () => {
@@ -370,11 +370,11 @@ describe("runDevTerminalAction — PR base branch", () => {
       manifestPath: ctx.manifestPath,
       sessionUlid: SESSION_ULID,
       worktree: false,
-      base: "main",
+      base: "release",
       execaImpl: spy as unknown as Parameters<typeof runDevTerminalAction>[0]["execaImpl"],
     });
 
-    expect(baseArgFromSpy(spy)).toBe("main");
+    expect(baseArgFromSpy(spy)).toBe("release");
   });
 });
 
