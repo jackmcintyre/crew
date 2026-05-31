@@ -151,8 +151,8 @@ development_status:
   epic-8-retrospective: optional
   epic-9: in-progress
   9-1-readiness-brake-and-minimal-intake-cockpit: ready-for-dev
-  9-2-author-seam-feature-to-drafted-story: backlog
-  9-3-judge-panel-rubric-grading: backlog
-  9-4-quality-lead-adjudication-and-escalation: backlog
-  9-5-generated-backlog-dashboard: backlog
+  9-2-author-seam-feature-to-drafted-story: ready-for-dev
+  9-3-judge-panel-rubric-grading: ready-for-dev
+  9-4-quality-lead-adjudication-and-escalation: ready-for-dev
+  9-5-generated-backlog-dashboard: ready-for-dev
   epic-9-retrospective: optional
