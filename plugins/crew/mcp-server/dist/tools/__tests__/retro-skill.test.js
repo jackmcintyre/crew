@@ -196,14 +196,29 @@ describe("gatherRetroInputs — fixture cycle bundle (AC4)", () => {
     });
     it("returns ruleRegistry parsed when docs/discipline-rules.yaml is present", async () => {
         // Absence is the 6a-phase default (asserted above); when the registry
-        // exists (6.5+) it is parsed via the comment-preserving yaml package.
+        // exists (6.5+) it is parsed via the validated, comment-preserving parser
+        // (parseRuleRegistry). The registry must satisfy DisciplineRuleSchema —
+        // a malformed one raises RuleRegistryMalformedError (asserted below).
+        const validRule = {
+            id: "01HZRETR0000000000000000A1",
+            text: "no hand-written stories",
+            target_failure_class: "handwritten-story",
+            introduced_at: "2026-05-20T10:00:00.000Z",
+            level: "must",
+        };
         await writeYaml(path.join(tmpRoot, "docs", "discipline-rules.yaml"), {
-            rules: [{ id: "r1", text: "no hand-written stories" }],
+            rules: [validRule],
         });
         const bundle = await gatherRetroInputs({ targetRepoRoot: tmpRoot });
-        expect(bundle.ruleRegistry).toEqual({
-            rules: [{ id: "r1", text: "no hand-written stories" }],
+        expect(bundle.ruleRegistry).toEqual({ rules: [validRule] });
+    });
+    it("propagates RuleRegistryMalformedError when the registry is malformed (Story 6.5)", async () => {
+        // A rule missing required fields is a hard stop — the validated parser
+        // refuses it rather than handing the analyst a half-shaped registry.
+        await writeYaml(path.join(tmpRoot, "docs", "discipline-rules.yaml"), {
+            rules: [{ id: "r1", text: "missing required fields" }],
         });
+        await expect(gatherRetroInputs({ targetRepoRoot: tmpRoot })).rejects.toMatchObject({ name: "RuleRegistryMalformedError" });
     });
     it("returns an empty bundle when no .crew dirs exist (absence is not an error)", async () => {
         const bundle = await gatherRetroInputs({ targetRepoRoot: tmpRoot });

@@ -204,6 +204,34 @@ export class StandardsDocMalformedError extends DomainError {
 }
 
 /**
+ * `docs/discipline-rules.yaml` was found but failed the parser: either YAML
+ * syntax is invalid, a required rule field is missing or wrongly typed, or an
+ * unknown key was present (the schema is `.strict()`). The `zodMessage` field
+ * carries the offending Zod message (or the YAML parse error); `yamlPath`
+ * names the offending rule path so the operator can find it.
+ *
+ * Mirrors `StandardsDocMalformedError`'s constructor shape. Distinct from an
+ * absent registry — absence is NOT an error (it parses to an empty registry).
+ *
+ * (Story 6.5 — FR62)
+ */
+export class RuleRegistryMalformedError extends DomainError {
+  readonly sourcePath: string;
+  readonly yamlPath: string;
+  readonly zodMessage: string;
+
+  constructor(opts: { sourcePath: string; yamlPath: string; zodMessage: string }) {
+    super(
+      `docs/discipline-rules.yaml at ${opts.sourcePath} is malformed at '${opts.yamlPath}': ${opts.zodMessage}. ` +
+        `See the schema in mcp-server/src/schemas/discipline-rules.ts. (FR62)`,
+    );
+    this.sourcePath = opts.sourcePath;
+    this.yamlPath = opts.yamlPath;
+    this.zodMessage = opts.zodMessage;
+  }
+}
+
+/**
  * An agent operating under a known role attempted to invoke an MCP tool
  * whose name is not in the role's tools_allow. Caught at the
  * CallToolRequestSchema handler before the tool's handler runs.

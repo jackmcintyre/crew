@@ -9,12 +9,13 @@
  * stamp, and records telemetry. All kind-specific behaviour lives behind this
  * handler interface.
  *
- * **This story ships ONLY the gate machinery.** The production registry is
- * deliberately EMPTY — every kind fails closed via
- * `ProposalKindNotApplicableYetError` (AC6). The real handlers are registered
- * by later stories:
+ * Story 6.4 shipped ONLY the gate machinery with an EMPTY production registry.
+ * Story 6.5 registers the FIRST real handler — `rule`. Every other kind still
+ * fails closed via `ProposalKindNotApplicableYetError` (AC6) until its handler
+ * lands:
  *
- *   - `rule` / `rule-retirement`                      → Story 6.5
+ *   - `rule`                                          → Story 6.5 (DONE)
+ *   - `rule-retirement`                               → Story 6.6
  *   - `skill-create` / `skill-revise` /
  *     `skill-supersede` / `skill-retire`              → Story 6.7
  *   - `team-change`                                   → Story 6.10
@@ -29,6 +30,7 @@
  */
 
 import type { RetroProposal } from "../schemas/retro-proposal.js";
+import { makeRuleApplyHandler } from "./apply-rule-proposal.js";
 
 /**
  * Context threaded into a handler's `previewDiff`/`apply` calls. The gate owns
@@ -87,15 +89,26 @@ export type ProposalApplyRegistry = Map<
 >;
 
 /**
- * The PRODUCTION registry — empty in Story 6.4 by design (AC6). Later stories
- * register their handlers into this map. The gate defaults to this registry
- * when no `handlers` injection is provided.
+ * The PRODUCTION registry. Story 6.4 shipped it EMPTY; Story 6.5 registers the
+ * first real handler — `rule` — so accepting a `rule` proposal now actually
+ * appends (or edits) a rule in `docs/discipline-rules.yaml`. Every OTHER kind
+ * still fails closed via `ProposalKindNotApplicableYetError` until its handler
+ * lands (see `KIND_TO_STORY`). The gate defaults to this registry when no
+ * `handlers` injection is provided.
  *
- * It is intentionally a fresh empty map (not a shared mutable singleton) per
- * import so a test that mutates a registry never leaks into production.
+ * It is intentionally a fresh map (not a shared mutable singleton) per import
+ * so a test that mutates a registry never leaks into production; the `rule`
+ * handler is likewise constructed fresh per call.
+ *
+ * Retro-path registrations are grouped here: as later stories land their
+ * handlers (`rule-retirement` → 6.6, `skill-*` → 6.7, `team-change` → 6.10)
+ * they append a `.set(...)` line below.
  */
 export function createProductionRegistry(): ProposalApplyRegistry {
-  return new Map();
+  const registry: ProposalApplyRegistry = new Map();
+  // Story 6.5 — the first real handler.
+  registry.set("rule", makeRuleApplyHandler());
+  return registry;
 }
 
 /**
@@ -106,7 +119,10 @@ export function createProductionRegistry(): ProposalApplyRegistry {
  */
 export const KIND_TO_STORY: Readonly<Record<RetroProposal["type"], string>> = {
   rule: "Story 6.5",
-  "rule-retirement": "Story 6.5",
+  // Repointed from 6.5 → 6.6: the rule-retirement apply path lands in Story 6.6
+  // (this story ships only the `rule` handler). Until 6.6 lands its handler,
+  // accepting a `rule-retirement` proposal fails closed with this story pointer.
+  "rule-retirement": "Story 6.6",
   "skill-create": "Story 6.7",
   "skill-revise": "Story 6.7",
   "skill-supersede": "Story 6.7",
