@@ -607,7 +607,8 @@ describe("AC4o — MCP tool registration smoke", () => {
     // Story 9.1 added markStoryReady. 37 → 38.
     // Story 9.3 added writeLensVerdict + aggregateJudgePanel (judge panel). 38 → 40.
     // Story 9.4 added adjudicateQualityLead (Quality Lead). 40 → 41.
-    expect(registeredTools.length).toBe(41);
+    // Story 9.5 added getBacklogDashboard (backlog dashboard). 41 → 42.
+    expect(registeredTools.length).toBe(42);
   });
 });
 
