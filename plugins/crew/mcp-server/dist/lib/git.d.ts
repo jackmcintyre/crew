@@ -20,6 +20,14 @@ export declare const CONVENTIONAL_COMMIT_TYPES: readonly ["feat", "fix", "refact
  * (Story 4.4 Task 1.3)
  */
 export declare function assertNoNegativeFlags(args: readonly string[], role: string, callSite: "gh" | "git"): void;
+/** stderr substrings that mark a transient git-lock collision worth retrying. */
+export declare const GIT_LOCK_CONTENTION: RegExp;
+/** Total attempts (initial + retries) before surfacing a git-lock failure. */
+export declare const GIT_LOCK_MAX_ATTEMPTS = 5;
+/** Linear backoff between retries: retry 1 → 25ms, 2 → 50ms, … */
+export declare const GIT_LOCK_BACKOFF_MS = 25;
+/** Default backoff sleep (real timer); overridable via a `sleepImpl` test seam. */
+export declare function defaultGitLockSleep(ms: number): Promise<void>;
 /**
  * Single entrypoint for plugin-side git commits (Story 1.5 AC4).
  * Stages the given `paths` then commits with the given `message`.
@@ -57,6 +65,8 @@ export declare function gitCommit(opts: {
     messageShape?: "plugin-internal" | "conventional";
     body?: string;
     execaImpl?: typeof defaultExeca;
+    /** Test seam for the lock-contention retry backoff (production omits this). */
+    sleepImpl?: (ms: number) => Promise<void>;
 }): Promise<GitCommitResult>;
 /**
  * Create and check out a new branch in the target repo.
@@ -73,6 +83,8 @@ export declare function gitCreateBranch(opts: {
     targetRepoRoot: string;
     branchName: string;
     execaImpl?: typeof defaultExeca;
+    /** Test seam for the lock-contention retry backoff (production omits this). */
+    sleepImpl?: (ms: number) => Promise<void>;
 }): Promise<void>;
 /**
  * Push the given branch to `origin` with `-u` (set-upstream).
@@ -90,6 +102,8 @@ export declare function gitPush(opts: {
     branchName: string;
     role: string;
     execaImpl?: typeof defaultExeca;
+    /** Test seam for the lock-contention retry backoff (production omits this). */
+    sleepImpl?: (ms: number) => Promise<void>;
 }): Promise<void>;
 /**
  * Initialise a fresh git repo at `cwd` with a deterministic default branch

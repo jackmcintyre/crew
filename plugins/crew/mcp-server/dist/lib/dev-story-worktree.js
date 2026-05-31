@@ -47,6 +47,7 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { execa as defaultExeca } from "execa";
 import { DevStoryWorktreeError } from "../errors.js";
+import { GIT_LOCK_CONTENTION, GIT_LOCK_MAX_ATTEMPTS, GIT_LOCK_BACKOFF_MS, defaultGitLockSleep, } from "./git.js";
 // ---------------------------------------------------------------------------
 // Internal: run a git subcommand via execa (mirrors the materialise-pr-branch
 // precedent — git operations bypass the gh allowlist).
@@ -59,28 +60,12 @@ async function runGit(args, cwd, execaImpl) {
         exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
     };
 }
-// ---------------------------------------------------------------------------
-// Concurrent `git worktree add` retry (lock contention).
-//
-// Two dev workers (Story 8.22) can fire `git worktree add` against the SAME
-// `.git` at the same instant and collide on git's internal config/index/ref
-// locks; the loser exits non-zero with a transient lock error. Git does NOT
-// fully serialise these (the prior code comment that claimed it did was wrong —
-// it surfaced as a flaky `concurrent-drains-isolation` test that reds CI under
-// load). Retry the transient lock failures with a short backoff before giving
-// up. A non-lock failure (e.g. a bad base ref) still fails fast — we only retry
-// when the stderr clearly signals lock contention.
-// ---------------------------------------------------------------------------
-/** stderr substrings that mark a transient git-lock collision worth retrying. */
-const WORKTREE_ADD_LOCK_CONTENTION = /could not lock|cannot lock|\.lock\b|update_ref failed|another git process/i;
-/** Total `git worktree add` attempts before surfacing the failure. */
-const WORKTREE_ADD_MAX_ATTEMPTS = 5;
-/** Linear backoff between retries: attempt 1 → 25ms, 2 → 50ms, … */
-const WORKTREE_ADD_BACKOFF_MS = 25;
-/** Default backoff sleep (real timer); overridable via opts.sleepImpl in tests. */
-function defaultSleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// Concurrent `git worktree add` against a shared `.git` can lose a lock race
+// (two dev workers, Story 8.22) exactly as the mutating ops in `git.ts` can —
+// so the retry policy (regex / attempt budget / backoff / sleep) is shared from
+// there rather than duplicated here. The prior code comment claiming git
+// "serialises" concurrent worktree adds was wrong; it surfaced as the flaky
+// `concurrent-drains-isolation` test that reds CI under load.
 /**
  * Sanitise a story ref into a filesystem-safe worktree directory segment.
  * `bmad:8.20` → `bmad-8.20`.
@@ -115,7 +100,7 @@ export function devStoryWorktreePath(targetRepoRoot, sessionUlid, ref) {
 export async function materialiseDevStoryWorktree(opts) {
     const { targetRepoRoot, sessionUlid, ref, base } = opts;
     const execaImpl = opts.execaImpl ?? defaultExeca;
-    const sleep = opts.sleepImpl ?? defaultSleep;
+    const sleep = opts.sleepImpl ?? defaultGitLockSleep;
     const setupLog = [];
     // -------------------------------------------------------------------------
     // Step 1: Compute the worktree path (sibling of the checkout) and reap any
@@ -163,11 +148,11 @@ export async function materialiseDevStoryWorktree(opts) {
     // -------------------------------------------------------------------------
     let add = await runGit(["-C", targetRepoRoot, "worktree", "add", "--detach", worktreePath, base], targetRepoRoot, execaImpl);
     for (let attempt = 1; add.exitCode !== 0 &&
-        attempt < WORKTREE_ADD_MAX_ATTEMPTS &&
-        WORKTREE_ADD_LOCK_CONTENTION.test(add.stderr); attempt++) {
+        attempt < GIT_LOCK_MAX_ATTEMPTS &&
+        GIT_LOCK_CONTENTION.test(add.stderr); attempt++) {
         setupLog.push(`[dev-story-worktree] git worktree add for ${ref} hit lock contention ` +
-            `(attempt ${attempt}/${WORKTREE_ADD_MAX_ATTEMPTS}): ${add.stderr.trim()}. Retrying.`);
-        await sleep(WORKTREE_ADD_BACKOFF_MS * attempt);
+            `(attempt ${attempt}/${GIT_LOCK_MAX_ATTEMPTS}): ${add.stderr.trim()}. Retrying.`);
+        await sleep(GIT_LOCK_BACKOFF_MS * attempt);
         add = await runGit(["-C", targetRepoRoot, "worktree", "add", "--detach", worktreePath, base], targetRepoRoot, execaImpl);
     }
     if (add.exitCode !== 0) {
