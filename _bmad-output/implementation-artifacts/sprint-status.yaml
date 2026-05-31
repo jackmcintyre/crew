@@ -149,3 +149,10 @@ development_status:
   8-21-drain-observability-seams-non-fatal: done
   8-22-drain-dispatches-concurrent-workers: done
   epic-8-retrospective: optional
+  epic-9: in-progress
+  9-1-readiness-brake-and-minimal-intake-cockpit: ready-for-dev
+  9-2-author-seam-feature-to-drafted-story: backlog
+  9-3-judge-panel-rubric-grading: backlog
+  9-4-quality-lead-adjudication-and-escalation: backlog
+  9-5-generated-backlog-dashboard: backlog
+  epic-9-retrospective: optional
