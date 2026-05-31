@@ -70,6 +70,12 @@ export interface DevStoryWorktreeOpts {
     base: string;
     /** Test seam — production callers do not pass this. */
     execaImpl?: typeof defaultExeca;
+    /**
+     * Test seam for the `git worktree add` retry backoff — production callers do
+     * not pass this (the default awaits a real timer). Injecting a no-op keeps the
+     * unit test that drives the lock-contention retry path instant.
+     */
+    sleepImpl?: (ms: number) => Promise<void>;
 }
 /**
  * The directory that holds ALL of a session's dev-story worktrees — a sibling

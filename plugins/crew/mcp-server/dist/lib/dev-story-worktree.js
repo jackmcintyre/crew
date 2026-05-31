@@ -59,6 +59,28 @@ async function runGit(args, cwd, execaImpl) {
         exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
     };
 }
+// ---------------------------------------------------------------------------
+// Concurrent `git worktree add` retry (lock contention).
+//
+// Two dev workers (Story 8.22) can fire `git worktree add` against the SAME
+// `.git` at the same instant and collide on git's internal config/index/ref
+// locks; the loser exits non-zero with a transient lock error. Git does NOT
+// fully serialise these (the prior code comment that claimed it did was wrong —
+// it surfaced as a flaky `concurrent-drains-isolation` test that reds CI under
+// load). Retry the transient lock failures with a short backoff before giving
+// up. A non-lock failure (e.g. a bad base ref) still fails fast — we only retry
+// when the stderr clearly signals lock contention.
+// ---------------------------------------------------------------------------
+/** stderr substrings that mark a transient git-lock collision worth retrying. */
+const WORKTREE_ADD_LOCK_CONTENTION = /could not lock|cannot lock|\.lock\b|update_ref failed|another git process/i;
+/** Total `git worktree add` attempts before surfacing the failure. */
+const WORKTREE_ADD_MAX_ATTEMPTS = 5;
+/** Linear backoff between retries: attempt 1 → 25ms, 2 → 50ms, … */
+const WORKTREE_ADD_BACKOFF_MS = 25;
+/** Default backoff sleep (real timer); overridable via opts.sleepImpl in tests. */
+function defaultSleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 /**
  * Sanitise a story ref into a filesystem-safe worktree directory segment.
  * `bmad:8.20` → `bmad-8.20`.
@@ -93,6 +115,7 @@ export function devStoryWorktreePath(targetRepoRoot, sessionUlid, ref) {
 export async function materialiseDevStoryWorktree(opts) {
     const { targetRepoRoot, sessionUlid, ref, base } = opts;
     const execaImpl = opts.execaImpl ?? defaultExeca;
+    const sleep = opts.sleepImpl ?? defaultSleep;
     const setupLog = [];
     // -------------------------------------------------------------------------
     // Step 1: Compute the worktree path (sibling of the checkout) and reap any
@@ -129,10 +152,24 @@ export async function materialiseDevStoryWorktree(opts) {
     // Step 2: git worktree add --detach <path> <base> — a clean checkout cut from
     // `base`, the dev's editing + build surface. `--detach` keeps `base` usable in
     // the orchestrating checkout and composes with concurrency (each story cuts a
-    // distinct path off the same base; git serialises the `.git` index update).
-    // runDevTerminalAction creates the story branch inside the worktree next.
+    // distinct path off the same base).
+    //
+    // Concurrency caveat: git does NOT fully serialise concurrent `git worktree
+    // add` against a shared `.git` — two workers can collide on the config/index/
+    // ref locks and the loser exits non-zero with a transient lock error. Retry
+    // those with a short backoff; a non-lock failure (e.g. a bad base ref) still
+    // fails fast on the first attempt. runDevTerminalAction creates the story
+    // branch inside the worktree next.
     // -------------------------------------------------------------------------
-    const add = await runGit(["-C", targetRepoRoot, "worktree", "add", "--detach", worktreePath, base], targetRepoRoot, execaImpl);
+    let add = await runGit(["-C", targetRepoRoot, "worktree", "add", "--detach", worktreePath, base], targetRepoRoot, execaImpl);
+    for (let attempt = 1; add.exitCode !== 0 &&
+        attempt < WORKTREE_ADD_MAX_ATTEMPTS &&
+        WORKTREE_ADD_LOCK_CONTENTION.test(add.stderr); attempt++) {
+        setupLog.push(`[dev-story-worktree] git worktree add for ${ref} hit lock contention ` +
+            `(attempt ${attempt}/${WORKTREE_ADD_MAX_ATTEMPTS}): ${add.stderr.trim()}. Retrying.`);
+        await sleep(WORKTREE_ADD_BACKOFF_MS * attempt);
+        add = await runGit(["-C", targetRepoRoot, "worktree", "add", "--detach", worktreePath, base], targetRepoRoot, execaImpl);
+    }
     if (add.exitCode !== 0) {
         throw new DevStoryWorktreeError({
             ref,
