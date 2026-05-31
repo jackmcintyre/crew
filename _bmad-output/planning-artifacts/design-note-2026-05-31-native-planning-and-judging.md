@@ -59,7 +59,10 @@ Generate-and-judge is the shape we already trust on the build side (dev → revi
 
 ---
 
-## 6. The rubric (first cut — to be extended by Jack)
+## 6. The rubric (first cut — **extended** in the dedicated rubric doc)
+
+> **The full, usable rubric now lives in `_bmad-output/planning-artifacts/rubric-story-quality-2026-05-31.md`** — the evolvable grading artifact Story 9.3's judge panel and Story 9.4's Quality Lead reference. It turns this first cut into scoreable per-lens checks with worked PASS/FAIL examples, adds the **"Considered" lens** (risk-tiered cold-dev sufficiency, Jack's call 2026-05-31), and ports the BMad ship-gate rule into a continuous-flow "every story is its own ship gate" check. The summary below stays as the short version.
+
 
 The native format and the rubric are the **same artifact**: the strict schema *is* the grading sheet the judges score against. Reframed from "a template the author fills" into "a grading sheet the judges score." It judges the **spec**, not the implementation. (BMad's Dev Agent Record / File List / Definition-of-Done are build-time tracking and belong to the *build* gate, which the reviewer already owns.)
 
