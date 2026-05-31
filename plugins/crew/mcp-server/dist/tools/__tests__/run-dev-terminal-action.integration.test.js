@@ -248,7 +248,7 @@ describe("runDevTerminalAction — PR base branch", () => {
         const baseIdx = ghArgs.indexOf("--base");
         return baseIdx === -1 ? undefined : ghArgs[baseIdx + 1];
     }
-    it("defaults the PR base to `dev` when no base is supplied", async () => {
+    it("defaults the PR base to `main` when no base is supplied", async () => {
         const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
         await runDevTerminalAction({
             targetRepoRoot: ctx.repoRoot,
@@ -262,7 +262,7 @@ describe("runDevTerminalAction — PR base branch", () => {
             worktree: false,
             execaImpl: spy,
         });
-        expect(baseArgFromSpy(spy)).toBe("dev");
+        expect(baseArgFromSpy(spy)).toBe("main");
     });
     it("honours an explicit base branch override", async () => {
         const spy = makeStubExeca({ ghStdout: FAKE_PR_URL });
@@ -276,10 +276,10 @@ describe("runDevTerminalAction — PR base branch", () => {
             manifestPath: ctx.manifestPath,
             sessionUlid: SESSION_ULID,
             worktree: false,
-            base: "main",
+            base: "release",
             execaImpl: spy,
         });
-        expect(baseArgFromSpy(spy)).toBe("main");
+        expect(baseArgFromSpy(spy)).toBe("release");
     });
 });
 describe("runDevTerminalAction — branch slug edge cases (AC3b)", () => {
