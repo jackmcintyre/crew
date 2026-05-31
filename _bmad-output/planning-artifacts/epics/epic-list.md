@@ -84,7 +84,19 @@ Lands: `plugins/<plugin>/example/` (BMad-shaped: primed `to-do/` queue, `docs/st
 
 ---
 
+## Epic 9: Intake & Judging — The Planning Cockpit
+
+**Goal:** A non-engineer drives gate 1 of the pipeline — propose, specify, and sequence features in plain language; the team drafts each into a story; a diverse judge panel + a dedicated Quality Lead grade it against the rubric; only blessed stories become `ready`; the drain claims only `ready`. The same project-shaped team produces and judges at both gates (plan and build). The grouping tables become a generated view of intake state, not a hand-kept file.
+
+**Source of truth:** `_bmad-output/planning-artifacts/design-note-2026-05-31-native-planning-and-judging.md`.
+
+Lands: an operator-controlled `ready` state + a drain claim-path that selects only `ready` (9.1); an author seam that drafts a plain-language feature into a story spec (9.2); a generate-and-judge panel emitting a machine-checkable per-criterion verdict against the two-tier rubric (9.3); the **Quality Lead** role — owns the rubric, adjudicates the panel, decides ready-or-escalate (9.4); a generated backlog dashboard rendered from intake state (9.5). Reuses E2 (team/personas), E3 (adapters/manifests/scan), E6 (standards/rubric).
+
+**Status (2026-05-31):** active scaffold — direction agreed; MVP on the current BMad substrate; the owned native story format is a later re-foundation. Stories are thin stubs; `bmad-create-story` authors each full spec. Sequencing: 9.1 (spine, no rubric) → 9.2 → [extend rubric] → 9.3 → 9.4 → 9.5.
+
+---
+
 **Dependency flow:**
-E1 (foundation) → E2 (hire) ↔ E3 (backlog) → E4 (dev loop) → E5 (orchestration) ↔ E6 (calibration) → E7 (canary). **E8 (stateless substrate + Stage-1 dogfood)** supersedes the E5 daemon/`/watch` line and is the active proof-point workstream; it reuses the E2–E6 tool layer.
+E1 (foundation) → E2 (hire) ↔ E3 (backlog) → E4 (dev loop) → E5 (orchestration) ↔ E6 (calibration) → E7 (canary). **E8 (stateless substrate + Stage-1 dogfood)** supersedes the E5 daemon/`/watch` line and is the active proof-point workstream; it reuses the E2–E6 tool layer. **E9 (intake & judging — the planning cockpit)** is the new front half: gate 1 that feeds the E8 drain (gate 2), reusing the E2/E3/E6 tool layer and superseding E3's one-shot `/plan` as the ongoing planning surface.
 
 E2 and E3 are independent of each other (you can hire without a backlog; you can scan a backlog without hiring) but both are prerequisites for E4. E5 and E6 are independent of each other but both consume manifests + telemetry produced by E4.
